@@ -11,7 +11,8 @@ import LoginPage from './pages/LoginPage';
 import NewExpensePage from './pages/NewExpensePage';
 import PromotionsPage from './pages/PromotionsPage';
 import SettingsPage from './pages/SettingsPage';
-import BrandLogo from './components/BrandLogo';
+import AppHeader from './components/AppHeader';
+import BrandMark from './components/BrandLogo';
 
 function OnlineBanner() {
   const [online, setOnline] = useState(navigator.onLine);
@@ -51,7 +52,7 @@ export default function App() {
   if (loading) {
     return (
       <div className="page-loading">
-        <BrandLogo size="md" />
+        <BrandMark size="md" showWordmark />
         <span>Cargando…</span>
       </div>
     );
@@ -63,6 +64,7 @@ export default function App() {
   return (
     <div className="app">
       <OnlineBanner />
+      {!hideNav && <AppHeader />}
       <main className="content">
         <Routes>
           <Route path="/" element={<DashboardPage />} />

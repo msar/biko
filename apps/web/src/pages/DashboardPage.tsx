@@ -48,7 +48,6 @@ export default function DashboardPage() {
             <button onClick={() => setMonth(shiftMonth(month, 1))}>›</button>
           </div>
         </div>
-        <Link to="/ajustes" className="icon-btn" aria-label="Ajustes">⚙️</Link>
       </header>
 
       <section className="hero-card">

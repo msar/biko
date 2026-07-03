@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import BrandLogo from '../components/BrandLogo';
+import BrandMark from '../components/BrandLogo';
 import { useAuth } from '../lib/auth';
 
 export default function LoginPage() {
@@ -36,7 +36,7 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <div className="login-card">
-        <BrandLogo size="lg" />
+        <BrandMark size="lg" showWordmark />
         <p className="brand-sub">Gastos, cuotas y promos del hogar</p>
         <form onSubmit={onSubmit}>
           {mode === 'register' && <input name="name" placeholder="Tu nombre" required autoComplete="name" />}

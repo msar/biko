@@ -1,6 +1,11 @@
 :root {
-  --green: #10683f;
-  --green-dark: #0b4b2d;
+  --brand-navy: #1e305e;
+  --brand-navy-dark: #152744;
+  --brand-teal: #00a8b5;
+  --brand-teal-dark: #008a94;
+  --green: var(--brand-navy);
+  --green-dark: var(--brand-navy-dark);
+  --accent: var(--brand-teal);
   --cream: #f6f4ef;
   --ink: #22271f;
   --muted: #6f7568;
@@ -91,7 +96,7 @@ body {
 }
 
 .hero-card {
-  background: linear-gradient(135deg, var(--green), var(--green-dark));
+  background: linear-gradient(135deg, var(--brand-navy), var(--brand-teal));
   color: #fff;
   border-radius: var(--radius);
   padding: 22px 18px;
@@ -112,7 +117,7 @@ body {
 
 .hero-savings {
   font-size: 0.85rem;
-  color: var(--gold);
+  color: #b8eef2;
   font-weight: 600;
 }
 
@@ -281,8 +286,19 @@ body {
 }
 
 .bottom-nav a.active {
-  color: var(--green);
+  color: var(--accent);
   font-weight: 700;
+  position: relative;
+}
+
+.bottom-nav a.active::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 .nav-icon {
@@ -299,7 +315,7 @@ body {
   color: #fff;
   font-size: 1.6rem;
   margin-top: -18px;
-  box-shadow: 0 4px 10px rgb(16 104 63 / 0.4);
+  box-shadow: 0 4px 10px rgb(0 168 181 / 0.4);
 }
 
 /* --- forms --- */
@@ -423,7 +439,7 @@ label {
 .btn-link {
   background: none;
   border: none;
-  color: var(--green);
+  color: var(--accent);
   cursor: pointer;
   font-size: 0.85rem;
   padding: 4px 0;
@@ -566,6 +582,57 @@ label {
   margin: 0 auto 4px;
 }
 
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  background: var(--card);
+  border-bottom: 1px solid #e6e3da;
+}
+
+.brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-mark-lg {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.brand-wordmark {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--brand-navy);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.brand-mark-lg .brand-wordmark {
+  font-size: 1.5rem;
+}
+
+.brand-mark .brand-logo {
+  margin: 0;
+}
+
+.login-card .brand-mark {
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.page-loading .brand-mark {
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* --- new expense --- */
 .amount-input-wrap {
   display: flex;
@@ -620,7 +687,7 @@ label {
 
 .category-chip.selected {
   border-color: var(--green);
-  background: #e8f2ec;
+  background: #e6f7f8;
 }
 
 .method-list {
@@ -641,14 +708,14 @@ label {
 
 .method-chip.selected {
   border-color: var(--green);
-  background: #e8f2ec;
+  background: #e6f7f8;
   font-weight: 600;
 }
 
 .promo-banner {
-  background: #e8f2ec;
-  border: 1px solid var(--green);
-  color: var(--green-dark);
+  background: #e6f7f8;
+  border: 1px solid var(--accent);
+  color: var(--brand-teal-dark);
   border-radius: 12px;
   padding: 12px;
   font-size: 0.9rem;
@@ -716,7 +783,7 @@ label {
 }
 
 .savings-tag {
-  color: var(--green) !important;
+  color: var(--accent) !important;
   font-weight: 600;
 }
 
@@ -820,7 +887,7 @@ label {
 .week-day h3 {
   margin: 0 0 6px;
   font-size: 0.9rem;
-  color: var(--green-dark);
+  color: var(--accent);
 }
 
 .week-promo-logo {
@@ -834,7 +901,7 @@ label {
 }
 
 .week-promo-pct {
-  background: var(--green);
+  background: var(--accent);
   color: #fff;
   font-weight: 800;
   font-size: 0.65rem;
@@ -925,7 +992,7 @@ label {
 }
 
 .week-promo-hide-btn:hover {
-  color: var(--green-dark);
+  color: var(--accent);
   text-decoration: underline;
 }
 
@@ -990,7 +1057,7 @@ label {
 }
 
 .week-promo-variant-pct {
-  color: var(--green-dark);
+  color: var(--accent);
   min-width: 36px;
   font-size: 0.9rem;
 }
@@ -1026,7 +1093,7 @@ label {
 .week-promo-details-link {
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--green-dark);
+  color: var(--accent);
   text-decoration: none;
   margin-top: 2px;
 }
@@ -1037,8 +1104,8 @@ label {
 
 /* --- promo recomendada (alta de gasto) --- */
 .reco-card {
-  background: linear-gradient(135deg, #e8f2ec, #f6f4ef);
-  border: 2px solid var(--green);
+  background: linear-gradient(135deg, #e6f7f8, #f6f4ef);
+  border: 2px solid var(--accent);
   border-radius: var(--radius);
   padding: 14px;
   display: flex;
@@ -1053,7 +1120,7 @@ label {
 .reco-head {
   font-size: 0.75rem;
   font-weight: 700;
-  color: var(--green-dark);
+  color: var(--brand-teal-dark);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }

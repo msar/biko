@@ -1,6 +1,7 @@
-type BrandLogoProps = {
+type BrandMarkProps = {
   className?: string;
   size?: 'sm' | 'md' | 'lg';
+  showWordmark?: boolean;
 };
 
 const sizeClass = {
@@ -9,12 +10,23 @@ const sizeClass = {
   lg: 'brand-logo-lg',
 } as const;
 
-export default function BrandLogo({ className, size = 'md' }: BrandLogoProps) {
+export default function BrandMark({ className, size = 'md', showWordmark = false }: BrandMarkProps) {
   return (
-    <img
-      src="/logo.png"
-      alt="Biko"
-      className={['brand-logo', sizeClass[size], className].filter(Boolean).join(' ')}
-    />
+    <div
+      className={['brand-mark', size === 'lg' && 'brand-mark-lg', className].filter(Boolean).join(' ')}
+    >
+      <img
+        src="/logo.png"
+        alt=""
+        aria-hidden
+        className={['brand-logo', sizeClass[size]].join(' ')}
+      />
+      {showWordmark && <span className="brand-wordmark">Biko</span>}
+    </div>
   );
+}
+
+/** @deprecated Use BrandMark */
+export function BrandLogo(props: Omit<BrandMarkProps, 'showWordmark'>) {
+  return <BrandMark {...props} />;
 }
