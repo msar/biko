@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { api, getToken, setToken } from './api';
+import { api, getToken, onUnauthorized, setToken } from './api';
 import type { SessionUser } from './types';
 
 interface AuthState {
@@ -20,29 +20,48 @@ const AuthContext = createContext<AuthState | null>(null);
 
 const USER_KEY = 'biko:user';
 
+function readCachedUser(): SessionUser | null {
+  const cached = localStorage.getItem(USER_KEY);
+  return cached ? (JSON.parse(cached) as SessionUser) : null;
+}
+
+function clearSession(setUser: (u: SessionUser | null) => void) {
+  setToken(null);
+  setUser(null);
+  localStorage.removeItem(USER_KEY);
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<SessionUser | null>(() => {
-    const cached = localStorage.getItem(USER_KEY);
-    return cached ? (JSON.parse(cached) as SessionUser) : null;
-  });
-  const [loading, setLoading] = useState(Boolean(getToken() && !user));
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Revalida la sesión al abrir (si hay red); offline usa el user cacheado.
-    if (!getToken() || !navigator.onLine) {
+    onUnauthorized(() => clearSession(setUser));
+  }, []);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      localStorage.removeItem(USER_KEY);
+      setUser(null);
       setLoading(false);
       return;
     }
+
+    // Offline: usar usuario cacheado sin revalidar (PWA).
+    if (!navigator.onLine) {
+      setUser(readCachedUser());
+      setLoading(false);
+      return;
+    }
+
     api<{ id: string; name: string; email: string; household: { id: string } }>('/auth/me')
       .then((me) => {
         const session = { id: me.id, name: me.name, email: me.email, householdId: me.household.id };
         setUser(session);
         localStorage.setItem(USER_KEY, JSON.stringify(session));
       })
-      .catch(() => {
-        setUser(null);
-        localStorage.removeItem(USER_KEY);
-      })
+      .catch(() => clearSession(setUser))
       .finally(() => setLoading(false));
   }, []);
 
@@ -69,11 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       applySession(res.token, res.user);
     },
-    logout: () => {
-      setToken(null);
-      setUser(null);
-      localStorage.removeItem(USER_KEY);
-    },
+    logout: () => clearSession(setUser),
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

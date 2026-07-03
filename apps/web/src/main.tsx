@@ -8,6 +8,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import { AuthProvider } from './lib/auth';
+import { ApiError } from './lib/api';
 import './styles.css';
 
 registerSW({ immediate: true });
@@ -17,7 +18,10 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 60_000,
       gcTime: 1000 * 60 * 60 * 24 * 7, // una semana en cache offline
-      retry: 1,
+      retry: (failureCount, error) => {
+        if (error instanceof ApiError && error.status === 401) return false;
+        return failureCount < 1;
+      },
       networkMode: 'offlineFirst',
     },
   },

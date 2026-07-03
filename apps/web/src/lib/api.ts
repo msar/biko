@@ -1,6 +1,7 @@
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
 
 let authToken: string | null = localStorage.getItem('biko:token');
+let unauthorizedHandler: (() => void) | null = null;
 
 export function setToken(token: string | null) {
   authToken = token;
@@ -10,6 +11,11 @@ export function setToken(token: string | null) {
 
 export function getToken() {
   return authToken;
+}
+
+/** Limpia sesión cuando cualquier request recibe 401 (token inválido o expirado). */
+export function onUnauthorized(handler: () => void) {
+  unauthorizedHandler = handler;
 }
 
 export class ApiError extends Error {
@@ -34,7 +40,10 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401) setToken(null);
+    if (res.status === 401) {
+      setToken(null);
+      unauthorizedHandler?.();
+    }
     throw new ApiError(res.status, (body as { error?: string }).error ?? 'Error de red');
   }
   return body as T;
