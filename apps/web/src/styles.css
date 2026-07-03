@@ -872,8 +872,33 @@ label {
   gap: 10px;
 }
 
-.week-promo-hide-btn {
+.week-promo-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.week-promo-fav-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.week-promo-fav-btn.active {
+  color: var(--gold);
+}
+
+.week-promo-fav-btn:hover {
+  transform: scale(1.1);
+}
+
+.week-promo-hide-btn {
   flex-shrink: 0;
   border: none;
   background: transparent;

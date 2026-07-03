@@ -16,6 +16,7 @@ import type {
   CategorySchedule,
   DayRecommendation,
   Entity,
+  FavoriteWeeklyPromo,
   HiddenWeeklyPromo,
   Promotion,
 } from '../lib/types';
@@ -30,12 +31,16 @@ function WeeklyCalendar({
   hiddenPromos,
   onHideGroup,
   onUnhideGroup,
+  onToggleFavorite,
+  favoriteKeys,
 }: {
   weekly: DayRecommendation[] | undefined;
   province: string | null | undefined;
   hiddenPromos: HiddenWeeklyPromo[] | undefined;
   onHideGroup: (group: WeeklyPromoGroup) => void;
   onUnhideGroup: (groupKey: string) => void;
+  onToggleFavorite: (group: WeeklyPromoGroup) => void;
+  favoriteKeys: ReadonlySet<string>;
 }) {
   const [showHidden, setShowHidden] = useState(false);
   const activeDays = weekly?.filter((day) => day.promotions.length > 0) ?? [];
@@ -75,13 +80,27 @@ function WeeklyCalendar({
         </p>
       )}
       {activeDays.map((day) => (
-        <WeeklyDayCard key={day.dayOfWeek} day={day} onHideGroup={onHideGroup} />
+        <WeeklyDayCard
+          key={day.dayOfWeek}
+          day={day}
+          onHideGroup={onHideGroup}
+          onToggleFavorite={onToggleFavorite}
+          favoriteKeys={favoriteKeys}
+        />
       ))}
     </div>
   );
 }
 
-function WhenToGo({ categories }: { categories: Category[] }) {
+function WhenToGo({
+  categories,
+  onToggleFavorite,
+  favoriteKeys,
+}: {
+  categories: Category[];
+  onToggleFavorite: (group: WeeklyPromoGroup) => void;
+  favoriteKeys: ReadonlySet<string>;
+}) {
   const [categoryId, setCategoryId] = useState<string | null>(null);
 
   const { data: schedule, isLoading } = useQuery({
@@ -119,7 +138,12 @@ function WhenToGo({ categories }: { categories: Category[] }) {
             {idx === 0 && <span className="badge-best">Mejor día</span>}
           </div>
           {groupWeeklyPromos(day.promotions).map((group) => (
-            <WeeklyPromoGroupCard key={group.key} group={group} />
+            <WeeklyPromoGroupCard
+              key={group.key}
+              group={group}
+              favorited={favoriteKeys.has(group.key)}
+              onToggleFavorite={onToggleFavorite}
+            />
           ))}
         </div>
       ))}
@@ -261,6 +285,16 @@ export default function PromotionsPage() {
     queryFn: () => api<HiddenWeeklyPromo[]>('/promotions/weekly/hidden'),
   });
 
+  const { data: favoritePromos } = useQuery({
+    queryKey: ['promotions', 'weekly', 'favorites'],
+    queryFn: () => api<FavoriteWeeklyPromo[]>('/promotions/weekly/favorites'),
+  });
+
+  const favoriteKeys = useMemo(
+    () => new Set(favoritePromos?.map((f) => f.groupKey) ?? []),
+    [favoritePromos],
+  );
+
   const hideGroup = useMutation({
     mutationFn: (group: { key: string; label: string }) =>
       api<HiddenWeeklyPromo>('/promotions/weekly/hidden', {
@@ -282,8 +316,35 @@ export default function PromotionsPage() {
     },
   });
 
+  const favoriteGroup = useMutation({
+    mutationFn: (group: { key: string; label: string }) =>
+      api<FavoriteWeeklyPromo>('/promotions/weekly/favorites', {
+        method: 'POST',
+        body: JSON.stringify({ groupKey: group.key, label: group.label }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['promotions', 'weekly', 'favorites'] });
+    },
+  });
+
+  const unfavoriteGroup = useMutation({
+    mutationFn: (groupKey: string) =>
+      api(`/promotions/weekly/favorites/${encodeURIComponent(groupKey)}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['promotions', 'weekly', 'favorites'] });
+    },
+  });
+
   const onHideGroup = (group: WeeklyPromoGroup) =>
     hideGroup.mutate({ key: group.key, label: group.label });
+
+  const onToggleFavorite = (group: WeeklyPromoGroup) => {
+    if (favoriteKeys.has(group.key)) {
+      unfavoriteGroup.mutate(group.key);
+    } else {
+      favoriteGroup.mutate({ key: group.key, label: group.label });
+    }
+  };
 
   const { data: promotions } = useQuery({
     queryKey: ['promotions'],
@@ -348,7 +409,15 @@ export default function PromotionsPage() {
         </button>
       </div>
 
-      {tab === 'hoy' && <TodayPromos weekly={weekly} today={today} onHideGroup={onHideGroup} />}
+      {tab === 'hoy' && (
+        <TodayPromos
+          weekly={weekly}
+          today={today}
+          onHideGroup={onHideGroup}
+          onToggleFavorite={onToggleFavorite}
+          favoriteKeys={favoriteKeys}
+        />
+      )}
 
       {tab === 'calendar' && (
         <WeeklyCalendar
@@ -357,10 +426,14 @@ export default function PromotionsPage() {
           hiddenPromos={hiddenPromos}
           onHideGroup={onHideGroup}
           onUnhideGroup={(groupKey) => unhideGroup.mutate(groupKey)}
+          onToggleFavorite={onToggleFavorite}
+          favoriteKeys={favoriteKeys}
         />
       )}
 
-      {tab === 'when' && categories && <WhenToGo categories={categories} />}
+      {tab === 'when' && categories && (
+        <WhenToGo categories={categories} onToggleFavorite={onToggleFavorite} favoriteKeys={favoriteKeys} />
+      )}
 
       {tab === 'all' && (
         <>
@@ -466,6 +539,8 @@ export default function PromotionsPage() {
                   key={group.key}
                   group={group}
                   onDeactivate={(id) => void deactivate(id)}
+                  favorited={favoriteKeys.has(group.key)}
+                  onToggleFavorite={onToggleFavorite}
                 />
               ))}
             </div>

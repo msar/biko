@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isActionableWeeklyPromo, parseMinPurchaseAmount, weeklyPromoGroupKey, filterHiddenWeeklyGroups } from './weekly-promo-quality';
+import { isActionableWeeklyPromo, parseMinPurchaseAmount, weeklyPromoGroupKey, filterHiddenWeeklyGroups, sortWeeklyGroupsByFavorites } from './weekly-promo-quality';
 
 describe('isActionableWeeklyPromo', () => {
   it('excludes auto insurance miscategorized as combustible', () => {
@@ -92,5 +92,23 @@ describe('parseMinPurchaseAmount', () => {
   it('extracts minimum from MODO copy', () => {
     expect(parseMinPurchaseAmount(['Compra mínima $75.000 en ticket'])).toBe(75000);
     expect(parseMinPurchaseAmount(['Mínimo de consumo 50000'])).toBe(50000);
+  });
+});
+
+describe('sortWeeklyGroupsByFavorites', () => {
+  it('puts favorited groups first while preserving order within tiers', () => {
+    const groups = [
+      { key: 'a', label: 'A' },
+      { key: 'b', label: 'B' },
+      { key: 'c', label: 'C' },
+      { key: 'd', label: 'D' },
+    ];
+    const sorted = sortWeeklyGroupsByFavorites(groups, new Set(['c', 'a']));
+    expect(sorted.map((g) => g.key)).toEqual(['a', 'c', 'b', 'd']);
+  });
+
+  it('returns original order when no favorites', () => {
+    const groups = [{ key: 'x' }, { key: 'y' }];
+    expect(sortWeeklyGroupsByFavorites(groups, [])).toEqual(groups);
   });
 });

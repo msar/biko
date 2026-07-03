@@ -186,6 +186,38 @@ export default async function promotionRoutes(app: FastifyInstance) {
     return reply.code(204).send();
   });
 
+  app.get('/promotions/weekly/favorites', { preHandler: [app.authenticate] }, async (request) => {
+    return app.prisma.householdFavoriteWeeklyPromo.findMany({
+      where: { householdId: request.user.householdId },
+      orderBy: { label: 'asc' },
+    });
+  });
+
+  app.post('/promotions/weekly/favorites', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const body = z.object({ groupKey: z.string().min(1), label: z.string().min(1) }).parse(request.body);
+    const row = await app.prisma.householdFavoriteWeeklyPromo.upsert({
+      where: {
+        householdId_groupKey: { householdId: request.user.householdId, groupKey: body.groupKey },
+      },
+      create: { householdId: request.user.householdId, groupKey: body.groupKey, label: body.label },
+      update: { label: body.label },
+    });
+    return reply.code(201).send(row);
+  });
+
+  app.delete('/promotions/weekly/favorites/:groupKey', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { groupKey } = z.object({ groupKey: z.string().min(1) }).parse(request.params);
+    const decoded = decodeURIComponent(groupKey);
+    const existing = await app.prisma.householdFavoriteWeeklyPromo.findUnique({
+      where: { householdId_groupKey: { householdId: request.user.householdId, groupKey: decoded } },
+    });
+    if (!existing) return reply.code(404).send({ error: 'Promo favorita no encontrada' });
+    await app.prisma.householdFavoriteWeeklyPromo.delete({
+      where: { householdId_groupKey: { householdId: request.user.householdId, groupKey: decoded } },
+    });
+    return reply.code(204).send();
+  });
+
   // "¿Cuándo conviene ir?" para una categoría (ej: Combustible).
   app.get('/promotions/by-category/:categoryId', { preHandler: [app.authenticate] }, async (request, reply) => {
     const { categoryId } = z.object({ categoryId: z.string() }).parse(request.params);

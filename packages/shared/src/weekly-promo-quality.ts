@@ -125,3 +125,19 @@ export function parseMinPurchaseAmount(texts: string[]): number | null {
   }
   return null;
 }
+
+/** Ordena grupos poniendo favoritos primero, manteniendo el orden relativo dentro de cada grupo. */
+export function sortWeeklyGroupsByFavorites<T extends { key: string }>(
+  groups: T[],
+  favoriteKeys: ReadonlySet<string> | string[],
+): T[] {
+  const favorites = favoriteKeys instanceof Set ? favoriteKeys : new Set(favoriteKeys);
+  if (favorites.size === 0) return groups;
+  const starred: T[] = [];
+  const rest: T[] = [];
+  for (const group of groups) {
+    if (favorites.has(group.key)) starred.push(group);
+    else rest.push(group);
+  }
+  return [...starred, ...rest];
+}

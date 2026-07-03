@@ -1,4 +1,4 @@
-import { formatPromotionBenefit, weeklyPromoGroupKey, type DayOfWeek } from '@biko/shared';
+import { formatPromotionBenefit, sortWeeklyGroupsByFavorites, weeklyPromoGroupKey, type DayOfWeek } from '@biko/shared';
 import { useState } from 'react';
 import { DAY_LABEL, fmtARS } from './api';
 import { promoDetailsLinkLabel } from './promo-source-label';
@@ -142,14 +142,30 @@ export function WeeklyPromoGroupCard({
   group,
   onHide,
   onDeactivate,
+  favorited = false,
+  onToggleFavorite,
 }: {
   group: WeeklyPromoGroup;
   onHide?: (group: WeeklyPromoGroup) => void;
   onDeactivate?: (promotionId: string) => void;
+  favorited?: boolean;
+  onToggleFavorite?: (group: WeeklyPromoGroup) => void;
 }) {
   const multi = group.promos.length > 1;
   const solo = group.promos[0]!;
   const inactive = group.promos.every((p) => p.active === false);
+
+  const favoriteButton = onToggleFavorite ? (
+    <button
+      type="button"
+      className={`week-promo-fav-btn ${favorited ? 'active' : ''}`}
+      onClick={() => onToggleFavorite(group)}
+      aria-label={favorited ? `Quitar ${group.label} de favoritos` : `Marcar ${group.label} como favorito`}
+      title={favorited ? 'Quitar de favoritos' : 'Marcar como favorito'}
+    >
+      {favorited ? '★' : '☆'}
+    </button>
+  ) : null;
 
   const hideButton = onHide ? (
     <button
@@ -163,6 +179,14 @@ export function WeeklyPromoGroupCard({
     </button>
   ) : null;
 
+  const actionButtons =
+    favoriteButton || hideButton ? (
+      <div className="week-promo-actions">
+        {favoriteButton}
+        {hideButton}
+      </div>
+    ) : null;
+
   if (!multi) {
     return (
       <div className={`week-promo-group ${inactive ? 'inactive' : ''}`}>
@@ -173,7 +197,7 @@ export function WeeklyPromoGroupCard({
             <span className="week-promo-pct">{promoBenefitBadge(solo)}</span>
           )}
           <WeeklyPromoVariant promo={solo} onDeactivate={onDeactivate} />
-          {hideButton}
+          {actionButtons}
         </div>
       </div>
     );
@@ -193,7 +217,7 @@ export function WeeklyPromoGroupCard({
             {group.promos.length} promos distintas — distinto banco, tope o condiciones
           </small>
         </div>
-        {hideButton}
+        {actionButtons}
       </div>
       <div className="week-promo-variants">
         {group.promos.map((promo) => (
@@ -208,15 +232,22 @@ export function WeeklyDayCard({
   day,
   onHideGroup,
   onDeactivate,
+  onToggleFavorite,
+  favoriteKeys,
   cap = WEEKLY_PROMO_CAP,
 }: {
   day: DayRecommendation;
   onHideGroup?: (group: WeeklyPromoGroup) => void;
   onDeactivate?: (promotionId: string) => void;
+  onToggleFavorite?: (group: WeeklyPromoGroup) => void;
+  favoriteKeys?: ReadonlySet<string>;
   cap?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const groups = groupWeeklyPromos(day.promotions);
+  const groups = sortWeeklyGroupsByFavorites(
+    groupWeeklyPromos(day.promotions),
+    favoriteKeys ?? [],
+  );
   const visible = expanded ? groups : groups.slice(0, cap);
   const hiddenCount = groups.length - cap;
 
@@ -229,6 +260,8 @@ export function WeeklyDayCard({
           group={group}
           onHide={onHideGroup}
           onDeactivate={onDeactivate}
+          favorited={favoriteKeys?.has(group.key)}
+          onToggleFavorite={onToggleFavorite}
         />
       ))}
       {!expanded && hiddenCount > 0 && (
@@ -244,13 +277,19 @@ export function TodayPromos({
   weekly,
   today,
   onHideGroup,
+  onToggleFavorite,
+  favoriteKeys,
 }: {
   weekly: DayRecommendation[] | undefined;
   today: DayOfWeek;
   onHideGroup?: (group: WeeklyPromoGroup) => void;
+  onToggleFavorite?: (group: WeeklyPromoGroup) => void;
+  favoriteKeys?: ReadonlySet<string>;
 }) {
   const todayRec = weekly?.find((d) => d.dayOfWeek === today);
-  const groups = todayRec ? groupWeeklyPromos(todayRec.promotions) : [];
+  const groups = todayRec
+    ? sortWeeklyGroupsByFavorites(groupWeeklyPromos(todayRec.promotions), favoriteKeys ?? [])
+    : [];
 
   return (
     <div className="week-calendar">
@@ -260,7 +299,13 @@ export function TodayPromos({
       {groups.length > 0 ? (
         <div className="week-day card">
           {groups.map((group) => (
-            <WeeklyPromoGroupCard key={group.key} group={group} onHide={onHideGroup} />
+            <WeeklyPromoGroupCard
+              key={group.key}
+              group={group}
+              onHide={onHideGroup}
+              favorited={favoriteKeys?.has(group.key)}
+              onToggleFavorite={onToggleFavorite}
+            />
           ))}
         </div>
       ) : (

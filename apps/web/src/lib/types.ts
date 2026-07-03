@@ -64,6 +64,13 @@ export interface HiddenWeeklyPromo {
   createdAt: string;
 }
 
+export interface FavoriteWeeklyPromo {
+  householdId: string;
+  groupKey: string;
+  label: string;
+  createdAt: string;
+}
+
 export interface Promotion {
   id: string;
   entityId: string;

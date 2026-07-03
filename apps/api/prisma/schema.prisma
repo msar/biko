@@ -120,6 +120,7 @@ model Household {
   statementImports StatementImport[]
   monthlyCapUsages MonthlyCapUsage[]
   hiddenWeeklyPromos HouseholdHiddenWeeklyPromo[]
+  favoriteWeeklyPromos HouseholdFavoriteWeeklyPromo[]
 }
 
 model User {
@@ -143,6 +144,17 @@ model User {
 
 // Comercios/promos que el hogar ocultó en Mi semana (por groupKey de weeklyPromoGroupKey).
 model HouseholdHiddenWeeklyPromo {
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  groupKey    String
+  label       String
+  createdAt   DateTime  @default(now())
+
+  @@id([householdId, groupKey])
+}
+
+// Comercios/promos favoritos del hogar (priorizan en Hoy y Mi semana).
+model HouseholdFavoriteWeeklyPromo {
   householdId String
   household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
   groupKey    String
