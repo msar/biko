@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
@@ -9,6 +10,12 @@ const createSchema = z.object({
   closingDay: z.number().int().min(1).max(31).nullish(),
   dueDay: z.number().int().min(1).max(31).nullish(),
 });
+
+const updateSchema = createSchema.partial().omit({ definitionId: true });
+
+function isUniqueViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
 
 export default async function paymentMethodRoutes(app: FastifyInstance) {
   app.get('/payment-methods', { preHandler: [app.authenticate] }, async (request) => {
@@ -28,25 +35,47 @@ export default async function paymentMethodRoutes(app: FastifyInstance) {
     if (definition.type === 'CREDIT_CARD' && (body.closingDay == null || body.dueDay == null)) {
       return reply.code(400).send({ error: 'Las tarjetas de crédito requieren día de cierre y de vencimiento' });
     }
-    const method = await app.prisma.paymentMethod.create({
-      data: { ...body, householdId: request.user.householdId },
-      include: { definition: { include: { entity: true } } },
-    });
-    return reply.code(201).send(method);
+    try {
+      const method = await app.prisma.paymentMethod.create({
+        data: { ...body, householdId: request.user.householdId },
+        include: { definition: { include: { entity: true } } },
+      });
+      return reply.code(201).send(method);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return reply.code(409).send({ error: 'Ya tenés esa tarjeta con esos últimos 4 dígitos' });
+      }
+      throw error;
+    }
   });
 
   app.put('/payment-methods/:id', { preHandler: [app.authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
-    const body = createSchema.partial().omit({ definitionId: true }).parse(request.body);
+    const body = updateSchema.parse(request.body);
     const existing = await app.prisma.paymentMethod.findFirst({
       where: { id, householdId: request.user.householdId },
+      include: { definition: true },
     });
     if (!existing) return reply.code(404).send({ error: 'Medio de pago no encontrado' });
-    return app.prisma.paymentMethod.update({
-      where: { id },
-      data: body,
-      include: { definition: { include: { entity: true } } },
-    });
+
+    const closingDay = body.closingDay !== undefined ? body.closingDay : existing.closingDay;
+    const dueDay = body.dueDay !== undefined ? body.dueDay : existing.dueDay;
+    if (existing.definition.type === 'CREDIT_CARD' && (closingDay == null || dueDay == null)) {
+      return reply.code(400).send({ error: 'Las tarjetas de crédito requieren día de cierre y de vencimiento' });
+    }
+
+    try {
+      return await app.prisma.paymentMethod.update({
+        where: { id },
+        data: body,
+        include: { definition: { include: { entity: true } } },
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return reply.code(409).send({ error: 'Ya tenés esa tarjeta con esos últimos 4 dígitos' });
+      }
+      throw error;
+    }
   });
 
   app.delete('/payment-methods/:id', { preHandler: [app.authenticate] }, async (request, reply) => {

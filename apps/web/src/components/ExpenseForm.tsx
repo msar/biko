@@ -8,6 +8,7 @@ import { api, fmtARS } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { enqueueExpense, type OutboxExpense } from '../lib/outbox';
 import { ensureStoreSuggestionsCache, rememberStoreFromExpense } from '../lib/store-suggestions';
+import { groupMethodsByEntity, paymentMethodDisplayName } from '../lib/payment-method-catalog';
 import type {
   Category,
   ExpenseScope,
@@ -561,19 +562,24 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
             No tenés medios de pago cargados. Agregalos en <a href="/ajustes">Ajustes</a>.
           </p>
         )}
-        <div className="method-list">
-          {methods?.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              className={`method-chip ${paymentMethodId === m.id ? 'selected' : ''}`}
-              onClick={() => setPaymentMethodId(m.id)}
-            >
-              {m.nickname ?? m.definition.name}
-              {m.lastFour ? ` ···${m.lastFour}` : ''}
-            </button>
-          ))}
-        </div>
+        {(methods ? groupMethodsByEntity(methods) : []).map((group) => (
+          <div key={group.entityId} className="payment-method-group">
+            <span className="field-label payment-method-group-title">{group.entityName}</span>
+            <div className="method-list">
+              {group.items.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={`method-chip ${paymentMethodId === m.id ? 'selected' : ''}`}
+                  onClick={() => setPaymentMethodId(m.id)}
+                >
+                  {paymentMethodDisplayName(m)}
+                  {m.lastFour ? ` ···${m.lastFour}` : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </section>
 
       <section className="field-row">

@@ -1,89 +1,21 @@
 import { ARGENTINE_PROVINCES } from '@biko/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FormEvent, useState } from 'react';
+import { useState } from 'react';
+import { AddPaymentMethodsWizard, EditPaymentMethodForm } from '../components/PaymentMethodForm';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import {
+  groupMethodsByEntity,
+  methodSubtitle,
+  paymentMethodDisplayName,
+} from '../lib/payment-method-catalog';
 import type { PaymentMethod, PaymentMethodDefinition } from '../lib/types';
-
-function AddMethodForm({ definitions, onDone }: { definitions: PaymentMethodDefinition[]; onDone: () => void }) {
-  const queryClient = useQueryClient();
-  const [definitionId, setDefinitionId] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const selected = definitions.find((d) => d.id === definitionId);
-  const isCredit = selected?.type === 'CREDIT_CARD';
-  const isCard = isCredit || selected?.type === 'DEBIT_CARD';
-
-  const mutation = useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
-      api('/payment-methods', { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['payment-methods'] });
-      onDone();
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Error'),
-  });
-
-  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const data = new FormData(e.currentTarget);
-    mutation.mutate({
-      definitionId,
-      nickname: String(data.get('nickname')) || null,
-      lastFour: String(data.get('lastFour')) || null,
-      closingDay: data.get('closingDay') ? Number(data.get('closingDay')) : null,
-      dueDay: data.get('dueDay') ? Number(data.get('dueDay')) : null,
-    });
-  };
-
-  return (
-    <form className="card promo-form" onSubmit={onSubmit}>
-      <h2>Agregar medio de pago</h2>
-      <label>
-        Medio de pago (catálogo estándar)
-        <select value={definitionId} onChange={(e) => setDefinitionId(e.target.value)} required>
-          <option value="">Elegí uno…</option>
-          {definitions.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      {isCard && (
-        <label>
-          Últimos 4 dígitos
-          <input name="lastFour" pattern="\d{4}" maxLength={4} placeholder="1234" />
-        </label>
-      )}
-      {isCredit && (
-        <div className="field-row">
-          <label>
-            Día de cierre
-            <input name="closingDay" type="number" min="1" max="31" required placeholder="15" />
-          </label>
-          <label>
-            Día de vencimiento
-            <input name="dueDay" type="number" min="1" max="31" required placeholder="10" />
-          </label>
-        </div>
-      )}
-      <label>
-        Apodo (opcional)
-        <input name="nickname" placeholder="La Visa de Mariano" />
-      </label>
-      {error && <p className="error">{error}</p>}
-      <button className="btn-primary" disabled={!definitionId || mutation.isPending}>
-        Agregar
-      </button>
-    </form>
-  );
-}
 
 export default function SettingsPage() {
   const { user, logout } = useAuth();
   const queryClient = useQueryClient();
-  const [showForm, setShowForm] = useState(false);
+  const [panel, setPanel] = useState<'none' | 'add' | 'edit'>('none');
+  const [editId, setEditId] = useState<string | null>(null);
 
   const { data: methods } = useQuery({
     queryKey: ['payment-methods'],
@@ -107,15 +39,24 @@ export default function SettingsPage() {
     },
   });
 
+  const closePanel = () => {
+    setPanel('none');
+    setEditId(null);
+  };
+
   const removeMethod = async (id: string) => {
     if (!confirm('¿Eliminar este medio de pago?')) return;
     try {
       await api(`/payment-methods/${id}`, { method: 'DELETE' });
       void queryClient.invalidateQueries({ queryKey: ['payment-methods'] });
+      if (editId === id) closePanel();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'No se pudo eliminar');
     }
   };
+
+  const editMethod = methods?.find((m) => m.id === editId);
+  const grouped = methods ? groupMethodsByEntity(methods) : [];
 
   return (
     <div className="page">
@@ -157,28 +98,64 @@ export default function SettingsPage() {
       <section className="card">
         <div className="row-between">
           <h2>Medios de pago</h2>
-          <button className="icon-btn" onClick={() => setShowForm(!showForm)}>
-            {showForm ? '✕' : '＋'}
+          <button
+            className="icon-btn"
+            onClick={() => {
+              if (panel === 'add') closePanel();
+              else {
+                setPanel('add');
+                setEditId(null);
+              }
+            }}
+          >
+            {panel === 'add' ? '✕' : '＋'}
           </button>
         </div>
-        {showForm && definitions && <AddMethodForm definitions={definitions} onDone={() => setShowForm(false)} />}
-        {methods?.map((m) => (
-          <div key={m.id} className="list-row">
-            <div>
-              <strong>{m.nickname ?? m.definition.name}</strong>
-              <small>
-                {' '}
-                {m.definition.name}
-                {m.lastFour ? ` ···${m.lastFour}` : ''}
-                {m.closingDay ? ` · cierre ${m.closingDay}, vto ${m.dueDay}` : ''}
-              </small>
-            </div>
-            <button className="btn-link" onClick={() => removeMethod(m.id)}>
-              Eliminar
-            </button>
+
+        {panel === 'add' && definitions && methods && (
+          <AddPaymentMethodsWizard
+            definitions={definitions}
+            existingMethods={methods}
+            onDone={closePanel}
+            onCancel={closePanel}
+          />
+        )}
+
+        {panel === 'edit' && editMethod && (
+          <EditPaymentMethodForm method={editMethod} onDone={closePanel} onCancel={closePanel} />
+        )}
+
+        {grouped.map((group) => (
+          <div key={group.entityId} className="payment-method-group">
+            <h3 className="payment-method-group-title">{group.entityName}</h3>
+            {group.items.map((m) => (
+              <div key={m.id} className="list-row">
+                <div>
+                  <strong>{paymentMethodDisplayName(m)}</strong>
+                  {methodSubtitle(m) && <small> {methodSubtitle(m)}</small>}
+                </div>
+                <div className="list-row-actions">
+                  <button
+                    className="btn-link"
+                    onClick={() => {
+                      setEditId(m.id);
+                      setPanel('edit');
+                    }}
+                  >
+                    Editar
+                  </button>
+                  <button className="btn-link" onClick={() => removeMethod(m.id)}>
+                    Eliminar
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         ))}
-        {methods && methods.length === 0 && <p className="hint">Agregá tus tarjetas y billeteras del catálogo.</p>}
+
+        {methods && methods.length === 0 && panel === 'none' && (
+          <p className="hint">Agregá tus tarjetas y billeteras del catálogo.</p>
+        )}
       </section>
     </div>
   );
