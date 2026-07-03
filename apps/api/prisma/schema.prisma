@@ -1,0 +1,392 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum PaymentMethodType {
+  DEBIT_CARD
+  CREDIT_CARD
+  WALLET // ej: MODO, MercadoPago
+  CASH
+  BANK_TRANSFER
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum CardNetwork {
+  VISA
+  MASTERCARD
+  AMEX
+  CABAL
+  NONE // billeteras, efectivo, transferencia
+}
+
+enum EntityKind {
+  BANK
+  WALLET
+  OTHER
+}
+
+enum PromotionSource {
+  MANUAL
+  SCRAPED
+}
+
+enum DiscountKind {
+  PERCENTAGE_REFUND
+  INSTALLMENTS
+  FIXED_AMOUNT
+  OTHER
+}
+
+enum StatementImportStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+enum ExpenseScope {
+  HOUSEHOLD
+  PERSONAL
+}
+
+// ============================================================
+// CATÁLOGO GLOBAL DE ENTIDADES Y MEDIOS DE PAGO (seed, no editable por hogar)
+// ============================================================
+
+// Banco o billetera: "Santander", "BBVA", "Galicia", "MODO", "Naranja X",
+// "MercadoPago". Global y seedeado para evitar entradas manuales tipo
+// "Visa Sant" / "Santander visa" que rompen el matching de promociones.
+model Entity {
+  id   String     @id @default(cuid())
+  name String     @unique
+  kind EntityKind
+
+  definitions PaymentMethodDefinition[]
+  promotions  Promotion[]
+  capUsages   MonthlyCapUsage[]
+}
+
+// Combinación estándar entidad + tipo + red: "Santander Visa (crédito)",
+// "Santander Amex (crédito)", "MODO", "Efectivo". Los hogares eligen de esta
+// lista, nunca tipean el nombre del banco.
+model PaymentMethodDefinition {
+  id       String            @id @default(cuid())
+  // null solo para definiciones sin entidad (Efectivo, Transferencia genérica)
+  entityId String?
+  entity   Entity?           @relation(fields: [entityId], references: [id])
+  name     String            // nombre de display: "Santander Visa (crédito)"
+  type     PaymentMethodType
+  network  CardNetwork       @default(NONE)
+  active   Boolean           @default(true)
+
+  paymentMethods PaymentMethod[]
+
+  @@unique([entityId, type, network])
+}
+
+// ============================================================
+// HOGAR Y USUARIOS
+// ============================================================
+
+model Household {
+  id         String   @id @default(cuid())
+  name       String
+  inviteCode String   @unique @default(cuid())
+  // Provincia del hogar para filtrar promos regionales (null = ver todas).
+  province   String?
+  createdAt  DateTime @default(now())
+
+  users            User[]
+  categories       Category[]
+  paymentMethods   PaymentMethod[]
+  purchases        Purchase[]
+  statementImports StatementImport[]
+  monthlyCapUsages MonthlyCapUsage[]
+  hiddenWeeklyPromos HouseholdHiddenWeeklyPromo[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  householdId  String
+  household    Household @relation(fields: [householdId], references: [id])
+  name         String
+  email        String    @unique
+  // Null si el usuario se autentica vía un provider externo (ej. Clerk) en vez de password propio.
+  passwordHash String?
+  // "password" hoy; "clerk" / "google" el día que se migre a un provider externo.
+  authProvider String    @default("password")
+  // Id del usuario en el provider externo, cuando authProvider != "password".
+  externalId   String?   @unique
+  createdAt    DateTime  @default(now())
+
+  purchases    Purchase[]
+  ownedMethods PaymentMethod[] @relation("MethodOwner")
+  allocations  PurchaseAllocation[]
+}
+
+// Comercios/promos que el hogar ocultó en Mi semana (por groupKey de weeklyPromoGroupKey).
+model HouseholdHiddenWeeklyPromo {
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  groupKey    String
+  label       String
+  createdAt   DateTime  @default(now())
+
+  @@id([householdId, groupKey])
+}
+
+// ============================================================
+// CATEGORÍAS Y MEDIOS DE PAGO DEL HOGAR
+// ============================================================
+
+model Category {
+  id          String   @id @default(cuid())
+  // null = categoría global/default (seed), no exclusiva de un hogar
+  householdId String?
+  household   Household? @relation(fields: [householdId], references: [id])
+  name        String   // Carnicería, Verdulería, Supermercado, Pollería, etc.
+  icon        String?
+  color       String?
+
+  purchases   Purchase[]
+  promotions  PromotionCategory[]
+
+  @@unique([householdId, name])
+}
+
+// Instancia de un medio de pago del catálogo en un hogar concreto.
+// Los datos "de identidad" (banco, tipo, red) viven en la definición global;
+// acá solo va lo específico de la instancia.
+model PaymentMethod {
+  id           String                  @id @default(cuid())
+  householdId  String
+  household    Household               @relation(fields: [householdId], references: [id])
+  definitionId String
+  definition   PaymentMethodDefinition @relation(fields: [definitionId], references: [id])
+  ownerUserId  String?                 // de quién es la tarjeta/cuenta (para reportes por persona)
+  owner        User?                   @relation("MethodOwner", fields: [ownerUserId], references: [id])
+
+  nickname     String?                 // solo display ("la Visa de Mariano"); nunca se usa para matching
+  lastFour     String?
+
+  // Solo aplica a CREDIT_CARD: define en qué mes cae cada cuota
+  closingDay   Int?                    // día de cierre del resumen (ej: 15)
+  dueDay       Int?                    // día de vencimiento del resumen (ej: 10 del mes siguiente al cierre)
+
+  purchases    Purchase[]
+
+  @@unique([householdId, definitionId, lastFour])
+  @@index([householdId])
+}
+
+// ============================================================
+// PROMOCIONES (dato global, no específico de un hogar)
+// ============================================================
+
+model Promotion {
+  id                 String             @id @default(cuid())
+  entityId           String
+  entity             Entity             @relation(fields: [entityId], references: [id])
+  // Banco que patrocina el descuento en MODO (null = promo genérica MODO).
+  sponsorBank        String?
+  sponsorBanks       String[]           @default([]) // bancos adheridos en MODO (vacío = no restringe por banco)
+  store              String?            // "ChangoMás", "Carrefour" — null = aplica a cualquier comercio
+  paymentMethodType  PaymentMethodType? // restringe a un tipo de medio de pago si aplica
+  cardNetwork        CardNetwork?       // restringe a una red (ej: "solo Visa"), null = cualquiera
+  daysOfWeek         DayOfWeek[]        @default([]) // vacío = todos los días
+
+  discountKind       DiscountKind       @default(PERCENTAGE_REFUND)
+  discountLabel      String?            // ej. "25% de reintegro", "6 cuotas sin interés"
+  discountPercentage Decimal            @db.Decimal(5, 2) // 0 para promos sin % (cuotas, etc.)
+  discountCap        Decimal?           @db.Decimal(12, 2) // tope mensual en pesos, null = sin tope
+  minPurchaseAmount  Decimal?           @db.Decimal(12, 2)
+  imageUrl           String?            // logo/imagen del comercio (MODO primary_image)
+  details            String[]           @default([]) // condiciones, locales adheridos, etc.
+  provinces          String[]           @default([]) // vacío = aplica en todo el país
+  storesAdherents    Boolean            @default(false) // requiere consultar locales adheridos
+  paymentFlow        String?            // instore | online
+
+  validFrom          DateTime?
+  validTo            DateTime?
+
+  source             PromotionSource    @default(MANUAL)
+  sourceUrl          String?            // ej: https://www.modo.com.ar/promos
+  // Clave de dedupe para promos scrapeadas: (fuente, id en la fuente).
+  externalSource     String?            // "MODO"
+  externalId         String?
+  active             Boolean            @default(true)
+  notes              String?
+
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  purchases          Purchase[]
+  categories         PromotionCategory[]
+
+  @@unique([externalSource, externalId])
+  @@index([entityId, active])
+}
+
+// Estado del último sync de cada scraper (una fila por fuente).
+model PromotionSync {
+  source    String    @id // "MODO"
+  lastRunAt DateTime?
+  lastError String?
+  imported  Int       @default(0)
+  updated   Int       @default(0)
+  deactivated Int     @default(0)
+}
+
+// Rubros/categorías a las que aplica una promo (ej: promo de combustible).
+// Sin filas = la promo no declara rubro (matchea cualquier categoría).
+model PromotionCategory {
+  promotionId String
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  categoryId  String
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, categoryId])
+}
+
+// ============================================================
+// COMPRAS Y CUOTAS
+// ============================================================
+
+// Purchase = la transacción real. Guarda una "foto" del descuento aplicado
+// (no solo el promotionId) para que el ahorro histórico no cambie si la
+// promoción se edita o desactiva más adelante.
+model Purchase {
+  id              String    @id @default(cuid())
+  // Id generado por el cliente para idempotencia en el sync offline:
+  // reintentos del outbox no duplican compras.
+  clientId        String?   @unique
+  householdId     String
+  household       Household @relation(fields: [householdId], references: [id])
+  userId          String    // quién cargó/hizo la compra
+  user            User      @relation(fields: [userId], references: [id])
+  paymentMethodId String
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+  categoryId      String
+  category        Category  @relation(fields: [categoryId], references: [id])
+
+  store           String
+  description     String?
+  purchaseDate    DateTime
+
+  // Montos
+  grossAmount     Decimal   @db.Decimal(12, 2) // 100.000 (precio de lista, sin descuento)
+
+  // Snapshot de la promo aplicada (si hubo)
+  promotionId               String?
+  promotion                 Promotion? @relation(fields: [promotionId], references: [id])
+  discountPercentageApplied Decimal?  @db.Decimal(5, 2) // 25.00 (copiado al momento de la compra)
+  discountCapApplied        Decimal?  @db.Decimal(12, 2) // tope restante disponible al momento de la compra
+
+  discountAmount Decimal   @db.Decimal(12, 2) @default(0) // 20.000 → resultado ya con tope aplicado
+  netAmount      Decimal   @db.Decimal(12, 2) // grossAmount - discountAmount = 80.000 (lo efectivamente pagado/financiado)
+
+  installmentsCount Int    @default(1)
+
+  // HOUSEHOLD = gasto compartido (default); PERSONAL = solo impacta al usuario que lo cargó.
+  scope ExpenseScope @default(HOUSEHOLD)
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  installments   Installment[]
+  allocations    PurchaseAllocation[]
+
+  @@index([householdId, purchaseDate])
+  @@index([categoryId])
+}
+
+// Reparto del netAmount entre miembros del hogar (para dashboard "por persona").
+model PurchaseAllocation {
+  id         String   @id @default(cuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  amount     Decimal  @db.Decimal(12, 2)
+
+  @@unique([purchaseId, userId])
+}
+
+// Cada cuota es un "gasto" que impacta un mes específico.
+// Para compras sin cuotas, installmentsCount = 1 y hay una sola Installment
+// con dueDate = purchaseDate. Así el dashboard mensual siempre consulta
+// esta tabla, sin distinguir contado vs. cuotas.
+model Installment {
+  id          String   @id @default(cuid())
+  purchaseId  String
+  purchase    Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  // denormalizado para queries de dashboard sin joins pesados
+  householdId String
+
+  number      Int      // 1, 2, 3... N
+  amount      Decimal  @db.Decimal(12, 2)
+  dueDate     DateTime
+  paid        Boolean  @default(false)
+  paidDate    DateTime?
+
+  @@index([householdId, dueDate])
+  @@unique([purchaseId, number])
+}
+
+// ============================================================
+// TOPE MENSUAL DE DESCUENTO POR BANCO
+// ============================================================
+
+// El tope de reintegro suele ser mensual y por banco/billetera (entity),
+// compartido entre todas las promociones de esa entidad, no por transacción
+// ni por promoción individual. Ej: si ya usaste $20.000 de tope con Santander
+// este mes, una nueva compra con Santander no debería recibir más descuento,
+// aunque sea otra promoción distinta de la misma entidad.
+model MonthlyCapUsage {
+  id          String    @id @default(cuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id])
+  entityId    String
+  entity      Entity    @relation(fields: [entityId], references: [id])
+  yearMonth   String    // formato "2026-07"
+  usedAmount  Decimal   @db.Decimal(12, 2) @default(0)
+
+  @@unique([householdId, entityId, yearMonth])
+  @@index([householdId, yearMonth])
+}
+
+// ============================================================
+// IMPORTACIÓN DE RESÚMENES BANCARIOS (Fase 3, tabla ya prevista)
+// ============================================================
+
+model StatementImport {
+  id             String   @id @default(cuid())
+  householdId    String
+  household      Household @relation(fields: [householdId], references: [id])
+  fileName       String
+  bankSource     String   // "Galicia", "Santander", etc.
+  status         StatementImportStatus @default(PENDING)
+  processedCount Int      @default(0)
+  errorLog       String?
+  importedAt     DateTime @default(now())
+
+  @@index([householdId])
+}

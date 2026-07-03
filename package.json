@@ -1,0 +1,21 @@
+{
+  "name": "biko",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Household expense tracker for Argentina: expenses, cuotas, and bank/wallet promotions",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace @biko/api",
+    "dev:web": "npm run dev --workspace @biko/web",
+    "build": "npm run build --workspace @biko/shared --if-present && npm run build --workspace @biko/api && npm run build --workspace @biko/web",
+    "test": "npm run test --workspaces --if-present",
+    "db:migrate": "npm run db:migrate --workspace @biko/api",
+    "db:seed": "npm run db:seed --workspace @biko/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
