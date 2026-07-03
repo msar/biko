@@ -11,6 +11,7 @@ import LoginPage from './pages/LoginPage';
 import NewExpensePage from './pages/NewExpensePage';
 import PromotionsPage from './pages/PromotionsPage';
 import SettingsPage from './pages/SettingsPage';
+import BrandLogo from './components/BrandLogo';
 
 function OnlineBanner() {
   const [online, setOnline] = useState(navigator.onLine);
@@ -47,7 +48,14 @@ export default function App() {
     });
   }, [user, queryClient]);
 
-  if (loading) return <div className="page-loading">Cargando…</div>;
+  if (loading) {
+    return (
+      <div className="page-loading">
+        <BrandLogo size="md" />
+        <span>Cargando…</span>
+      </div>
+    );
+  }
   if (!user) return <LoginPage />;
 
   const hideNav = location.pathname === '/nuevo' || location.pathname.startsWith('/gastos/');

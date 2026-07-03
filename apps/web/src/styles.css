@@ -43,8 +43,11 @@ body {
 }
 
 .page-loading {
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   min-height: 100dvh;
   color: var(--muted);
 }
@@ -537,17 +540,30 @@ label {
   gap: 10px;
 }
 
-.brand {
-  margin: 0;
-  color: var(--green);
-  font-size: 2.4rem;
-  font-family: Georgia, serif;
-}
-
 .brand-sub {
   margin: 0 0 12px;
   color: var(--muted);
   font-size: 0.9rem;
+  text-align: center;
+}
+
+.brand-logo {
+  display: block;
+  height: auto;
+  object-fit: contain;
+}
+
+.brand-logo-sm {
+  width: 48px;
+}
+
+.brand-logo-md {
+  width: 72px;
+}
+
+.brand-logo-lg {
+  width: 140px;
+  margin: 0 auto 4px;
 }
 
 /* --- new expense --- */

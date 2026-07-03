@@ -7,17 +7,18 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg'],
+      includeAssets: ['logo.png', 'favicon.png', 'pwa-192.png', 'pwa-512.png'],
       manifest: {
         name: 'Biko — Gastos del hogar',
         short_name: 'Biko',
         description: 'Gastos, cuotas y promociones bancarias del hogar',
         lang: 'es-AR',
-        theme_color: '#10683f',
+        theme_color: '#1e305e',
         background_color: '#f6f4ef',
         display: 'standalone',
         start_url: '/',
         icons: [
+          { src: '/favicon.png', sizes: '32x32', type: 'image/png' },
           { src: '/pwa-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/pwa-512.png', sizes: '512x512', type: 'image/png' },
           { src: '/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
