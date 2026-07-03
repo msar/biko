@@ -1,10 +1,16 @@
-import { ARGENTINE_PROVINCES, DISCOUNT_KIND_LABEL, type DiscountKind } from '@biko/shared';
+import { dayOfWeekFromDate, DISCOUNT_KIND_LABEL, type DiscountKind } from '@biko/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FormEvent, useState } from 'react';
-import { api, DAY_LABEL, fmtARS, formatDays } from '../lib/api';
-import { filterPromosByLocation, PromoCard } from '../lib/promo-display';
-import { groupWeeklyPromos, WeeklyPromoGroupCard } from '../lib/weekly-promo-display';
-import { storeDisplayName } from '../lib/store-brands';
+import { FormEvent, useMemo, useState } from 'react';
+import { api, DAY_LABEL } from '../lib/api';
+import { filterPromosByLocation } from '../lib/promo-display';
+import {
+  groupWeeklyPromos,
+  promotionToWeeklyPromo,
+  TodayPromos,
+  WeeklyDayCard,
+  WeeklyPromoGroupCard,
+  type WeeklyPromoGroup,
+} from '../lib/weekly-promo-display';
 import type {
   Category,
   CategorySchedule,
@@ -19,72 +25,20 @@ const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'
 
 const DISCOUNT_KINDS: DiscountKind[] = ['PERCENTAGE_REFUND', 'INSTALLMENTS', 'FIXED_AMOUNT', 'OTHER'];
 
-const WEEKLY_PROMO_CAP = 5;
-
-function WeeklyDayCard({
-  day,
+function WeeklyCalendar({
+  weekly,
+  province,
+  hiddenPromos,
   onHideGroup,
+  onUnhideGroup,
 }: {
-  day: DayRecommendation;
-  onHideGroup: (group: ReturnType<typeof groupWeeklyPromos>[number]) => void;
+  weekly: DayRecommendation[] | undefined;
+  province: string | null | undefined;
+  hiddenPromos: HiddenWeeklyPromo[] | undefined;
+  onHideGroup: (group: WeeklyPromoGroup) => void;
+  onUnhideGroup: (groupKey: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const groups = groupWeeklyPromos(day.promotions);
-  const visible = expanded ? groups : groups.slice(0, WEEKLY_PROMO_CAP);
-  const hiddenCount = groups.length - WEEKLY_PROMO_CAP;
-
-  return (
-    <div className="week-day card">
-      <h3>{DAY_LABEL[day.dayOfWeek]}</h3>
-      {visible.map((group) => (
-        <WeeklyPromoGroupCard key={group.key} group={group} onHide={onHideGroup} />
-      ))}
-      {!expanded && hiddenCount > 0 && (
-        <button type="button" className="btn-link week-promo-more" onClick={() => setExpanded(true)}>
-          Ver {hiddenCount} más
-        </button>
-      )}
-    </div>
-  );
-}
-
-function WeeklyCalendar() {
-  const queryClient = useQueryClient();
   const [showHidden, setShowHidden] = useState(false);
-  const { data: me } = useQuery({
-    queryKey: ['me'],
-    queryFn: () => api<{ household: { province: string | null } }>('/auth/me'),
-  });
-  const { data: weekly } = useQuery({
-    queryKey: ['promotions', 'weekly', me?.household.province],
-    queryFn: () => api<DayRecommendation[]>('/promotions/weekly'),
-  });
-  const { data: hiddenPromos } = useQuery({
-    queryKey: ['promotions', 'weekly', 'hidden'],
-    queryFn: () => api<HiddenWeeklyPromo[]>('/promotions/weekly/hidden'),
-  });
-
-  const hideGroup = useMutation({
-    mutationFn: (group: { key: string; label: string }) =>
-      api<HiddenWeeklyPromo>('/promotions/weekly/hidden', {
-        method: 'POST',
-        body: JSON.stringify({ groupKey: group.key, label: group.label }),
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['promotions', 'weekly'] });
-      void queryClient.invalidateQueries({ queryKey: ['promotions', 'weekly', 'hidden'] });
-    },
-  });
-
-  const unhideGroup = useMutation({
-    mutationFn: (groupKey: string) =>
-      api(`/promotions/weekly/hidden/${encodeURIComponent(groupKey)}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['promotions', 'weekly'] });
-      void queryClient.invalidateQueries({ queryKey: ['promotions', 'weekly', 'hidden'] });
-    },
-  });
-
   const activeDays = weekly?.filter((day) => day.promotions.length > 0) ?? [];
 
   return (
@@ -92,7 +46,7 @@ function WeeklyCalendar() {
       <p className="hint">
         Compras frecuentes del hogar: super, verdulería, combustible, farmacia… Solo promos de tus bancos.
         Cada promo tiene link a MODO para ver condiciones (ej. compra mínima).
-        {me?.household.province && ` Filtrado para ${me.household.province}.`}
+        {province && ` Filtrado para ${province}.`}
       </p>
       {(hiddenPromos?.length ?? 0) > 0 && (
         <div className="week-hidden-bar">
@@ -108,12 +62,7 @@ function WeeklyCalendar() {
             {hiddenPromos.map((item) => (
               <li key={item.groupKey}>
                 <span>{item.label}</span>
-                <button
-                  type="button"
-                  className="btn-link"
-                  onClick={() => unhideGroup.mutate(item.groupKey)}
-                  disabled={unhideGroup.isPending}
-                >
+                <button type="button" className="btn-link" onClick={() => onUnhideGroup(item.groupKey)}>
                   Mostrar
                 </button>
               </li>
@@ -127,17 +76,12 @@ function WeeklyCalendar() {
         </p>
       )}
       {activeDays.map((day) => (
-        <WeeklyDayCard
-          key={day.dayOfWeek}
-          day={day}
-          onHideGroup={(group) => hideGroup.mutate({ key: group.key, label: group.label })}
-        />
+        <WeeklyDayCard key={day.dayOfWeek} day={day} onHideGroup={onHideGroup} />
       ))}
     </div>
   );
 }
 
-// "¿Cuándo ir?": elegís una categoría y te dice qué días conviene comprar.
 function WhenToGo({ categories }: { categories: Category[] }) {
   const [categoryId, setCategoryId] = useState<string | null>(null);
 
@@ -175,20 +119,8 @@ function WhenToGo({ categories }: { categories: Category[] }) {
             <strong>{DAY_LABEL[day.dayOfWeek]}</strong>
             {idx === 0 && <span className="badge-best">Mejor día</span>}
           </div>
-          {day.promotions.map((p) => (
-            <div key={p.promotionId} className="week-promo">
-              <strong>{p.discountPercentage}%</strong> {p.entityName}
-              <small>
-                {storeDisplayName(p.store)}
-                {p.discountCap ? ` · tope ${fmtARS.format(p.discountCap)}` : ''}
-                {p.minPurchaseAmount ? ` · mín. ${fmtARS.format(p.minPurchaseAmount)}` : ''}
-              </small>
-              {p.sourceUrl && (
-                <a className="week-promo-details-link" href={p.sourceUrl} target="_blank" rel="noreferrer">
-                  Ver detalles en MODO
-                </a>
-              )}
-            </div>
+          {groupWeeklyPromos(day.promotions).map((group) => (
+            <WeeklyPromoGroupCard key={group.key} group={group} />
           ))}
         </div>
       ))}
@@ -339,7 +271,7 @@ function SyncModoButton() {
 
 export default function PromotionsPage() {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<'calendar' | 'when' | 'all'>('calendar');
+  const [tab, setTab] = useState<'hoy' | 'calendar' | 'when' | 'all'>('hoy');
   const [showForm, setShowForm] = useState(false);
   const [filterCategory, setFilterCategory] = useState<string | null>(null);
   const [filterEntity, setFilterEntity] = useState<string | null>(null);
@@ -348,10 +280,46 @@ export default function PromotionsPage() {
   const [activeOnly, setActiveOnly] = useState(true);
   const [locationFilter, setLocationFilter] = useState<'household' | 'all'>('household');
 
+  const today = dayOfWeekFromDate(new Date());
+
   const { data: me } = useQuery({
     queryKey: ['me'],
     queryFn: () => api<{ household: { province: string | null } }>('/auth/me'),
   });
+
+  const { data: weekly } = useQuery({
+    queryKey: ['promotions', 'weekly', me?.household.province],
+    queryFn: () => api<DayRecommendation[]>('/promotions/weekly'),
+  });
+
+  const { data: hiddenPromos } = useQuery({
+    queryKey: ['promotions', 'weekly', 'hidden'],
+    queryFn: () => api<HiddenWeeklyPromo[]>('/promotions/weekly/hidden'),
+  });
+
+  const hideGroup = useMutation({
+    mutationFn: (group: { key: string; label: string }) =>
+      api<HiddenWeeklyPromo>('/promotions/weekly/hidden', {
+        method: 'POST',
+        body: JSON.stringify({ groupKey: group.key, label: group.label }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['promotions', 'weekly'] });
+      void queryClient.invalidateQueries({ queryKey: ['promotions', 'weekly', 'hidden'] });
+    },
+  });
+
+  const unhideGroup = useMutation({
+    mutationFn: (groupKey: string) =>
+      api(`/promotions/weekly/hidden/${encodeURIComponent(groupKey)}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['promotions', 'weekly'] });
+      void queryClient.invalidateQueries({ queryKey: ['promotions', 'weekly', 'hidden'] });
+    },
+  });
+
+  const onHideGroup = (group: WeeklyPromoGroup) =>
+    hideGroup.mutate({ key: group.key, label: group.label });
 
   const { data: promotions } = useQuery({
     queryKey: ['promotions'],
@@ -383,6 +351,11 @@ export default function PromotionsPage() {
     locationFilter === 'household' ? (me?.household.province ?? null) : null,
   );
 
+  const catalogGroups = useMemo(
+    () => groupWeeklyPromos(visiblePromos.map(promotionToWeeklyPromo)),
+    [visiblePromos],
+  );
+
   return (
     <div className="page">
       <header className="page-header">
@@ -399,6 +372,9 @@ export default function PromotionsPage() {
       )}
 
       <div className="segmented">
+        <button className={tab === 'hoy' ? 'active' : ''} onClick={() => setTab('hoy')}>
+          Hoy
+        </button>
         <button className={tab === 'calendar' ? 'active' : ''} onClick={() => setTab('calendar')}>
           Mi semana
         </button>
@@ -410,7 +386,17 @@ export default function PromotionsPage() {
         </button>
       </div>
 
-      {tab === 'calendar' && <WeeklyCalendar />}
+      {tab === 'hoy' && <TodayPromos weekly={weekly} today={today} onHideGroup={onHideGroup} />}
+
+      {tab === 'calendar' && (
+        <WeeklyCalendar
+          weekly={weekly}
+          province={me?.household.province}
+          hiddenPromos={hiddenPromos}
+          onHideGroup={onHideGroup}
+          onUnhideGroup={(groupKey) => unhideGroup.mutate(groupKey)}
+        />
+      )}
 
       {tab === 'when' && categories && <WhenToGo categories={categories} />}
 
@@ -511,9 +497,19 @@ export default function PromotionsPage() {
               Solo activas
             </label>
           </div>
-          {visiblePromos?.map((p) => (
-            <PromoCard key={p.id} promo={p} onDeactivate={p.active ? () => deactivate(p.id) : undefined} />
-          ))}
+          {catalogGroups.length > 0 ? (
+            <div className="week-day card">
+              {catalogGroups.map((group) => (
+                <WeeklyPromoGroupCard
+                  key={group.key}
+                  group={group}
+                  onDeactivate={(id) => void deactivate(id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="empty-state">Sin promos que coincidan con los filtros.</p>
+          )}
         </>
       )}
     </div>

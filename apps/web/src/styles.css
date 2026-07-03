@@ -772,89 +772,6 @@ label {
 }
 
 /* --- promos --- */
-.promo-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-}
-
-.promo-card-compact {
-  align-items: center;
-}
-
-.promo-card.inactive {
-  opacity: 0.5;
-}
-
-.promo-logo {
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
-  object-fit: contain;
-  background: var(--cream);
-  flex-shrink: 0;
-  padding: 4px;
-}
-
-.promo-head-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.promo-inline-pct {
-  color: var(--green-dark);
-  margin-right: 6px;
-}
-
-.badge-discount-kind {
-  border-radius: 999px;
-  font-size: 0.6rem;
-  font-weight: 700;
-  padding: 3px 8px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.badge-discount-kind.kind-percentage_refund {
-  background: #e8f2ec;
-  color: var(--green-dark);
-}
-
-.badge-discount-kind.kind-installments {
-  background: #eef0ff;
-  color: #3b4cc0;
-}
-
-.badge-discount-kind.kind-fixed_amount,
-.badge-discount-kind.kind-other {
-  background: var(--cream);
-  color: var(--muted);
-}
-
-.badge-adherents {
-  background: #fff3d6;
-  color: #8a5a00;
-  border-radius: 6px;
-  font-size: 0.6rem;
-  font-weight: 600;
-  padding: 2px 6px;
-  margin-left: 6px;
-}
-
-.promo-store-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.promo-provinces {
-  color: var(--green-dark) !important;
-  font-weight: 600;
-}
-
 .promo-details-toggle {
   align-self: flex-start;
   font-size: 0.8rem;
@@ -870,42 +787,6 @@ label {
 
 .promo-details-list li {
   margin: 2px 0;
-}
-
-.location-hint {
-  margin: 0 0 4px;
-}
-
-.promo-pct {
-  background: var(--green);
-  color: #fff;
-  font-weight: 800;
-  border-radius: 12px;
-  padding: 12px 10px;
-  font-size: 1.05rem;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-width: 56px;
-}
-
-.promo-pct small {
-  font-size: 0.55rem;
-  font-weight: 600;
-  opacity: 0.9;
-}
-
-.promo-body {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}
-
-.promo-body span,
-.promo-body small {
-  color: var(--muted);
-  font-size: 0.8rem;
 }
 
 .promo-form {
@@ -926,33 +807,6 @@ label {
   color: var(--green-dark);
 }
 
-.week-promo {
-  font-size: 0.85rem;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--cream);
-}
-
-.week-promo:last-child {
-  border-bottom: none;
-}
-
-.week-promo small {
-  color: var(--muted);
-  display: block;
-}
-
-.week-promo-compact {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--cream);
-}
-
-.week-promo-compact:last-of-type {
-  border-bottom: none;
-}
-
 .week-promo-logo {
   width: 36px;
   height: 36px;
@@ -967,10 +821,13 @@ label {
   background: var(--green);
   color: #fff;
   font-weight: 800;
-  font-size: 0.75rem;
+  font-size: 0.65rem;
+  line-height: 1.1;
+  text-align: center;
   border-radius: 8px;
   width: 36px;
-  height: 36px;
+  min-height: 36px;
+  padding: 4px 2px;
   display: grid;
   place-items: center;
   flex-shrink: 0;
@@ -989,15 +846,15 @@ label {
   font-size: 0.75rem;
 }
 
-.week-promo-inline-pct {
-  color: var(--green-dark);
-  margin-right: 4px;
-}
-
 .week-promo-more {
   align-self: flex-start;
   font-size: 0.8rem;
   padding: 4px 0 0;
+}
+
+.week-promo-group.inactive,
+.week-promo-variant.inactive {
+  opacity: 0.5;
 }
 
 .week-promo-group {
@@ -1137,11 +994,6 @@ label {
   text-decoration: underline;
 }
 
-.week-promo .week-promo-details-link {
-  display: inline-block;
-  margin-top: 4px;
-}
-
 /* --- promo recomendada (alta de gasto) --- */
 .reco-card {
   background: linear-gradient(135deg, #e8f2ec, #f6f4ef);
@@ -1221,18 +1073,6 @@ label {
   font-size: 0.65rem;
   font-weight: 700;
   padding: 3px 10px;
-}
-
-.badge-scraped {
-  background: var(--cream);
-  color: var(--muted);
-  border-radius: 6px;
-  font-size: 0.6rem;
-  font-weight: 600;
-  padding: 2px 6px;
-  margin-left: 6px;
-  text-transform: uppercase;
-  vertical-align: middle;
 }
 
 .sync-row {

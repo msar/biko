@@ -6,7 +6,6 @@ import { startOutboxSync } from './lib/outbox';
 import DashboardPage from './pages/DashboardPage';
 import EditExpensePage from './pages/EditExpensePage';
 import ExpensesPage from './pages/ExpensesPage';
-import HoyPage from './pages/HoyPage';
 import LoginPage from './pages/LoginPage';
 import NewExpensePage from './pages/NewExpensePage';
 import PromotionsPage from './pages/PromotionsPage';
@@ -56,7 +55,7 @@ export default function App() {
           <Route path="/gastos/:id/edit" element={<EditExpensePage />} />
           <Route path="/gastos" element={<ExpensesPage />} />
           <Route path="/promos" element={<PromotionsPage />} />
-          <Route path="/hoy" element={<HoyPage />} />
+          <Route path="/hoy" element={<Navigate to="/promos" replace />} />
           <Route path="/ajustes" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -71,9 +70,6 @@ export default function App() {
           </NavLink>
           <NavLink to="/nuevo" className="nav-add">
             <span className="nav-add-circle">+</span>
-          </NavLink>
-          <NavLink to="/hoy">
-            <span className="nav-icon">⭐</span>Hoy
           </NavLink>
           <NavLink to="/promos">
             <span className="nav-icon">📅</span>Promos
