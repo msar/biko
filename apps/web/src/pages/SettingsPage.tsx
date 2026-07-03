@@ -1,5 +1,6 @@
 import { ARGENTINE_PROVINCES } from '@biko/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { useState } from 'react';
 import { AddPaymentMethodsWizard, EditPaymentMethodForm } from '../components/PaymentMethodForm';
 import { api } from '../lib/api';
@@ -94,6 +95,16 @@ export default function SettingsPage() {
           Cerrar sesión
         </button>
       </section>
+
+      {user?.isSuperUser && (
+        <section className="card">
+          <h2>Administración</h2>
+          <p className="hint">Herramientas de mantenimiento del catálogo de promociones.</p>
+          <Link to="/admin" className="btn-link">
+            Sincronización de promos →
+          </Link>
+        </section>
+      )}
 
       <section className="card">
         <div className="row-between">

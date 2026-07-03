@@ -244,8 +244,10 @@ export default async function promotionRoutes(app: FastifyInstance) {
     });
   });
 
-  // Scraping de promos MODO (manual; en Railway se dispara con un cron diario).
-  app.post('/promotions/sync/modo', { preHandler: [app.authenticate] }, async (request, reply) => {
+  // Scraping de promos (solo super usuario; en Railway también corre por cron).
+  const superUserOnly = [app.authenticate, app.requireSuperUser];
+
+  app.post('/promotions/sync/modo', { preHandler: superUserOnly }, async (request, reply) => {
     const fresh = z.object({ fresh: z.coerce.boolean().optional() }).parse(request.query).fresh ?? false;
     try {
       const result = await syncModoPromotions(app.prisma, app.log, { fresh });
@@ -256,7 +258,7 @@ export default async function promotionRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/promotions/sync/mercadopago', { preHandler: [app.authenticate] }, async (request, reply) => {
+  app.post('/promotions/sync/mercadopago', { preHandler: superUserOnly }, async (request, reply) => {
     const fresh = z.object({ fresh: z.coerce.boolean().optional() }).parse(request.query).fresh ?? false;
     try {
       const result = await syncMercadoPagoPromotions(app.prisma, app.log, { fresh });
@@ -267,7 +269,7 @@ export default async function promotionRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/promotions/sync/naranjax', { preHandler: [app.authenticate] }, async (request, reply) => {
+  app.post('/promotions/sync/naranjax', { preHandler: superUserOnly }, async (request, reply) => {
     const fresh = z.object({ fresh: z.coerce.boolean().optional() }).parse(request.query).fresh ?? false;
     try {
       const result = await syncNaranjaXPromotions(app.prisma, app.log, { fresh });
@@ -278,7 +280,7 @@ export default async function promotionRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/promotions/sync/status', { preHandler: [app.authenticate] }, async () => {
+  app.get('/promotions/sync/status', { preHandler: superUserOnly }, async () => {
     const rows = await app.prisma.promotionSync.findMany();
     return rows;
   });

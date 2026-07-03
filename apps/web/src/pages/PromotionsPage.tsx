@@ -18,7 +18,6 @@ import type {
   Entity,
   HiddenWeeklyPromo,
   Promotion,
-  PromotionSyncStatus,
 } from '../lib/types';
 
 const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'] as const;
@@ -72,7 +71,7 @@ function WeeklyCalendar({
       )}
       {activeDays.length === 0 && (
         <p className="empty-state">
-          Sin promos de compras frecuentes para tus bancos. Agregá tus tarjetas en Ajustes o sincronizá MODO.
+          Sin promos de compras frecuentes para tus bancos. Agregá tus tarjetas en Ajustes.
         </p>
       )}
       {activeDays.map((day) => (
@@ -109,7 +108,7 @@ function WhenToGo({ categories }: { categories: Category[] }) {
 
       {categoryId && schedule && schedule.days.length === 0 && !isLoading && (
         <p className="empty-state">
-          Sin promos de {schedule.category.name} para tus medios de pago. Probá sincronizar MODO o cargá una promo.
+          Sin promos de {schedule.category.name} para tus medios de pago. Probá cargar una promo manualmente.
         </p>
       )}
 
@@ -234,68 +233,6 @@ function PromoForm({
   );
 }
 
-function SyncPromoSourceButton({
-  source,
-  label,
-  endpoint,
-}: {
-  source: string;
-  label: string;
-  endpoint: string;
-}) {
-  const queryClient = useQueryClient();
-  const { data: statuses } = useQuery({
-    queryKey: ['promotions', 'sync-status'],
-    queryFn: () => api<PromotionSyncStatus[]>('/promotions/sync/status'),
-  });
-  const status = statuses?.find((s) => s.source === source);
-
-  const sync = useMutation({
-    mutationFn: () =>
-      api<{ imported: number; updated: number; deactivated: number; cleared?: number }>(
-        `${endpoint}?fresh=1`,
-        { method: 'POST' },
-      ),
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ['promotions'] });
-      void queryClient.invalidateQueries({ queryKey: ['promotions', 'sync-status'] });
-    },
-  });
-
-  return (
-    <div className="sync-row">
-      <button className="btn-link" onClick={() => sync.mutate()} disabled={sync.isPending}>
-        {sync.isPending ? 'Sincronizando…' : `↻ Sincronizar ${label}`}
-      </button>
-      <small className="hint">
-        {sync.isError && `Falló el sync (el sitio de ${label} pudo haber cambiado). `}
-        {sync.isSuccess &&
-          `Listo: ${sync.data.cleared != null ? `${sync.data.cleared} borradas, ` : ''}${sync.data.imported} nuevas, ${sync.data.updated} actualizadas, ${sync.data.deactivated} dadas de baja. `}
-        {status?.lastRunAt && `Último sync: ${new Date(status.lastRunAt).toLocaleString('es-AR')}`}
-        {status?.lastError && ` · último error: ${status.lastError}`}
-      </small>
-    </div>
-  );
-}
-
-function PromoSyncButtons() {
-  return (
-    <>
-      <SyncPromoSourceButton source="MODO" label="MODO" endpoint="/promotions/sync/modo" />
-      <SyncPromoSourceButton
-        source="MERCADOPAGO"
-        label="Mercado Pago"
-        endpoint="/promotions/sync/mercadopago"
-      />
-      <SyncPromoSourceButton
-        source="NARANJA_X"
-        label="Naranja X"
-        endpoint="/promotions/sync/naranjax"
-      />
-    </>
-  );
-}
-
 export default function PromotionsPage() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<'hoy' | 'calendar' | 'when' | 'all'>('hoy');
@@ -391,8 +328,6 @@ export default function PromotionsPage() {
           {showForm ? '✕' : '＋'}
         </button>
       </header>
-
-      <PromoSyncButtons />
 
       {showForm && entities && categories && (
         <PromoForm entities={entities} categories={categories} onDone={() => setShowForm(false)} />

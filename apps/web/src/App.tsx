@@ -3,6 +3,7 @@ import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './lib/auth';
 import { startOutboxSync } from './lib/outbox';
+import AdminPage from './pages/AdminPage';
 import DashboardPage from './pages/DashboardPage';
 import EditExpensePage from './pages/EditExpensePage';
 import ExpensesPage from './pages/ExpensesPage';
@@ -25,6 +26,12 @@ function OnlineBanner() {
   }, []);
   if (online) return null;
   return <div className="offline-banner">Sin conexión — los gastos se guardan y sincronizan después</div>;
+}
+
+function AdminRoute() {
+  const { user } = useAuth();
+  if (!user?.isSuperUser) return <Navigate to="/" replace />;
+  return <AdminPage />;
 }
 
 export default function App() {
@@ -57,6 +64,7 @@ export default function App() {
           <Route path="/promos" element={<PromotionsPage />} />
           <Route path="/hoy" element={<Navigate to="/promos" replace />} />
           <Route path="/ajustes" element={<SettingsPage />} />
+          <Route path="/admin" element={<AdminRoute />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

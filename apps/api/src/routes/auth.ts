@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { ARGENTINE_PROVINCES } from '@biko/shared';
+import { ARGENTINE_PROVINCES, isSuperUser } from '@biko/shared';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
@@ -50,7 +50,16 @@ export default async function authRoutes(app: FastifyInstance) {
     });
 
     const token = app.jwt.sign({ userId: user.id, householdId, email: user.email });
-    return reply.code(201).send({ token, user: { id: user.id, name: user.name, email: user.email, householdId } });
+    return reply.code(201).send({
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        householdId,
+        isSuperUser: isSuperUser(user.email),
+      },
+    });
   });
 
   app.post('/auth/login', async (request, reply) => {
@@ -61,7 +70,16 @@ export default async function authRoutes(app: FastifyInstance) {
       return reply.code(401).send({ error: 'Email o contraseña incorrectos' });
     }
     const token = app.jwt.sign({ userId: user.id, householdId: user.householdId, email: user.email });
-    return { token, user: { id: user.id, name: user.name, email: user.email, householdId: user.householdId } };
+    return {
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        householdId: user.householdId,
+        isSuperUser: isSuperUser(user.email),
+      },
+    };
   });
 
   app.get('/auth/me', { preHandler: [app.authenticate] }, async (request) => {
@@ -83,6 +101,7 @@ export default async function authRoutes(app: FastifyInstance) {
       id: user.id,
       name: user.name,
       email: user.email,
+      isSuperUser: isSuperUser(user.email),
       household: {
         id: user.household.id,
         name: user.household.name,

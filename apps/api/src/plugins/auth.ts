@@ -1,3 +1,4 @@
+import { isSuperUser } from '@biko/shared';
 import jwt from '@fastify/jwt';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
@@ -18,6 +19,7 @@ declare module '@fastify/jwt' {
 declare module 'fastify' {
   interface FastifyInstance {
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    requireSuperUser: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }
 
@@ -32,6 +34,12 @@ export default fp(async (app: FastifyInstance) => {
       await request.jwtVerify();
     } catch {
       reply.code(401).send({ error: 'No autorizado' });
+    }
+  });
+
+  app.decorate('requireSuperUser', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!isSuperUser(request.user.email)) {
+      reply.code(403).send({ error: 'Acceso denegado' });
     }
   });
 });

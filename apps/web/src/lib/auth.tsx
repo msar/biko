@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
+import { isSuperUser } from '@biko/shared';
 import { api, getToken, onUnauthorized, setToken } from './api';
 import type { SessionUser } from './types';
 
@@ -55,9 +56,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    api<{ id: string; name: string; email: string; household: { id: string } }>('/auth/me')
+    api<{ id: string; name: string; email: string; isSuperUser: boolean; household: { id: string } }>('/auth/me')
       .then((me) => {
-        const session = { id: me.id, name: me.name, email: me.email, householdId: me.household.id };
+        const session = {
+          id: me.id,
+          name: me.name,
+          email: me.email,
+          householdId: me.household.id,
+          isSuperUser: me.isSuperUser ?? isSuperUser(me.email),
+        };
         setUser(session);
         localStorage.setItem(USER_KEY, JSON.stringify(session));
       })

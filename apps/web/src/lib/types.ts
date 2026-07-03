@@ -5,6 +5,7 @@ export interface SessionUser {
   name: string;
   email: string;
   householdId: string;
+  isSuperUser?: boolean;
 }
 
 export interface HouseholdMember {
