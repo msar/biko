@@ -317,6 +317,33 @@ describe('findCandidatePromotions', () => {
     expect(candidates.map((c) => c.promotion.id)).toEqual(['cordoba-supers']);
   });
 
+  it('matches regional adherents promos regardless of expense category (Carnave as pollería)', () => {
+    const candidates = findCandidatePromotions({
+      promotions: [
+        promo({
+          id: 'cordoba-supers',
+          entityId: 'ent-modo',
+          entityName: 'MODO',
+          store: 'Supermercados de Córdoba',
+          discountPercentage: 20,
+          daysOfWeek: [DayOfWeek.FRIDAY],
+          categoryIds: ['cat-super'],
+          provinces: ['Córdoba'],
+          storesAdherents: true,
+          sponsorBanks: ['Santander'],
+          notes: '20% de reintegro en Supermercados de Córdoba',
+        }),
+      ],
+      paymentMethod: santanderVisa,
+      date: new Date('2026-07-03T12:00:00'),
+      store: 'Carnave',
+      grossAmount: 10000,
+      categoryId: 'cat-poll',
+      householdProvince: 'Córdoba',
+    });
+    expect(candidates.map((c) => c.promotion.id)).toEqual(['cordoba-supers']);
+  });
+
   it('does not match regional group promo in wrong province', () => {
     const candidates = findCandidatePromotions({
       promotions: [

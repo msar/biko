@@ -49,22 +49,35 @@ export function storesMatch(promoStore: string, userStore: string): boolean {
   return userTokens.some((t) => promoTokens.some((p) => p.includes(t) || t.includes(p)));
 }
 
-function regionalGroupMatchesStore(
+/**
+ * Promo regional con locales adheridos cuando el usuario ingresa un comercio concreto
+ * (ej. Carnave en "Supermercados de Córdoba"). No exige rubro del gasto: adherentes
+ * incluyen pollerías y otros rubros además de supermercados.
+ */
+function regionalGroupStoreContextMatches(
   promo: PromotionInput,
-  store: string,
-  categoryId: string | null,
+  store: string | null,
   householdProvince: string | null,
 ): boolean {
   if (!isRegionalGroupPromo(promo)) return false;
+  if (!store || normalizeStoreName(store).length < 3) return false;
   if (!householdProvince || !promotionMatchesProvince(promo.provinces ?? [], householdProvince)) return false;
-  if (categoryId && promo.categoryIds.length > 0 && !promotionMatchesCategory(promo, categoryId)) return false;
-  return normalizeStoreName(store).length >= 3;
+  return true;
+}
+
+function promotionMatchesCategoryForPurchase(
+  promo: PromotionInput,
+  categoryId: string | null,
+  store: string | null,
+  householdProvince: string | null,
+): boolean {
+  if (promotionMatchesCategory(promo, categoryId)) return true;
+  return regionalGroupStoreContextMatches(promo, store, householdProvince);
 }
 
 function promotionMatchesStore(
   promo: PromotionInput,
   store: string | null,
-  categoryId: string | null,
   householdProvince: string | null,
 ): boolean {
   if (store == null || store.trim() === '') {
@@ -73,7 +86,7 @@ function promotionMatchesStore(
 
   if (promo.store != null && storesMatch(promo.store, store)) return true;
 
-  if (regionalGroupMatchesStore(promo, store, categoryId, householdProvince)) return true;
+  if (regionalGroupStoreContextMatches(promo, store, householdProvince)) return true;
 
   return false;
 }
@@ -103,12 +116,12 @@ export function findCandidatePromotions(params: {
   return promotions
     .filter((promo) => isPromotionActiveOn(promo, date))
     .filter((promo) => promotionMatchesDay(promo, day))
-    .filter((promo) => promotionMatchesCategory(promo, categoryId))
+    .filter((promo) => promotionMatchesCategoryForPurchase(promo, categoryId, store, householdProvince))
     .filter((promo) => promotionMatchesProvince(promo.provinces ?? [], householdProvince))
     .filter((promo) => promo.discountKind !== 'INSTALLMENTS' && promo.discountPercentage > 0)
     .filter((promo) => !isEmployeeOnlyPromo(promo))
     .filter((promo) => promotionMatchesHouseholdPaymentMethod(paymentMethod, promo))
-    .filter((promo) => promotionMatchesStore(promo, store, categoryId, householdProvince))
+    .filter((promo) => promotionMatchesStore(promo, store, householdProvince))
     .filter((promo) => {
       if (promo.minPurchaseAmount == null || grossAmount == null) return true;
       return grossAmount >= promo.minPurchaseAmount;
