@@ -1,7 +1,9 @@
 import { getCategorySchedule, getWeeklyRecommendations, householdHasMatchingPaymentMethod, filterHiddenWeeklyGroups, WEEKLY_ESSENTIAL_CATEGORY_NAMES } from '@biko/shared';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { syncMercadoPagoPromotions } from '../services/mercadopago-scraper.js';
 import { syncModoPromotions } from '../services/modo-scraper.js';
+import { syncNaranjaXPromotions } from '../services/naranjax-scraper.js';
 import {
   PROMOTION_INCLUDE,
   suggestForExpense,
@@ -251,6 +253,28 @@ export default async function promotionRoutes(app: FastifyInstance) {
     } catch (err) {
       app.log.error(err, 'MODO sync failed');
       return reply.code(502).send({ error: 'No se pudo sincronizar con MODO' });
+    }
+  });
+
+  app.post('/promotions/sync/mercadopago', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const fresh = z.object({ fresh: z.coerce.boolean().optional() }).parse(request.query).fresh ?? false;
+    try {
+      const result = await syncMercadoPagoPromotions(app.prisma, app.log, { fresh });
+      return result;
+    } catch (err) {
+      app.log.error(err, 'Mercado Pago sync failed');
+      return reply.code(502).send({ error: 'No se pudo sincronizar con Mercado Pago' });
+    }
+  });
+
+  app.post('/promotions/sync/naranjax', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const fresh = z.object({ fresh: z.coerce.boolean().optional() }).parse(request.query).fresh ?? false;
+    try {
+      const result = await syncNaranjaXPromotions(app.prisma, app.log, { fresh });
+      return result;
+    } catch (err) {
+      app.log.error(err, 'Naranja X sync failed');
+      return reply.code(502).send({ error: 'No se pudo sincronizar con Naranja X' });
     }
   });
 

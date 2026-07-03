@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure Biko on Railway (Postgres + api + web + modo-sync).
+# Configure Biko on Railway (Postgres + api + web + modo-sync + mercadopago-sync).
 # Requires: railway CLI logged in, repo linked to project.
 set -euo pipefail
 
@@ -35,6 +35,7 @@ ensure_service() {
 ensure_service "api"
 ensure_service "web"
 ensure_service "modo-sync"
+ensure_service "mercadopago-sync"
 
 # Remove legacy single-service deploy if present
 if railway service list --json | python3 -c "import json,sys; names={s['name'] for s in json.load(sys.stdin)}; sys.exit(0 if 'biko' in names else 1)"; then
@@ -68,6 +69,14 @@ railway variable set \
   'DATABASE_URL=${{Postgres.DATABASE_URL}}' \
   'RAILPACK_BUILD_CMD=npm install && npx prisma generate --schema apps/api/prisma/schema.prisma' \
   'RAILPACK_START_CMD=npm run sync:modo --workspace @biko/api' \
+  --skip-deploys --json >/dev/null
+
+echo "Setting mercadopago-sync variables..."
+railway variable set \
+  --service mercadopago-sync \
+  'DATABASE_URL=${{Postgres.DATABASE_URL}}' \
+  'RAILPACK_BUILD_CMD=npm install && npx prisma generate --schema apps/api/prisma/schema.prisma' \
+  'RAILPACK_START_CMD=npm run sync:mercadopago --workspace @biko/api' \
   --skip-deploys --json >/dev/null
 
 echo "Generating public domains..."
@@ -110,6 +119,13 @@ if "modo-sync" in services:
     s["deploy"]["cronSchedule"] = "0 9 * * *"
     s["deploy"]["restartPolicyType"] = "NEVER"
 
+if "mercadopago-sync" in services:
+    s = svc(services["mercadopago-sync"])
+    s.setdefault("build", {})["buildCommand"] = "npm install && npx prisma generate --schema apps/api/prisma/schema.prisma"
+    s.setdefault("deploy", {})["startCommand"] = "npm run sync:mercadopago --workspace @biko/api"
+    s["deploy"]["cronSchedule"] = "0 10 * * *"
+    s["deploy"]["restartPolicyType"] = "NEVER"
+
 print(json.dumps(cfg))
 PY
 
@@ -118,6 +134,7 @@ echo "Deploying services..."
 railway up --service api --detach --message "Deploy api"
 railway up --service web --detach --message "Deploy web"
 railway up --service modo-sync --detach --message "Deploy modo-sync"
+railway up --service mercadopago-sync --detach --message "Deploy mercadopago-sync"
 
 echo ""
 echo "Done. Check status: railway service list --json"
