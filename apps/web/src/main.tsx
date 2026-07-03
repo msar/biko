@@ -11,7 +11,25 @@ import { AuthProvider } from './lib/auth';
 import { ApiError } from './lib/api';
 import './styles.css';
 
-registerSW({ immediate: true });
+// Reload once when a waiting service worker takes control (after deploy).
+let swRefreshing = false;
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (swRefreshing) return;
+    swRefreshing = true;
+    window.location.reload();
+  });
+}
+
+registerSW({
+  immediate: true,
+  onRegisteredSW(_url, registration) {
+    if (registration) {
+      // Check for updates periodically while the app is open (common on mobile PWAs).
+      window.setInterval(() => void registration.update(), 60_000);
+    }
+  },
+});
 
 const queryClient = new QueryClient({
   defaultOptions: {
