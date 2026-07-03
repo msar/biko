@@ -222,6 +222,13 @@ function parsePlanDiscount(binder: NxBinder, plan: NxPlan) {
   return parseDiscountFromText([titleRaw, binder.subtitle ?? '']);
 }
 
+/** Solo importamos beneficios con descuento/reintegro; las cuotas sin interés se omiten. */
+export function isNxDiscountBenefit(parsed: { kind: string; percentage: number | null }): boolean {
+  if (parsed.kind === 'INSTALLMENTS') return false;
+  if (parsed.kind === 'PERCENTAGE_REFUND') return (parsed.percentage ?? 0) > 0;
+  return true;
+}
+
 function formatNxSpecificDates(daysApplied: string[]): string | null {
   if (daysApplied.length === 0) return null;
   const formatted = daysApplied.map((raw) => {
@@ -282,7 +289,7 @@ export function normalizeBinderPlan(binder: NxBinder, plan: NxPlan, now = new Da
   if (!binderId || !titleRaw) return null;
 
   const parsedDiscount = parsePlanDiscount(binder, plan);
-  if (!parsedDiscount) return null;
+  if (!parsedDiscount || !isNxDiscountBenefit(parsedDiscount)) return null;
 
   const validFrom = parseNxDate(plan.days?.dateFrom, 'from');
   const validTo = parseNxDate(plan.days?.dateTo, 'to');
@@ -304,7 +311,10 @@ export function normalizeBinderPlan(binder: NxBinder, plan: NxPlan, now = new Da
   }
 
   const discountLabel = parsedDiscount.label;
-  const displayTitle = buildPromoNotes(titleRaw, store, discountLabel);
+  const displayTitle =
+    parsedDiscount.kind === 'PERCENTAGE_REFUND' || parsedDiscount.kind === 'FIXED_AMOUNT'
+      ? buildPromoNotes(parsedDiscount.label, store, parsedDiscount.label)
+      : buildPromoNotes(titleRaw, store, discountLabel);
 
   return {
     externalId: planExternalId(binderId, plan),
@@ -364,7 +374,7 @@ export function normalizeFeatured(card: NxFeatured, now = new Date()): ScrapedPr
   if (!externalId || !titleRaw || !isFeaturedPromoLink(sourceUrl)) return null;
 
   const parsedDiscount = parseDiscountFromText([titleRaw, card.validity ?? '']);
-  if (!parsedDiscount) return null;
+  if (!parsedDiscount || !isNxDiscountBenefit(parsedDiscount)) return null;
 
   const validFrom = parseNxDate(card.dateFrom ?? null, 'from');
   const validTo = parseNxDate(card.dateTo ?? null, 'to');

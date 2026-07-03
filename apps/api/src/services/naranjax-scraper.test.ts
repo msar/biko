@@ -3,6 +3,7 @@ import {
   buildNaranjaXSourceUrl,
   currentNxPlans,
   isNaranjaXPromoActive,
+  isNxDiscountBenefit,
   mapNxCategory,
   normalizeBinder,
   normalizeBinderPromos,
@@ -185,18 +186,42 @@ describe('normalizeBinderPromos', () => {
   it('splits combined binders so 30% stays on Wednesdays only', () => {
     const now = new Date('2026-07-03T12:00:00Z');
     const promos = normalizeBinderPromos(farmacityBinder, now);
-    const refund = promos.find((promo) => promo.discountKind === 'PERCENTAGE_REFUND');
-    const installments = promos.find((promo) => promo.discountKind === 'INSTALLMENTS');
 
-    expect(refund).toMatchObject({
+    expect(promos).toHaveLength(1);
+    expect(promos[0]).toMatchObject({
       store: 'Farmacity',
       discountPercentage: 30,
       daysOfWeek: ['WEDNESDAY'],
       sourceUrl: farmacityBinder.fullUrl,
     });
-    expect(refund?.details.some((d) => d.startsWith('El '))).toBe(true);
-    expect(installments?.discountKind).toBe('INSTALLMENTS');
-    expect(installments?.daysOfWeek).toEqual([]);
+    expect(promos[0]?.details.some((d) => d.startsWith('El '))).toBe(true);
+  });
+
+  it('skips installment-only plans', () => {
+    const promos = normalizeBinderPromos({
+      id: 'plan-z-only',
+      commerceName: 'Farmacity',
+      title: 'Plan Zeta cero interés',
+      fullUrl: 'https://www.naranjax.com/promociones/SALUD_Y_BIENESTAR/FARMACIAS/farmacity_comercio',
+      plans: [
+        {
+          status: 'CURRENT',
+          days: {
+            dateFrom: '01/07/2026',
+            dateTo: '30/09/2026',
+            weekdaysApplied: [1, 2, 3, 4, 5, 6, 7],
+          },
+        },
+      ],
+    });
+    expect(promos).toHaveLength(0);
+  });
+});
+
+describe('isNxDiscountBenefit', () => {
+  it('rejects pure installment benefits', () => {
+    expect(isNxDiscountBenefit({ kind: 'INSTALLMENTS', percentage: null })).toBe(false);
+    expect(isNxDiscountBenefit({ kind: 'PERCENTAGE_REFUND', percentage: 30 })).toBe(true);
   });
 });
 
