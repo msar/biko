@@ -14,6 +14,14 @@ export interface HouseholdMember {
 
 export type ExpenseScope = 'HOUSEHOLD' | 'PERSONAL';
 
+export type PromotionApplyMode = 'auto' | 'manual' | 'off';
+
+export interface ManualDiscount {
+  label?: string | null;
+  discountPercentage: number;
+  discountCap?: number | null;
+}
+
 export interface Entity {
   id: string;
   name: string;
@@ -138,6 +146,9 @@ export interface Purchase {
   purchaseDate: string;
   grossAmount: string;
   discountAmount: string;
+  discountPercentageApplied: string | null;
+  discountCapApplied: string | null;
+  discountLabelApplied: string | null;
   netAmount: string;
   installmentsCount: number;
   scope: ExpenseScope;

@@ -15,9 +15,87 @@ import type {
   HouseholdMember,
   PaymentMethod,
   Promotion,
+  PromotionApplyMode,
   Purchase,
   Suggestion,
 } from '../lib/types';
+
+function promotionOptionLabel(p: Promotion, categories: Category[] | undefined): string {
+  const pct = Number(p.discountPercentage);
+  const store = p.store ? ` · ${p.store}` : '';
+  const cap = p.discountCap ? ` · tope ${fmtARS.format(Number(p.discountCap))}` : '';
+  const catNames = p.categoryIds
+    .map((id) => categories?.find((c) => c.id === id)?.name)
+    .filter(Boolean);
+  const cats = catNames.length ? ` · ${catNames.join(', ')}` : '';
+  return `${pct}% ${p.entity.name}${store}${cap}${cats}`;
+}
+
+function resolvePromotionStateFromPurchase(purchase: Purchase): {
+  promotionMode: PromotionApplyMode;
+  manualSource: 'existing' | 'custom';
+  promotionId: string | null;
+  manualLabel: string;
+  manualPct: string;
+  manualCap: string;
+} {
+  const hasDiscount = Number(purchase.discountAmount) > 0;
+
+  if (!hasDiscount && !purchase.promotion) {
+    return {
+      promotionMode: 'off',
+      manualSource: 'custom',
+      promotionId: null,
+      manualLabel: '',
+      manualPct: '',
+      manualCap: '',
+    };
+  }
+
+  if (purchase.discountLabelApplied && purchase.promotion?.id) {
+    return {
+      promotionMode: 'manual',
+      manualSource: 'existing',
+      promotionId: purchase.promotion.id,
+      manualLabel: '',
+      manualPct: '',
+      manualCap: '',
+    };
+  }
+
+  if (purchase.discountLabelApplied || (!purchase.promotion && hasDiscount)) {
+    return {
+      promotionMode: 'manual',
+      manualSource: 'custom',
+      promotionId: null,
+      manualLabel: purchase.discountLabelApplied ?? '',
+      manualPct: purchase.discountPercentageApplied
+        ? String(Number(purchase.discountPercentageApplied))
+        : '',
+      manualCap: purchase.discountCapApplied ? String(Number(purchase.discountCapApplied)) : '',
+    };
+  }
+
+  if (purchase.promotion?.id && !purchase.discountLabelApplied) {
+    return {
+      promotionMode: 'auto',
+      manualSource: 'existing',
+      promotionId: purchase.promotion.id,
+      manualLabel: '',
+      manualPct: '',
+      manualCap: '',
+    };
+  }
+
+  return {
+    promotionMode: 'auto',
+    manualSource: 'custom',
+    promotionId: null,
+    manualLabel: '',
+    manualPct: '',
+    manualCap: '',
+  };
+}
 
 function todayISO(): string {
   const d = new Date();
@@ -44,13 +122,19 @@ export interface ExpenseFormInitial {
   store: string;
   date: string;
   installments: number;
-  applyPromotion: boolean;
+  promotionMode: PromotionApplyMode;
+  manualSource: 'existing' | 'custom';
+  promotionId: string | null;
+  manualLabel: string;
+  manualPct: string;
+  manualCap: string;
   scope: ExpenseScope;
   splitMode: 'equal' | 'custom';
   myShare: string;
 }
 
 function initialFromPurchase(purchase: Purchase, userId: string): ExpenseFormInitial {
+  const promoState = resolvePromotionStateFromPurchase(purchase);
   const myAllocation = purchase.allocations.find((a) => a.userId === userId);
   const netAmount = Number(purchase.netAmount);
   const memberCount = purchase.allocations.length;
@@ -67,7 +151,7 @@ function initialFromPurchase(purchase: Purchase, userId: string): ExpenseFormIni
     store: purchase.store,
     date: purchaseDateToISO(purchase.purchaseDate),
     installments: purchase.installmentsCount,
-    applyPromotion: Number(purchase.discountAmount) > 0 || Boolean(purchase.promotion),
+    ...promoState,
     scope: purchase.scope,
     splitMode: purchase.scope === 'PERSONAL' || isEqual ? 'equal' : 'custom',
     myShare: String(Math.round(myAmount)),
@@ -92,7 +176,12 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
   const [store, setStore] = useState(initial?.store ?? '');
   const [date, setDate] = useState(initial?.date ?? todayISO());
   const [installments, setInstallments] = useState(initial?.installments ?? 1);
-  const [applyPromotion, setApplyPromotion] = useState(initial?.applyPromotion ?? true);
+  const [promotionMode, setPromotionMode] = useState<PromotionApplyMode>(initial?.promotionMode ?? 'auto');
+  const [manualSource, setManualSource] = useState<'existing' | 'custom'>(initial?.manualSource ?? 'custom');
+  const [selectedPromotionId, setSelectedPromotionId] = useState<string | null>(initial?.promotionId ?? null);
+  const [manualLabel, setManualLabel] = useState(initial?.manualLabel ?? '');
+  const [manualPct, setManualPct] = useState(initial?.manualPct ?? '');
+  const [manualCap, setManualCap] = useState(initial?.manualCap ?? '');
   const [scope, setScope] = useState<ExpenseScope>(initial?.scope ?? 'HOUSEHOLD');
   const [splitMode, setSplitMode] = useState<'equal' | 'custom'>(initial?.splitMode ?? 'equal');
   const [myShare, setMyShare] = useState(initial?.myShare ?? '');
@@ -146,26 +235,28 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
   const debouncedStore = useDebounced(store, 400);
   const debouncedAmount = useDebounced(grossAmount, 400);
 
+  const autoPromotion = promotionMode === 'auto';
+
   const { data: expenseSuggestion } = useQuery({
-    queryKey: ['suggest-expense', categoryId, debouncedStore, date, debouncedAmount, applyPromotion],
+    queryKey: ['suggest-expense', categoryId, debouncedStore, date, debouncedAmount, promotionMode],
     queryFn: () =>
       api<ExpenseSuggestionResult>(
         `/promotions/suggest-expense?date=${date}T12:00:00${categoryId ? `&categoryId=${categoryId}` : ''}${debouncedStore ? `&store=${encodeURIComponent(debouncedStore)}` : ''}${debouncedAmount ? `&amount=${debouncedAmount}` : ''}`,
       ),
-    enabled: Boolean(applyPromotion && navigator.onLine && (categoryId || debouncedStore)),
+    enabled: Boolean(autoPromotion && navigator.onLine && (categoryId || debouncedStore)),
   });
 
   const { data: serverSuggestion } = useQuery({
-    queryKey: ['suggest', paymentMethodId, categoryId, debouncedStore, date, debouncedAmount, applyPromotion],
+    queryKey: ['suggest', paymentMethodId, categoryId, debouncedStore, date, debouncedAmount, promotionMode],
     queryFn: () =>
       api<{ suggestion: Suggestion | null }>(
         `/promotions/suggest?paymentMethodId=${paymentMethodId}&date=${date}T12:00:00${categoryId ? `&categoryId=${categoryId}` : ''}${debouncedStore ? `&store=${encodeURIComponent(debouncedStore)}` : ''}${debouncedAmount ? `&amount=${debouncedAmount}` : ''}`,
       ),
-    enabled: Boolean(paymentMethodId && applyPromotion && navigator.onLine),
+    enabled: Boolean(paymentMethodId && autoPromotion && navigator.onLine),
   });
 
   const offlineSuggestion = useMemo(() => {
-    if (!applyPromotion || navigator.onLine || !selectedMethod || !promotions) return null;
+    if (!autoPromotion || navigator.onLine || !selectedMethod || !promotions) return null;
     const def = selectedMethod.definition;
     if (!def.entityId) return null;
     const candidates = findCandidatePromotions({
@@ -204,7 +295,39 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
       ? calculateDiscount(grossAmount, first.promotion.discountPercentage, first.promotion.discountCap)
       : null;
     return { promotion: first.promotion, estimatedDiscount: est?.discountAmount ?? null };
-  }, [applyPromotion, selectedMethod, promotions, date, store, grossAmount, categoryId]);
+  }, [autoPromotion, selectedMethod, promotions, date, store, grossAmount, categoryId]);
+
+  const selectedManualPromo = promotions?.find((p) => p.id === selectedPromotionId) ?? null;
+
+  const manualDiscountPreview = useMemo(() => {
+    if (promotionMode !== 'manual' || !grossAmount) return null;
+    if (manualSource === 'existing' && selectedManualPromo) {
+      return calculateDiscount(
+        grossAmount,
+        Number(selectedManualPromo.discountPercentage),
+        selectedManualPromo.discountCap ? Number(selectedManualPromo.discountCap) : null,
+      );
+    }
+    if (manualSource === 'custom') {
+      const pct = Number(manualPct);
+      if (!pct || pct <= 0) return null;
+      const cap = manualCap ? Number(manualCap) : null;
+      return calculateDiscount(grossAmount, pct, cap);
+    }
+    return null;
+  }, [promotionMode, grossAmount, manualSource, selectedManualPromo, manualPct, manualCap]);
+
+  const selectablePromos = useMemo(() => {
+    if (!promotions) return [];
+    return promotions
+      .filter((p) => p.active && Number(p.discountPercentage) > 0 && p.discountKind !== 'INSTALLMENTS')
+      .sort((a, b) => {
+        const aMatch = categoryId && a.categoryIds.includes(categoryId) ? 1 : 0;
+        const bMatch = categoryId && b.categoryIds.includes(categoryId) ? 1 : 0;
+        if (aMatch !== bMatch) return bMatch - aMatch;
+        return a.entity.name.localeCompare(b.entity.name);
+      });
+  }, [promotions, categoryId]);
 
   const suggestion = serverSuggestion?.suggestion ?? null;
   const best = expenseSuggestion?.best ?? null;
@@ -212,6 +335,8 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
 
   const estimatedNet = useMemo(() => {
     if (!grossAmount) return 0;
+    if (promotionMode === 'manual' && manualDiscountPreview) return manualDiscountPreview.netAmount;
+    if (promotionMode !== 'auto') return grossAmount;
     if (suggestion?.estimatedNet != null) return suggestion.estimatedNet;
     if (best?.suggestion.estimatedNet != null && paymentMethodId === best.paymentMethodId) {
       return best.suggestion.estimatedNet;
@@ -220,7 +345,7 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
       return grossAmount - offlineSuggestion.estimatedDiscount;
     }
     return grossAmount;
-  }, [grossAmount, suggestion, best, paymentMethodId, offlineSuggestion]);
+  }, [grossAmount, promotionMode, manualDiscountPreview, suggestion, best, paymentMethodId, offlineSuggestion]);
 
   const equalShare = members.length > 0 ? estimatedNet / members.length : estimatedNet;
   const myShareAmount = splitMode === 'custom' && scope === 'HOUSEHOLD' ? Number(myShare) || 0 : equalShare;
@@ -243,9 +368,20 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
       purchaseDate: `${date}T12:00:00`,
       grossAmount,
       installmentsCount: installments,
-      applyPromotion,
+      promotionMode,
       scope,
     };
+    if (promotionMode === 'manual') {
+      if (manualSource === 'existing' && selectedPromotionId) {
+        payload.promotionId = selectedPromotionId;
+      } else if (manualSource === 'custom') {
+        payload.manualDiscount = {
+          label: manualLabel.trim() || null,
+          discountPercentage: Number(manualPct),
+          discountCap: manualCap ? Number(manualCap) : null,
+        };
+      }
+    }
     if (scope === 'HOUSEHOLD' && splitMode === 'custom' && myShareAmount > 0) {
       payload.myShareAmount = myShareAmount;
     }
@@ -299,12 +435,18 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
     onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo guardar'),
   });
 
+  const manualPromoValid =
+    promotionMode !== 'manual' ||
+    (manualSource === 'existing' && Boolean(selectedPromotionId)) ||
+    (manualSource === 'custom' && Number(manualPct) > 0 && Number(manualPct) <= 100);
+
   const canSave =
     grossAmount > 0 &&
     categoryId &&
     paymentMethodId &&
     store.trim() &&
     !mutation.isPending &&
+    manualPromoValid &&
     (scope !== 'HOUSEHOLD' || splitMode !== 'custom' || (myShareAmount > 0 && myShareAmount <= estimatedNet));
 
   if (savedOffline) {
@@ -463,7 +605,7 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
         </section>
       )}
 
-      {applyPromotion && best && (
+      {autoPromotion && best && (
         <ExpenseSuggestionPromo
           paymentMethodName={best.paymentMethodName}
           suggestion={best.suggestion}
@@ -472,12 +614,12 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
           onUsePaymentMethod={() => setPaymentMethodId(best.paymentMethodId)}
         />
       )}
-      {applyPromotion && store.trim() && !best && !suggestion && navigator.onLine && debouncedStore && (
+      {autoPromotion && store.trim() && !best && !suggestion && navigator.onLine && debouncedStore && (
         <div className="promo-banner promo-banner-offline">
-          No hay promo activa hoy para {store.trim()}. Revisá el calendario en Promos.
+          No hay promo activa hoy para {store.trim()}. Revisá el calendario en Promos o ingresá una manual.
         </div>
       )}
-      {applyPromotion && paymentMethodId && best && paymentMethodId !== best.paymentMethodId && !suggestion && (
+      {autoPromotion && paymentMethodId && best && paymentMethodId !== best.paymentMethodId && !suggestion && (
         <div className="promo-banner promo-banner-offline">
           Con {selectedMethod?.nickname ?? selectedMethod?.definition.name} no aplica ninguna promo — con{' '}
           {best.paymentMethodName} ahorrarías{' '}
@@ -486,30 +628,123 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
             : suggestionBenefitText(best.suggestion.promotion)}
         </div>
       )}
-      {applyPromotion && suggestion && !best && (
+      {autoPromotion && suggestion && !best && (
         <div className="promo-banner">
           ✨ Aplica {suggestionBenefitText(suggestion.promotion)}
           {suggestion.estimatedDiscount != null && <> — ahorrás {fmtARS.format(suggestion.estimatedDiscount)}</>}
         </div>
       )}
-      {applyPromotion && suggestion && best && paymentMethodId !== best.paymentMethodId && (
+      {autoPromotion && suggestion && best && paymentMethodId !== best.paymentMethodId && (
         <div className="promo-banner promo-banner-offline">
           Con esta tarjeta aplica {suggestionBenefitText(suggestion.promotion)}
           {suggestion.estimatedDiscount != null && <> (ahorrás {fmtARS.format(suggestion.estimatedDiscount)})</>} — menos
           que la recomendada
         </div>
       )}
-      {applyPromotion && offline && offlineSuggestion && (
+      {autoPromotion && offline && offlineSuggestion && (
         <div className="promo-banner promo-banner-offline">
           ✨ Podría aplicar {offlineSuggestion.promotion.discountPercentage}% {offlineSuggestion.promotion.entityName}
           {offlineSuggestion.estimatedDiscount != null && <> (~{fmtARS.format(offlineSuggestion.estimatedDiscount)})</>}
           <small> — se confirma al sincronizar</small>
         </div>
       )}
-      <label className="toggle-row">
-        <input type="checkbox" checked={applyPromotion} onChange={(e) => setApplyPromotion(e.target.checked)} />
-        Aplicar promoción automáticamente
-      </label>
+
+      <section>
+        <h2 className="field-label">Promoción</h2>
+        <div className="segmented">
+          <button type="button" className={promotionMode === 'auto' ? 'active' : ''} onClick={() => setPromotionMode('auto')}>
+            Automática
+          </button>
+          <button type="button" className={promotionMode === 'manual' ? 'active' : ''} onClick={() => setPromotionMode('manual')}>
+            Manual
+          </button>
+          <button type="button" className={promotionMode === 'off' ? 'active' : ''} onClick={() => setPromotionMode('off')}>
+            Sin promo
+          </button>
+        </div>
+
+        {promotionMode === 'manual' && (
+          <div className="manual-promo-fields">
+            <div className="segmented">
+              <button
+                type="button"
+                className={manualSource === 'existing' ? 'active' : ''}
+                onClick={() => setManualSource('existing')}
+              >
+                Promo existente
+              </button>
+              <button
+                type="button"
+                className={manualSource === 'custom' ? 'active' : ''}
+                onClick={() => setManualSource('custom')}
+              >
+                Ingresar descuento
+              </button>
+            </div>
+
+            {manualSource === 'existing' ? (
+              <label>
+                Promoción
+                <select
+                  value={selectedPromotionId ?? ''}
+                  onChange={(e) => setSelectedPromotionId(e.target.value || null)}
+                >
+                  <option value="">Elegí una promoción…</option>
+                  {selectablePromos.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {promotionOptionLabel(p, categories)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <>
+                <label>
+                  Etiqueta (opcional)
+                  <input
+                    value={manualLabel}
+                    onChange={(e) => setManualLabel(e.target.value)}
+                    placeholder="App YPF, Combustible…"
+                  />
+                </label>
+                <div className="field-row">
+                  <label>
+                    Descuento %
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      inputMode="decimal"
+                      value={manualPct}
+                      onChange={(e) => setManualPct(e.target.value)}
+                      placeholder="10"
+                    />
+                  </label>
+                  <label>
+                    Tope $
+                    <input
+                      type="number"
+                      min="0"
+                      inputMode="decimal"
+                      value={manualCap}
+                      onChange={(e) => setManualCap(e.target.value)}
+                      placeholder="4000"
+                    />
+                  </label>
+                </div>
+                <p className="hint">El tope es el máximo de descuento aplicable (mensual o por compra).</p>
+              </>
+            )}
+
+            {manualDiscountPreview && manualDiscountPreview.discountAmount > 0 && (
+              <div className="promo-banner">
+                ✨ Descuento estimado: {fmtARS.format(manualDiscountPreview.discountAmount)} — pagás{' '}
+                {fmtARS.format(manualDiscountPreview.netAmount)}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
 
       {error && <p className="error">{error}</p>}
 

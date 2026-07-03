@@ -298,6 +298,7 @@ model Purchase {
   promotion                 Promotion? @relation(fields: [promotionId], references: [id])
   discountPercentageApplied Decimal?  @db.Decimal(5, 2) // 25.00 (copiado al momento de la compra)
   discountCapApplied        Decimal?  @db.Decimal(12, 2) // tope restante disponible al momento de la compra
+  discountLabelApplied      String?   // etiqueta manual (ej. "App YPF") cuando no hay promotionId
 
   discountAmount Decimal   @db.Decimal(12, 2) @default(0) // 20.000 → resultado ya con tope aplicado
   netAmount      Decimal   @db.Decimal(12, 2) // grossAmount - discountAmount = 80.000 (lo efectivamente pagado/financiado)

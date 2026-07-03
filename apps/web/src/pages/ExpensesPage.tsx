@@ -116,7 +116,8 @@ export default function ExpensesPage() {
               {badge && <small className="expense-badge">{badge}</small>}
               {Number(exp.discountAmount) > 0 && (
                 <small className="savings-tag">
-                  ✨ {exp.promotion?.entity.name}: −{fmtARS.format(Number(exp.discountAmount))}
+                  ✨ {exp.discountLabelApplied ?? exp.promotion?.entity.name ?? 'Descuento'}: −
+                  {fmtARS.format(Number(exp.discountAmount))}
                 </small>
               )}
             </div>

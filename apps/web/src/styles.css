@@ -410,6 +410,31 @@ label {
   font-weight: 600;
 }
 
+.manual-promo-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.manual-promo-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.manual-promo-fields select,
+.manual-promo-fields input {
+  font-size: 1rem;
+  padding: 10px 12px;
+  border: 1px solid #ddd8cc;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--ink);
+}
+
 .error {
   color: var(--red);
   font-size: 0.85rem;

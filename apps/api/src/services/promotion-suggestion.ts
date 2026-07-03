@@ -184,6 +184,50 @@ export async function suggestPromotion(
   return null;
 }
 
+/** Aplica una promo concreta (selección manual), respetando tope mensual. */
+export async function applyPromotionById(
+  db: Db,
+  params: {
+    householdId: string;
+    date: Date;
+    grossAmount: number;
+    promotionId: string;
+  },
+): Promise<Suggestion | null> {
+  const promo = await db.promotion.findFirst({
+    where: { id: params.promotionId, active: true },
+    include: PROMOTION_INCLUDE,
+  });
+  if (!promo) return null;
+
+  const pct = promo.discountPercentage.toNumber();
+  const yearMonth = yearMonthOf(params.date);
+
+  if (promo.discountCap == null) {
+    const est = calculateDiscount(params.grossAmount, pct, null);
+    return {
+      promotion: toPromotionInput(promo),
+      remainingCap: null,
+      yearMonth,
+      estimatedDiscount: est.discountAmount,
+      estimatedNet: est.netAmount,
+    };
+  }
+
+  const used = await getUsedAmount(db, params.householdId, promo.entityId, yearMonth);
+  const remainingCap = Math.max(promo.discountCap.toNumber() - used, 0);
+  if (remainingCap <= 0) return null;
+
+  const est = calculateDiscount(params.grossAmount, pct, remainingCap);
+  return {
+    promotion: toPromotionInput(promo),
+    remainingCap,
+    yearMonth,
+    estimatedDiscount: est.discountAmount,
+    estimatedNet: est.netAmount,
+  };
+}
+
 export interface ExpenseSuggestion {
   paymentMethodId: string;
   paymentMethodName: string;

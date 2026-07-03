@@ -9,8 +9,13 @@ import {
   updatePurchaseWithAllocations,
 } from '../services/expense-purchase.js';
 
-const expenseBodySchema = z.object({
-  clientId: z.string().min(8).optional(),
+const manualDiscountSchema = z.object({
+  label: z.string().max(120).nullish(),
+  discountPercentage: z.number().positive().max(100),
+  discountCap: z.number().positive().nullish(),
+});
+
+const expenseFieldsSchema = z.object({
   paymentMethodId: z.string(),
   categoryId: z.string(),
   store: z.string().min(1),
@@ -18,12 +23,40 @@ const expenseBodySchema = z.object({
   purchaseDate: z.coerce.date(),
   grossAmount: z.number().positive(),
   installmentsCount: z.number().int().min(1).max(36).default(1),
-  applyPromotion: z.boolean().default(true),
+  applyPromotion: z.boolean().optional(),
+  promotionMode: z.enum(['auto', 'manual', 'off']).optional(),
+  promotionId: z.string().optional(),
+  manualDiscount: manualDiscountSchema.optional(),
   scope: z.enum(['HOUSEHOLD', 'PERSONAL']).default('HOUSEHOLD'),
   myShareAmount: z.number().positive().optional(),
 });
 
-const updateExpenseSchema = expenseBodySchema.omit({ clientId: true });
+function validatePromotionMode(
+  data: z.infer<typeof expenseFieldsSchema>,
+  ctx: z.RefinementCtx,
+): void {
+  const mode = data.promotionMode ?? (data.applyPromotion === false ? 'off' : 'auto');
+  if (mode === 'manual' && !data.promotionId && !data.manualDiscount) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Indicá una promoción o un descuento manual',
+      path: ['promotionMode'],
+    });
+  }
+  if (mode === 'manual' && data.promotionId && data.manualDiscount) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Elegí promo existente o descuento custom, no ambos',
+      path: ['promotionMode'],
+    });
+  }
+}
+
+const expenseBodySchema = expenseFieldsSchema
+  .extend({ clientId: z.string().min(8).optional() })
+  .superRefine(validatePromotionMode);
+
+const updateExpenseSchema = expenseFieldsSchema.superRefine(validatePromotionMode);
 
 const listQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
