@@ -118,6 +118,12 @@ async function main() {
         await upsertDefinition({
           entityName: entity.name,
           type: 'CREDIT_CARD',
+          network: 'VISA',
+          name: 'Naranja X Visa (crédito)',
+        });
+        await upsertDefinition({
+          entityName: entity.name,
+          type: 'CREDIT_CARD',
           network: 'MASTERCARD',
           name: 'Naranja X Mastercard (crédito)',
         });

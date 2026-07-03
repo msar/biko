@@ -3,10 +3,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useState } from 'react';
 import { api } from '../lib/api';
 import {
-  CREDIT_NETWORKS,
   NETWORK_LABEL,
   alreadyAddedDefinitionIds,
   creditDefinitionFor,
+  creditNetworksForEntity,
+  issuerHasCreditCards,
   listIssuerEntities,
   walletDefinitionFor,
 } from '../lib/payment-method-catalog';
@@ -40,13 +41,16 @@ export function AddPaymentMethodsWizard({
   const [savingWalletId, setSavingWalletId] = useState<string | null>(null);
 
   const selectedIssuer = issuers.find((i) => i.entityId === selectedEntityId);
-  const isBank = selectedIssuer?.kind === 'BANK';
+  const showCreditFlow = selectedEntityId != null && issuerHasCreditCards(selectedEntityId, definitions);
+  const availableCreditNetworks = selectedEntityId
+    ? creditNetworksForEntity(selectedEntityId, definitions)
+    : [];
 
   const toggleNetwork = (network: CardNetwork) => {
     setNetworks((prev) => (prev.includes(network) ? prev.filter((n) => n !== network) : [...prev, network]));
   };
 
-  const addWallet = async (entityId: string) => {
+  const addWallet = async (entityId: string, closeOnSuccess = true) => {
     const def = walletDefinitionFor(entityId, definitions);
     if (!def) {
       setError('No se encontró la billetera en el catálogo');
@@ -64,7 +68,7 @@ export function AddPaymentMethodsWizard({
         body: JSON.stringify({ definitionId: def.id }),
       });
       void queryClient.invalidateQueries({ queryKey: ['payment-methods'] });
-      onDone();
+      if (closeOnSuccess) onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al agregar');
     } finally {
@@ -72,7 +76,7 @@ export function AddPaymentMethodsWizard({
     }
   };
 
-  const onSubmitBank = async (e: FormEvent) => {
+  const onSubmitCreditCards = async (e: FormEvent) => {
     e.preventDefault();
     if (!selectedEntityId || networks.length === 0) return;
     if (!closingDay || !dueDay) {
@@ -111,7 +115,7 @@ export function AddPaymentMethodsWizard({
     }
   };
 
-  if (!selectedEntityId || !isBank) {
+  if (!showCreditFlow) {
     return (
       <div className="card promo-form payment-method-wizard">
         <div className="row-between">
@@ -142,18 +146,37 @@ export function AddPaymentMethodsWizard({
             <span className="field-label">Billeteras</span>
             <div className="issuer-grid">
               {wallets.map((wallet) => {
+                const hasCards = issuerHasCreditCards(wallet.entityId, definitions);
                 const def = walletDefinitionFor(wallet.entityId, definitions);
-                const already = def ? addedIds.has(def.id) : false;
+                const walletAlready = def ? addedIds.has(def.id) : false;
+                const allCardsAdded =
+                  hasCards &&
+                  creditNetworksForEntity(wallet.entityId, definitions).every((network) => {
+                    const cardDef = creditDefinitionFor(wallet.entityId, network, definitions);
+                    return !cardDef || addedIds.has(cardDef.id);
+                  });
+                const disabled =
+                  savingWalletId === wallet.entityId ||
+                  (!hasCards && walletAlready) ||
+                  (hasCards && allCardsAdded && walletAlready);
                 return (
                   <button
                     key={wallet.entityId}
                     type="button"
                     className="method-chip"
-                    disabled={already || savingWalletId === wallet.entityId}
-                    onClick={() => void addWallet(wallet.entityId)}
+                    disabled={disabled}
+                    onClick={() => {
+                      if (hasCards) {
+                        setSelectedEntityId(wallet.entityId);
+                        setNetworks([]);
+                        setError(null);
+                      } else {
+                        void addWallet(wallet.entityId);
+                      }
+                    }}
                   >
                     {wallet.entityName}
-                    {already ? ' ✓' : savingWalletId === wallet.entityId ? ' …' : ''}
+                    {disabled && !savingWalletId ? ' ✓' : savingWalletId === wallet.entityId ? ' …' : ''}
                   </button>
                 );
               })}
@@ -166,7 +189,7 @@ export function AddPaymentMethodsWizard({
   }
 
   return (
-    <form className="card promo-form payment-method-wizard" onSubmit={onSubmitBank}>
+    <form className="card promo-form payment-method-wizard" onSubmit={onSubmitCreditCards}>
       <div className="row-between">
         <h2>{selectedIssuer?.entityName}</h2>
         <button type="button" className="icon-btn" onClick={() => setSelectedEntityId(null)} aria-label="Volver">
@@ -175,8 +198,8 @@ export function AddPaymentMethodsWizard({
       </div>
       <span className="field-label">Tarjetas de crédito que tenés</span>
       <div className="network-checkboxes">
-        {CREDIT_NETWORKS.map((network) => {
-          const def = creditDefinitionFor(selectedEntityId, network, definitions);
+        {availableCreditNetworks.map((network) => {
+          const def = creditDefinitionFor(selectedEntityId!, network, definitions);
           const already = def ? addedIds.has(def.id) : true;
           return (
             <label key={network} className={`network-check ${already ? 'disabled' : ''}`}>
@@ -192,6 +215,17 @@ export function AddPaymentMethodsWizard({
           );
         })}
       </div>
+      {selectedIssuer?.kind === 'WALLET' && (() => {
+        const walletDef = walletDefinitionFor(selectedEntityId!, definitions);
+        if (!walletDef || addedIds.has(walletDef.id)) return null;
+        return (
+          <p className="hint">
+            <button type="button" className="btn-link" onClick={() => void addWallet(selectedEntityId!, false)}>
+              Agregar también cuenta {selectedIssuer.entityName} (app)
+            </button>
+          </p>
+        );
+      })()}
       {networks.length > 0 && (
         <div className="field-row">
           <label>

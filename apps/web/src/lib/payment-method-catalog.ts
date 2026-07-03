@@ -34,6 +34,22 @@ export function creditDefinitionFor(
   );
 }
 
+export function creditNetworksForEntity(
+  entityId: string,
+  definitions: PaymentMethodDefinition[],
+): CardNetwork[] {
+  const available = new Set(
+    definitions
+      .filter((d) => d.entityId === entityId && d.type === 'CREDIT_CARD')
+      .map((d) => d.network),
+  );
+  return CREDIT_NETWORKS.filter((n) => available.has(n));
+}
+
+export function issuerHasCreditCards(entityId: string, definitions: PaymentMethodDefinition[]): boolean {
+  return creditNetworksForEntity(entityId, definitions).length > 0;
+}
+
 export function walletDefinitionFor(
   entityId: string,
   definitions: PaymentMethodDefinition[],
