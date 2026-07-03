@@ -41,6 +41,18 @@ const NX_CATEGORY_MAP: Record<string, string> = {
   HOGAR_Y_DECO: 'Hogar',
 };
 
+const NX_WEEKDAY_LABELS: Record<number, string> = {
+  1: 'Los lunes',
+  2: 'Los martes',
+  3: 'Los miércoles',
+  4: 'Los jueves',
+  5: 'Los viernes',
+  6: 'Los sábados',
+  7: 'Los domingos',
+};
+
+const NX_MONTH_LABELS = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+
 const NX_DAY_MAP: Record<number, string> = {
   1: 'MONDAY',
   2: 'TUESDAY',
@@ -60,6 +72,8 @@ interface NxPlan {
     dateTo?: string;
     datesDescription?: string;
     weekdaysApplied?: number[];
+    daysApplied?: string[];
+    type?: number;
   };
   captureMethods?: Array<{ key?: string; extra?: { name?: string } }>;
   promotionDetails?: { appliesOnline?: boolean };
@@ -162,29 +176,78 @@ export function isNaranjaXPromoActive(validFrom: string | null, validTo: string 
   return true;
 }
 
-function collectBinderDateRange(plans: NxPlan[]): { validFrom: string | null; validTo: string | null } {
-  let validFrom: string | null = null;
-  let validTo: string | null = null;
-
-  for (const plan of plans) {
-    const from = parseNxDate(plan.days?.dateFrom, 'from');
-    const to = parseNxDate(plan.days?.dateTo, 'to');
-    if (from && (!validFrom || new Date(from) < new Date(validFrom))) validFrom = from;
-    if (to && (!validTo || new Date(to) > new Date(validTo))) validTo = to;
-  }
-
-  return { validFrom, validTo };
+export function planScheduleKey(plan: NxPlan): string {
+  const weekdays = [...(plan.days?.weekdaysApplied ?? [])].sort((a, b) => a - b).join('');
+  const from = plan.days?.dateFrom ?? '';
+  const to = plan.days?.dateTo ?? '';
+  const applied = [...(plan.days?.daysApplied ?? [])].sort().join(',');
+  return `${plan.days?.type ?? 0}|${weekdays}|${from}|${to}|${applied}`;
 }
 
-function collectBinderDays(plans: NxPlan[]): string[] {
-  const dayIds = new Set<number>();
+export function uniquePlansBySchedule(plans: NxPlan[]): NxPlan[] {
+  const seen = new Map<string, NxPlan>();
   for (const plan of plans) {
-    for (const id of plan.days?.weekdaysApplied ?? []) dayIds.add(id);
+    const key = planScheduleKey(plan);
+    if (!seen.has(key)) seen.set(key, plan);
   }
-  return parseNxDaysOfWeek([...dayIds]);
+  return [...seen.values()];
 }
 
-function extractBinderDetails(binder: NxBinder, plans: NxPlan[]): string[] {
+function planExternalId(binderId: string, plan: NxPlan): string {
+  const key = planScheduleKey(plan);
+  let hash = 0;
+  for (const char of key) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  return `${binderId}:${Math.abs(hash).toString(36)}`;
+}
+
+function isRestrictivePlanSchedule(plan: NxPlan): boolean {
+  if ((plan.days?.daysApplied?.length ?? 0) > 0) return true;
+  const weekdays = plan.days?.weekdaysApplied ?? [];
+  return weekdays.length > 0 && weekdays.length < 7;
+}
+
+function parsePlanDiscount(binder: NxBinder, plan: NxPlan) {
+  const titleRaw = binder.title?.trim() ?? '';
+  if (isRestrictivePlanSchedule(plan)) {
+    return parseDiscountFromText([titleRaw, binder.subtitle ?? '']);
+  }
+
+  const installmentMatch = titleRaw.match(/(\d+\s+cuotas?\s+cero\s+inter[eé]s|plan\s+z(?:eta)?\s+cero\s+inter[eé]s)/i);
+  if (installmentMatch) {
+    const parsed = parseDiscountFromText([installmentMatch[0]!]);
+    if (parsed) return parsed;
+    return { kind: 'INSTALLMENTS' as const, label: 'Plan Z cero interés', percentage: null };
+  }
+
+  return parseDiscountFromText([titleRaw, binder.subtitle ?? '']);
+}
+
+function formatNxSpecificDates(daysApplied: string[]): string | null {
+  if (daysApplied.length === 0) return null;
+  const formatted = daysApplied.map((raw) => {
+    const match = raw.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!match) return raw;
+    const month = NX_MONTH_LABELS[Number(match[2]) - 1] ?? match[2];
+    return `${Number(match[1])}/${month}`;
+  });
+  return `El ${formatted.join(', ')}`;
+}
+
+function formatPlanDaysLabel(plan: NxPlan): string | null {
+  const specific = formatNxSpecificDates(plan.days?.daysApplied ?? []);
+  if (specific) return specific;
+
+  const weekdays = plan.days?.weekdaysApplied ?? [];
+  if (weekdays.length > 0 && weekdays.length < 7) {
+    return weekdays
+      .map((id) => NX_WEEKDAY_LABELS[id])
+      .filter(Boolean)
+      .join(', ');
+  }
+  return null;
+}
+
+function extractPlanDetails(binder: NxBinder, plan: NxPlan): string[] {
   const details: string[] = [];
 
   if (binder.subtitle?.trim()) details.push(binder.subtitle.trim());
@@ -192,40 +255,37 @@ function extractBinderDetails(binder: NxBinder, plans: NxPlan[]): string[] {
   for (const tag of binder.tags ?? []) {
     const text = tag.description?.trim();
     if (!text) continue;
-    if (tag.type === 'refund' || tag.type === 'accreditation' || tag.type === 'days') {
-      details.push(text);
-    }
+    if (tag.type === 'refund' || tag.type === 'accreditation') details.push(text);
   }
 
-  const tiers = new Set<string>();
-  for (const plan of plans) {
-    const tier = plan.ephemeris?.description?.trim();
-    if (tier) tiers.add(tier);
-    const dates = plan.days?.datesDescription?.trim();
-    if (dates) details.push(dates);
-    if (plan.promotionDetails?.appliesOnline) details.push('Compra online');
-    for (const capture of plan.captureMethods ?? []) {
-      if (capture.key === 'app') details.push(`App ${capture.extra?.name ?? binder.commerceName ?? ''}`.trim());
-    }
+  const daysLabel = formatPlanDaysLabel(plan);
+  if (daysLabel) details.push(daysLabel);
+
+  const dates = plan.days?.datesDescription?.trim();
+  if (dates) details.push(dates);
+
+  const tier = plan.ephemeris?.description?.trim();
+  if (tier) details.push(tier);
+
+  if (plan.promotionDetails?.appliesOnline) details.push('Compra online');
+  for (const capture of plan.captureMethods ?? []) {
+    if (capture.key === 'app') details.push(`App ${capture.extra?.name ?? binder.commerceName ?? ''}`.trim());
   }
-  for (const tier of tiers) details.push(tier);
 
   return [...new Set(details.filter(Boolean))];
 }
 
-export function normalizeBinder(binder: NxBinder, now = new Date()): ScrapedPromo | null {
-  const externalId = binder.id?.trim();
+export function normalizeBinderPlan(binder: NxBinder, plan: NxPlan, now = new Date()): ScrapedPromo | null {
+  const binderId = binder.id?.trim();
   const store = binder.commerceName?.trim() || null;
   const titleRaw = binder.title?.trim();
-  if (!externalId || !titleRaw) return null;
+  if (!binderId || !titleRaw) return null;
 
-  const plans = currentNxPlans(binder.plans);
-  if (plans.length === 0) return null;
-
-  const parsedDiscount = parseDiscountFromText([titleRaw, binder.subtitle ?? '']);
+  const parsedDiscount = parsePlanDiscount(binder, plan);
   if (!parsedDiscount) return null;
 
-  const { validFrom, validTo } = collectBinderDateRange(plans);
+  const validFrom = parseNxDate(plan.days?.dateFrom, 'from');
+  const validTo = parseNxDate(plan.days?.dateTo, 'to');
   if (!isNaranjaXPromoActive(validFrom, validTo, now)) return null;
 
   const sourceUrl = buildNaranjaXSourceUrl(binder.fullUrl, binder.url);
@@ -237,7 +297,7 @@ export function normalizeBinder(binder: NxBinder, now = new Date()): ScrapedProm
     parsePercentage(binder.subtitle ?? '') ??
     0;
 
-  const details = extractBinderDetails(binder, plans);
+  const details = extractPlanDetails(binder, plan);
   const minPurchaseAmount = parseMinPurchaseAmount([titleRaw, binder.subtitle ?? '', ...details]);
   if (minPurchaseAmount != null) {
     details.push(`Compra mínima ${minPurchaseAmount.toLocaleString('es-AR')}`);
@@ -245,10 +305,9 @@ export function normalizeBinder(binder: NxBinder, now = new Date()): ScrapedProm
 
   const discountLabel = parsedDiscount.label;
   const displayTitle = buildPromoNotes(titleRaw, store, discountLabel);
-  const appliesOnline = plans.some((plan) => plan.promotionDetails?.appliesOnline);
 
   return {
-    externalId,
+    externalId: planExternalId(binderId, plan),
     title: displayTitle,
     store,
     categoryName: mapNxCategory(binder.category?.key),
@@ -258,7 +317,7 @@ export function normalizeBinder(binder: NxBinder, now = new Date()): ScrapedProm
     discountPercentage: pct,
     discountCap: parseNxDiscountCap(binder.tags),
     minPurchaseAmount,
-    daysOfWeek: collectBinderDays(plans),
+    daysOfWeek: parseNxDaysOfWeek(plan.days?.weekdaysApplied),
     validFrom,
     validTo,
     sourceUrl,
@@ -271,8 +330,24 @@ export function normalizeBinder(binder: NxBinder, now = new Date()): ScrapedProm
       tags: binder.category?.name,
     }),
     storesAdherents: false,
-    paymentFlow: appliesOnline ? 'online' : null,
+    paymentFlow: plan.promotionDetails?.appliesOnline ? 'online' : null,
   };
+}
+
+/** Un binder puede tener varios planes (ej. 30% miércoles + Plan Z todos los días). */
+export function normalizeBinderPromos(binder: NxBinder, now = new Date()): ScrapedPromo[] {
+  const plans = uniquePlansBySchedule(currentNxPlans(binder.plans));
+  const promos: ScrapedPromo[] = [];
+  for (const plan of plans) {
+    const promo = normalizeBinderPlan(binder, plan, now);
+    if (promo) promos.push(promo);
+  }
+  return promos;
+}
+
+export function normalizeBinder(binder: NxBinder, now = new Date()): ScrapedPromo | null {
+  const promos = normalizeBinderPromos(binder, now);
+  return promos.find((promo) => promo.discountKind !== 'INSTALLMENTS') ?? promos[0] ?? null;
 }
 
 function isFeaturedPromoLink(link: string | null | undefined): boolean {
@@ -365,8 +440,9 @@ export async function fetchNaranjaXPromos(log: FastifyBaseLogger): Promise<Scrap
     if (binders.length === 0) break;
 
     for (const binder of binders) {
-      const promo = normalizeBinder(binder);
-      if (promo && !byId.has(promo.externalId)) byId.set(promo.externalId, promo);
+      for (const promo of normalizeBinderPromos(binder)) {
+        if (!byId.has(promo.externalId)) byId.set(promo.externalId, promo);
+      }
     }
 
     const itemsInPage = json.info?.itemsInPage ?? binders.length;

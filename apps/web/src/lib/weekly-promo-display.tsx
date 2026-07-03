@@ -1,6 +1,7 @@
 import { formatPromotionBenefit, weeklyPromoGroupKey, type DayOfWeek } from '@biko/shared';
 import { useState } from 'react';
 import { DAY_LABEL, fmtARS } from './api';
+import { promoDetailsLinkLabel } from './promo-source-label';
 import { resolveStoreLogo, storeDisplayName } from './store-brands';
 import type { DayRecommendation, Promotion } from './types';
 
@@ -130,7 +131,7 @@ export function WeeklyPromoVariant({
       </div>
       {promo.sourceUrl ? (
         <a className="week-promo-details-link" href={promo.sourceUrl} target="_blank" rel="noreferrer">
-          Ver detalles en MODO
+          {promoDetailsLinkLabel(promo.sourceUrl)}
         </a>
       ) : null}
     </div>

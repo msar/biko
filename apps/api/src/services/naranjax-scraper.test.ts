@@ -5,6 +5,7 @@ import {
   isNaranjaXPromoActive,
   mapNxCategory,
   normalizeBinder,
+  normalizeBinderPromos,
   normalizeFeatured,
   parseNxDate,
   parseNxDaysOfWeek,
@@ -124,7 +125,6 @@ describe('normalizeBinder', () => {
     const now = new Date('2026-07-03T12:00:00Z');
     const promo = normalizeBinder(pedidosYaBinder, now);
     expect(promo).toMatchObject({
-      externalId: pedidosYaBinder.id,
       store: 'Pedidos Ya',
       categoryName: 'Restaurante',
       discountPercentage: 25,
@@ -140,6 +140,63 @@ describe('normalizeBinder', () => {
   it('returns null when no CURRENT plans remain', () => {
     const promo = normalizeBinder({ ...pedidosYaBinder, plans: [{ status: 'EXPIRED' }] });
     expect(promo).toBeNull();
+  });
+});
+
+const farmacityBinder = {
+  id: '8bd71d82-e040-4753-92bb-0d3cf83e16ff',
+  commerceName: 'Farmacity',
+  title: '30% off y Plan Zeta cero interés',
+  subtitle: 'En Farmacity, ingresá y encontrá más beneficios.',
+  fullUrl: 'https://www.naranjax.com/promociones/SALUD_Y_BIENESTAR/FARMACIAS/farmacity_comercio',
+  category: { key: 'SALUD_Y_BIENESTAR', name: 'Salud y bienestar' },
+  tags: [
+    { type: 'refund', description: '$ 6.000, por transacción' },
+    { type: 'days', description: 'Días seleccionados' },
+  ],
+  plans: [
+    {
+      status: 'CURRENT',
+      days: {
+        dateFrom: '01/07/2026',
+        dateTo: '30/09/2026',
+        weekdaysApplied: [1, 2, 3, 4, 5, 6, 7],
+        type: 2,
+        datesDescription: 'Desde: 1/JUL al 30/SEP',
+      },
+      promotionDetails: { appliesOnline: true },
+    },
+    {
+      status: 'CURRENT',
+      days: {
+        dateFrom: '01/07/2026',
+        dateTo: '29/07/2026',
+        weekdaysApplied: [3],
+        type: 3,
+        datesDescription: 'Desde: 1/JUL al 29/JUL',
+        daysApplied: ['01/07/2026', '08/07/2026', '15/07/2026', '22/07/2026', '29/07/2026'],
+      },
+      promotionDetails: { appliesOnline: true },
+    },
+  ],
+};
+
+describe('normalizeBinderPromos', () => {
+  it('splits combined binders so 30% stays on Wednesdays only', () => {
+    const now = new Date('2026-07-03T12:00:00Z');
+    const promos = normalizeBinderPromos(farmacityBinder, now);
+    const refund = promos.find((promo) => promo.discountKind === 'PERCENTAGE_REFUND');
+    const installments = promos.find((promo) => promo.discountKind === 'INSTALLMENTS');
+
+    expect(refund).toMatchObject({
+      store: 'Farmacity',
+      discountPercentage: 30,
+      daysOfWeek: ['WEDNESDAY'],
+      sourceUrl: farmacityBinder.fullUrl,
+    });
+    expect(refund?.details.some((d) => d.startsWith('El '))).toBe(true);
+    expect(installments?.discountKind).toBe('INSTALLMENTS');
+    expect(installments?.daysOfWeek).toEqual([]);
   });
 });
 

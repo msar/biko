@@ -1,6 +1,7 @@
 import { formatPromotionBenefit } from '@biko/shared';
 import { useState } from 'react';
 import { fmtARS, formatDays } from '../lib/api';
+import { promoDetailsLinkLabel } from '../lib/promo-source-label';
 import { storeDisplayName } from '../lib/store-brands';
 import type { Suggestion } from '../lib/types';
 
@@ -78,7 +79,7 @@ export default function ExpenseSuggestionPromo({
                 {promo.sourceUrl && (
                   <li>
                     <a href={promo.sourceUrl} target="_blank" rel="noreferrer">
-                      Ver en MODO
+                      {promoDetailsLinkLabel(promo.sourceUrl)}
                     </a>
                   </li>
                 )}
