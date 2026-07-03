@@ -74,6 +74,15 @@ export function weeklyPromoGroupKey(promo: Pick<PromotionInput, 'store' | 'notes
   return (promo.notes ?? promo.entityName).toLowerCase();
 }
 
+/** Etiqueta legible del grupo (comercio o notas). */
+export function weeklyPromoGroupLabel(promo: Pick<PromotionInput, 'store' | 'notes'>): string {
+  const store = promo.store?.trim();
+  if (store && !/consult|comercios adheridos|que acepten modo/i.test(store)) {
+    return store;
+  }
+  return promo.notes ?? store ?? 'Promo';
+}
+
 export interface WeeklyPromoGroupLike {
   store: string | null;
   notes?: string | null;

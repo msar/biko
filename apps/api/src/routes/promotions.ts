@@ -10,6 +10,7 @@ import {
   suggestPromotion,
   toPromotionInput,
 } from '../services/promotion-suggestion.js';
+import { ensurePurchaseHistoryFavoritesSynced } from '../services/promo-favorites.js';
 
 const dayEnum = z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']);
 
@@ -187,6 +188,7 @@ export default async function promotionRoutes(app: FastifyInstance) {
   });
 
   app.get('/promotions/weekly/favorites', { preHandler: [app.authenticate] }, async (request) => {
+    await ensurePurchaseHistoryFavoritesSynced(app.prisma, request.user.householdId);
     return app.prisma.householdFavoriteWeeklyPromo.findMany({
       where: { householdId: request.user.householdId },
       orderBy: { label: 'asc' },

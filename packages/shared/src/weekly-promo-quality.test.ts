@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isActionableWeeklyPromo, parseMinPurchaseAmount, weeklyPromoGroupKey, filterHiddenWeeklyGroups, sortWeeklyGroupsByFavorites } from './weekly-promo-quality';
+import { isActionableWeeklyPromo, parseMinPurchaseAmount, weeklyPromoGroupKey, weeklyPromoGroupLabel, filterHiddenWeeklyGroups, sortWeeklyGroupsByFavorites } from './weekly-promo-quality';
 
 describe('isActionableWeeklyPromo', () => {
   it('excludes auto insurance miscategorized as combustible', () => {
@@ -63,6 +63,12 @@ describe('isActionableWeeklyPromo', () => {
   it('groups axion promos under same key', () => {
     const key = weeklyPromoGroupKey({ store: 'Axion', notes: '20% en Axion', entityName: 'MODO' });
     expect(key).toBe('axion');
+  });
+});
+
+describe('weeklyPromoGroupLabel', () => {
+  it('prefers store name when actionable', () => {
+    expect(weeklyPromoGroupLabel({ store: 'ChangoMás', notes: '20%' })).toBe('ChangoMás');
   });
 });
 

@@ -426,6 +426,7 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
       }
       void queryClient.invalidateQueries({ queryKey: ['expenses'] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      void queryClient.invalidateQueries({ queryKey: ['promotions', 'weekly', 'favorites'] });
       if (mode === 'create' && result && 'offline' in result && result.offline) {
         setSavedOffline(true);
         setTimeout(() => navigate('/gastos'), 1200);

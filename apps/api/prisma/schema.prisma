@@ -112,6 +112,8 @@ model Household {
   // Provincia del hogar para filtrar promos regionales (null = ver todas).
   province   String?
   createdAt  DateTime @default(now())
+  // Backfill único de favoritos desde historial de compras con promo.
+  favoritePromosSyncedAt DateTime?
 
   users            User[]
   categories       Category[]
