@@ -29,6 +29,11 @@ export default defineConfig({
       },
     }),
   ],
+  preview: {
+    host: '0.0.0.0',
+    port: Number(process.env.PORT) || 3000,
+    allowedHosts: ['.up.railway.app'],
+  },
   server: {
     port: 5173,
     proxy: {

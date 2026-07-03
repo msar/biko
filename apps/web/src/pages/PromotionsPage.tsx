@@ -68,7 +68,7 @@ function WeeklyCalendar() {
     mutationFn: (group: { key: string; label: string }) =>
       api<HiddenWeeklyPromo>('/promotions/weekly/hidden', {
         method: 'POST',
-        body: JSON.stringify(group),
+        body: JSON.stringify({ groupKey: group.key, label: group.label }),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['promotions', 'weekly'] });
@@ -130,7 +130,7 @@ function WeeklyCalendar() {
         <WeeklyDayCard
           key={day.dayOfWeek}
           day={day}
-          onHideGroup={(group) => hideGroup.mutate({ groupKey: group.key, label: group.label })}
+          onHideGroup={(group) => hideGroup.mutate({ key: group.key, label: group.label })}
         />
       ))}
     </div>

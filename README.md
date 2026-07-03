@@ -50,21 +50,53 @@ Tests: `npm test` (Vitest en `packages/shared`).
 
 ## Deploy en Railway
 
-Un proyecto con 3 servicios:
+Proyecto **poetic-intuition** con 4 servicios:
 
-1. **PostgreSQL** (plugin managed de Railway).
-2. **api** — root del repo, config en `apps/api/railway.json`. Variables:
-   - `DATABASE_URL` → referencia a la DB del proyecto
-   - `JWT_SECRET` → secreto fuerte
-   - `CORS_ORIGIN` → URL pública del servicio web
-   El start command corre `prisma migrate deploy` + seed antes de levantar el server.
-3. **web** — root del repo, config en `apps/web/railway.json`. Variables:
-   - `VITE_API_URL` → URL pública del servicio api (se hornea en build)
-4. **modo-sync (cron)** — servicio extra apuntando al mismo repo con:
-   - Start command: `npm run sync:modo --workspace @biko/api`
-   - Cron schedule: `0 9 * * *` (diario)
-   - `DATABASE_URL` → misma referencia a la DB
-   También se puede disparar a mano con el botón "Sincronizar MODO" en la pestaña Promos.
+| Servicio | URL | Rol |
+|----------|-----|-----|
+| **api** | https://api-production-e98e.up.railway.app | Fastify + Prisma (migraciones + seed al arrancar) |
+| **web** | https://web-production-b6d21.up.railway.app | React PWA (`vite preview`) |
+| **Postgres** | (interno) | Base de datos managed |
+| **modo-sync** | (cron, sin URL pública) | Scraper MODO diario `0 9 * * *` UTC |
+
+### Setup inicial (CLI)
+
+Requisito: [Railway CLI](https://docs.railway.com/guides/cli) logueado (`railway login`).
+
+```bash
+# Linkear el repo al proyecto (una vez)
+railway link --project poetic-intuition --environment production --service api
+
+# Configurar servicios, variables y deploy (idempotente)
+./scripts/railway-setup.sh
+```
+
+El script crea `api`, `web` y `modo-sync` (si no existen), configura variables con referencias cruzadas (`${{Postgres.DATABASE_URL}}`, `${{api.RAILWAY_PUBLIC_DOMAIN}}`, etc.), aplica build/start commands vía `railway environment edit`, genera dominios y despliega con `railway up`.
+
+### Variables por servicio
+
+**api**
+- `DATABASE_URL` → `${{Postgres.DATABASE_URL}}`
+- `JWT_SECRET` → generado con `${{ secret(...) }}`
+- `CORS_ORIGIN` → `https://${{web.RAILWAY_PUBLIC_DOMAIN}}`
+
+**web**
+- `VITE_API_URL` → `https://${{api.RAILWAY_PUBLIC_DOMAIN}}` (horneado en build)
+
+**modo-sync**
+- `DATABASE_URL` → `${{Postgres.DATABASE_URL}}`
+- Cron: `0 9 * * *` (09:00 UTC = 06:00 ART)
+
+También se puede disparar a mano con el botón "Sincronizar MODO" en la pestaña Promos.
+
+### Redeploy manual
+
+```bash
+railway up --service api --detach
+railway up --service web --detach
+```
+
+Config as code de referencia: `apps/api/railway.json`, `apps/web/railway.json`, `apps/api/railway-modo.json`.
 
 ## Decisiones de modelo de datos
 
