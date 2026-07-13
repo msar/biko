@@ -223,6 +223,10 @@ export interface MonthlyDashboard {
   byCategory: Array<{ categoryId: string; name: string; icon: string | null; color: string | null; total: number }>;
   byUser: Array<{ userId: string; name: string; total: number }>;
   byPaymentMethod: Array<{ paymentMethodId: string; name: string; total: number }>;
+  settleUp: {
+    perUser: Array<{ userId: string; name: string; paid: number; share: number; balance: number }>;
+    transfers: Array<{ fromUserId: string; fromName: string; toUserId: string; toName: string; amount: number }>;
+  };
   installments: Array<{
     id: string;
     amount: number;

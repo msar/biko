@@ -198,6 +198,38 @@ body {
   border-bottom: none;
 }
 
+.balance-detail {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.balance-pos {
+  color: var(--brand-teal-dark);
+  font-variant-numeric: tabular-nums;
+}
+
+.balance-neg {
+  color: var(--red);
+  font-variant-numeric: tabular-nums;
+}
+
+.settle-transfers {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--cream);
+}
+
+.settle-transfer {
+  margin: 4px 0;
+  font-size: 0.9rem;
+}
+
+.settle-even {
+  margin: 10px 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
 .row-between {
   display: flex;
   justify-content: space-between;

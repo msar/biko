@@ -88,6 +88,38 @@ export default function DashboardPage() {
         </section>
       )}
 
+      {data && data.settleUp.perUser.length > 1 && (data.settleUp.transfers.length > 0 || data.total > 0) && (
+        <section className="card">
+          <h2>Balance del mes</h2>
+          {data.settleUp.perUser.map((u) => (
+            <div key={u.userId} className="list-row">
+              <span>
+                <strong>{u.name}</strong>
+                <span className="balance-detail">
+                  {' '}
+                  puso {fmtARS.format(u.paid)} · le toca {fmtARS.format(u.share)}
+                </span>
+              </span>
+              <strong className={u.balance >= 0 ? 'balance-pos' : 'balance-neg'}>
+                {u.balance >= 0 ? '+' : '−'}
+                {fmtARS.format(Math.abs(u.balance))}
+              </strong>
+            </div>
+          ))}
+          {data.settleUp.transfers.length > 0 ? (
+            <div className="settle-transfers">
+              {data.settleUp.transfers.map((t) => (
+                <p key={`${t.fromUserId}-${t.toUserId}`} className="settle-transfer">
+                  <strong>{t.fromName}</strong> le debe a <strong>{t.toName}</strong> {fmtARS.format(t.amount)}
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p className="settle-even">Están a mano 🤝</p>
+          )}
+        </section>
+      )}
+
       {upcoming && upcoming.length > 0 && (
         <section className="card">
           <h2>Cuotas comprometidas</h2>

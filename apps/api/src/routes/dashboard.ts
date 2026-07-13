@@ -1,4 +1,4 @@
-import { allocationShareForInstallment } from '@biko/shared';
+import { allocationShareForInstallment, computeSettleTransfers } from '@biko/shared';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
@@ -29,7 +29,9 @@ export default async function dashboardRoutes(app: FastifyInstance) {
           include: {
             category: true,
             user: { select: { id: true, name: true } },
-            paymentMethod: { include: { definition: { include: { entity: true } } } },
+            paymentMethod: {
+              include: { definition: { include: { entity: true } }, owner: { select: { id: true, name: true } } },
+            },
             allocations: { include: { user: { select: { id: true, name: true } } } },
           },
         },
@@ -45,6 +47,11 @@ export default async function dashboardRoutes(app: FastifyInstance) {
     const byCategory = new Map<string, { categoryId: string; name: string; icon: string | null; color: string | null; total: number }>();
     const byUser = new Map<string, { userId: string; name: string; total: number }>();
     const byPaymentMethod = new Map<string, { paymentMethodId: string; name: string; total: number }>();
+
+    // Settle-up: only HOUSEHOLD spend creates shared debt.
+    const memberNames = new Map<string, string>();
+    const paidByUser = new Map<string, number>();
+    const shareByUser = new Map<string, number>();
 
     for (const inst of installments) {
       const amount = inst.amount.toNumber();
@@ -63,6 +70,10 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         const pmEntry = byPaymentMethod.get(pm.id) ?? { paymentMethodId: pm.id, name: pmName, total: 0 };
         pmEntry.total += amount;
         byPaymentMethod.set(pm.id, pmEntry);
+
+        const payer = purchase.paymentMethod.owner ?? purchase.user;
+        memberNames.set(payer.id, payer.name);
+        paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + amount);
       }
 
       for (const allocation of purchase.allocations) {
@@ -75,8 +86,29 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         };
         userEntry.total += share;
         byUser.set(allocation.userId, userEntry);
+
+        if (isHousehold) {
+          memberNames.set(allocation.userId, allocation.user.name);
+          shareByUser.set(allocation.userId, (shareByUser.get(allocation.userId) ?? 0) + share);
+        }
       }
     }
+
+    const round2 = (v: number) => Math.round(v * 100) / 100;
+    const perUser = [...memberNames.entries()].map(([userId, name]) => {
+      const paid = round2(paidByUser.get(userId) ?? 0);
+      const share = round2(shareByUser.get(userId) ?? 0);
+      return { userId, name, paid, share, balance: round2(paid - share) };
+    });
+    const transfers = computeSettleTransfers(perUser.map((u) => ({ userId: u.userId, balance: u.balance }))).map(
+      (t) => ({
+        fromUserId: t.fromUserId,
+        fromName: memberNames.get(t.fromUserId) ?? '',
+        toUserId: t.toUserId,
+        toName: memberNames.get(t.toUserId) ?? '',
+        amount: t.amount,
+      }),
+    );
 
     const savings = await app.prisma.purchase.aggregate({
       where: { householdId, purchaseDate: { gte: range.gte, lt: range.lt } },
@@ -90,6 +122,10 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       byUser: [...byUser.values()].sort((a, b) => b.total - a.total),
       byPaymentMethod: [...byPaymentMethod.values()].sort((a, b) => b.total - a.total),
       totalSavings: savings._sum.discountAmount?.toNumber() ?? 0,
+      settleUp: {
+        perUser: perUser.sort((a, b) => b.balance - a.balance),
+        transfers,
+      },
       installments: installments.map((i) => ({
         id: i.id,
         amount: i.amount.toNumber(),

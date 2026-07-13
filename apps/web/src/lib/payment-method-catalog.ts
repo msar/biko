@@ -57,6 +57,13 @@ export function walletDefinitionFor(
   return definitions.find((d) => d.entityId === entityId && d.type === 'WALLET');
 }
 
+/** Efectivo: definición sin entidad, tipo CASH. */
+export function cashDefinition(
+  definitions: PaymentMethodDefinition[],
+): PaymentMethodDefinition | undefined {
+  return definitions.find((d) => d.entityId == null && d.type === 'CASH');
+}
+
 /** Unique bank/wallet issuers from catalog definitions. */
 export function listIssuerEntities(definitions: PaymentMethodDefinition[]): EntityGroup<never>[] {
   const seen = new Map<string, EntityGroup<never>>();

@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import {
   NETWORK_LABEL,
   alreadyAddedDefinitionIds,
+  cashDefinition,
   creditDefinitionFor,
   creditNetworksForEntity,
   issuerHasCreditCards,
@@ -39,6 +40,10 @@ export function AddPaymentMethodsWizard({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingWalletId, setSavingWalletId] = useState<string | null>(null);
+  const [savingCash, setSavingCash] = useState(false);
+
+  const cashDef = cashDefinition(definitions);
+  const cashAlready = cashDef ? addedIds.has(cashDef.id) : false;
 
   const selectedIssuer = issuers.find((i) => i.entityId === selectedEntityId);
   const showCreditFlow = selectedEntityId != null && issuerHasCreditCards(selectedEntityId, definitions);
@@ -73,6 +78,31 @@ export function AddPaymentMethodsWizard({
       setError(err instanceof Error ? err.message : 'Error al agregar');
     } finally {
       setSavingWalletId(null);
+    }
+  };
+
+  const addCash = async () => {
+    if (!cashDef) {
+      setError('No se encontró Efectivo en el catálogo');
+      return;
+    }
+    if (cashAlready) {
+      setError('Ya tenés Efectivo cargado');
+      return;
+    }
+    setSavingCash(true);
+    setError(null);
+    try {
+      await api('/payment-methods', {
+        method: 'POST',
+        body: JSON.stringify({ definitionId: cashDef.id }),
+      });
+      void queryClient.invalidateQueries({ queryKey: ['payment-methods'] });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al agregar');
+    } finally {
+      setSavingCash(false);
     }
   };
 
@@ -180,6 +210,22 @@ export function AddPaymentMethodsWizard({
                   </button>
                 );
               })}
+            </div>
+          </>
+        )}
+        {cashDef && (
+          <>
+            <span className="field-label">Otros</span>
+            <div className="issuer-grid">
+              <button
+                type="button"
+                className="method-chip"
+                disabled={cashAlready || savingCash}
+                onClick={() => void addCash()}
+              >
+                Efectivo
+                {cashAlready ? ' ✓' : savingCash ? ' …' : ''}
+              </button>
             </div>
           </>
         )}
