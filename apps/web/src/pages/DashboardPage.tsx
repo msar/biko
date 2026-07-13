@@ -88,7 +88,7 @@ export default function DashboardPage() {
         </section>
       )}
 
-      {data && data.settleUp.perUser.length > 1 && (data.settleUp.transfers.length > 0 || data.total > 0) && (
+      {data?.settleUp && data.settleUp.perUser.length > 1 && (data.settleUp.transfers.length > 0 || data.total > 0) && (
         <section className="card">
           <h2>Balance del mes</h2>
           {data.settleUp.perUser.map((u) => (
