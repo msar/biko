@@ -239,3 +239,19 @@ export interface MonthlyDashboard {
     userName: string;
   }>;
 }
+
+export interface LongTermDashboard {
+  balance: {
+    perUser: Array<{ userId: string; name: string; paid: number; share: number; balance: number }>;
+    transfers: Array<{ fromUserId: string; fromName: string; toUserId: string; toName: string; amount: number }>;
+  };
+  months: Array<{ month: string; total: number }>;
+  categories: Array<{
+    categoryId: string;
+    name: string;
+    icon: string | null;
+    color: string | null;
+    total: number;
+    byMonth: Array<{ month: string; total: number }>;
+  }>;
+}

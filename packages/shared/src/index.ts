@@ -5,6 +5,7 @@ export * from './discount-kind';
 export * from './installment-calculator';
 export * from './expense-allocation';
 export * from './settle-up';
+export * from './installment-attribution';
 export * from './promotion-recommender';
 export * from './promotion-suggester';
 export * from './provinces';

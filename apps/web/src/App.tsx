@@ -8,6 +8,7 @@ import DashboardPage from './pages/DashboardPage';
 import EditExpensePage from './pages/EditExpensePage';
 import ExpensesPage from './pages/ExpensesPage';
 import LoginPage from './pages/LoginPage';
+import LongTermPage from './pages/LongTermPage';
 import NewExpensePage from './pages/NewExpensePage';
 import PromotionsPage from './pages/PromotionsPage';
 import SettingsPage from './pages/SettingsPage';
@@ -68,6 +69,7 @@ export default function App() {
       <main className="content">
         <Routes>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/historico" element={<LongTermPage />} />
           <Route path="/nuevo" element={<NewExpensePage />} />
           <Route path="/gastos/:id/edit" element={<EditExpensePage />} />
           <Route path="/gastos" element={<ExpensesPage />} />

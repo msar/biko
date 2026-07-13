@@ -48,6 +48,9 @@ export default function DashboardPage() {
             <button onClick={() => setMonth(shiftMonth(month, 1))}>›</button>
           </div>
         </div>
+        <Link to="/historico" className="btn-link">
+          Largo plazo ›
+        </Link>
       </header>
 
       <section className="hero-card">
