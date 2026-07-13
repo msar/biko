@@ -57,11 +57,14 @@ export function walletDefinitionFor(
   return definitions.find((d) => d.entityId === entityId && d.type === 'WALLET');
 }
 
-/** Efectivo: definición sin entidad, tipo CASH. */
-export function cashDefinition(
+/** Medios de pago sin entidad (Efectivo, Transferencia genérica). */
+export function entitylessDefinitions(
   definitions: PaymentMethodDefinition[],
-): PaymentMethodDefinition | undefined {
-  return definitions.find((d) => d.entityId == null && d.type === 'CASH');
+): PaymentMethodDefinition[] {
+  const order: Record<string, number> = { CASH: 0, BANK_TRANSFER: 1 };
+  return definitions
+    .filter((d) => d.entityId == null && (d.type === 'CASH' || d.type === 'BANK_TRANSFER'))
+    .sort((a, b) => (order[a.type] ?? 9) - (order[b.type] ?? 9));
 }
 
 /** Unique bank/wallet issuers from catalog definitions. */

@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { ensureDefaultPaymentMethods } from '../services/household-defaults.js';
 
 const createSchema = z.object({
   definitionId: z.string(),
@@ -19,8 +20,22 @@ function isUniqueViolation(error: unknown): boolean {
 
 export default async function paymentMethodRoutes(app: FastifyInstance) {
   app.get('/payment-methods', { preHandler: [app.authenticate] }, async (request) => {
+    const householdId = request.user.householdId;
+    // Backfill único: hogares creados antes de los medios por defecto los reciben
+    // en su próximo fetch, sin re-agregar los que se hayan eliminado luego.
+    const household = await app.prisma.household.findUnique({
+      where: { id: householdId },
+      select: { defaultMethodsAddedAt: true },
+    });
+    if (household && household.defaultMethodsAddedAt == null) {
+      await ensureDefaultPaymentMethods(app.prisma, householdId);
+      await app.prisma.household.update({
+        where: { id: householdId },
+        data: { defaultMethodsAddedAt: new Date() },
+      });
+    }
     return app.prisma.paymentMethod.findMany({
-      where: { householdId: request.user.householdId },
+      where: { householdId },
       include: { definition: { include: { entity: true } }, owner: { select: { id: true, name: true } } },
       orderBy: { id: 'asc' },
     });

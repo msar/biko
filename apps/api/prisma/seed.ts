@@ -139,11 +139,19 @@ async function main() {
     }
   }
 
-  // Sin entidad: efectivo.
+  // Sin entidad: efectivo y transferencia genérica (disponibles para todos).
   const cash = await prisma.paymentMethodDefinition.findFirst({ where: { entityId: null, type: 'CASH' } });
   if (!cash) {
     await prisma.paymentMethodDefinition.create({
       data: { entityId: null, type: 'CASH', network: 'NONE', name: 'Efectivo' },
+    });
+  }
+  const transfer = await prisma.paymentMethodDefinition.findFirst({
+    where: { entityId: null, type: 'BANK_TRANSFER' },
+  });
+  if (!transfer) {
+    await prisma.paymentMethodDefinition.create({
+      data: { entityId: null, type: 'BANK_TRANSFER', network: 'NONE', name: 'Transferencia' },
     });
   }
 

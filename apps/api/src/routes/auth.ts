@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { ARGENTINE_PROVINCES, isSuperUser } from '@biko/shared';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { ensureDefaultPaymentMethods } from '../services/household-defaults.js';
 
 const registerSchema = z.object({
   name: z.string().min(1),
@@ -37,6 +38,11 @@ export default async function authRoutes(app: FastifyInstance) {
     } else {
       const household = await app.prisma.household.create({ data: { name: body.householdName! } });
       householdId = household.id;
+      await ensureDefaultPaymentMethods(app.prisma, householdId);
+      await app.prisma.household.update({
+        where: { id: householdId },
+        data: { defaultMethodsAddedAt: new Date() },
+      });
     }
 
     const user = await app.prisma.user.create({

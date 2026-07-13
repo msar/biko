@@ -114,6 +114,8 @@ model Household {
   createdAt  DateTime @default(now())
   // Backfill único de favoritos desde historial de compras con promo.
   favoritePromosSyncedAt DateTime?
+  // Alta única de medios de pago por defecto (Efectivo, Transferencia).
+  defaultMethodsAddedAt DateTime?
 
   users            User[]
   categories       Category[]

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { isSuperUser } from '@biko/shared';
-import { api, getToken, onUnauthorized, setToken } from './api';
+import { ApiError, api, getToken, onUnauthorized, setToken } from './api';
 import type { SessionUser } from './types';
 
 interface AuthState {
@@ -68,7 +68,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(session);
         localStorage.setItem(USER_KEY, JSON.stringify(session));
       })
-      .catch(() => clearSession(setUser))
+      .catch((err) => {
+        // Solo cerrar sesión si el token es inválido/expiró (401). Ante errores
+        // transitorios (offline, timeout, 5xx) mantener la sesión cacheada.
+        if (err instanceof ApiError && err.status === 401) {
+          clearSession(setUser);
+        } else {
+          setUser(readCachedUser());
+        }
+      })
       .finally(() => setLoading(false));
   }, []);
 

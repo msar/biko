@@ -26,7 +26,7 @@ declare module 'fastify' {
 export default fp(async (app: FastifyInstance) => {
   await app.register(jwt, {
     secret: process.env.JWT_SECRET ?? 'dev-secret-change-me',
-    sign: { expiresIn: '30d' },
+    sign: { expiresIn: '180d' },
   });
 
   app.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {
