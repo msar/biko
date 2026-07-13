@@ -12,7 +12,7 @@ Core differentiator vs. generic finance apps (YNAB, Ualá, Fintonic): native mod
 2. Categorize expenses (butcher, produce, supermarket, poultry shop, etc.).
 3. Track credit card purchases paid in installments (cuotas), correctly reflected in the month they actually bill.
 4. Maintain a catalog of bank/wallet promotions (e.g. "Mondays, ChangoMás, MODO, 25% off up to $20,000") and recommend which payment method to use per day/store.
-5. Track savings with accurate cap enforcement, including **monthly caps shared across purchases with the same bank**.
+5. Track savings with accurate cap enforcement, including **per-promotion monthly caps** (each promo has its own independent tope).
 6. (Later) Bulk-load expenses from bank statement PDFs/CSVs.
 7. (Later, lower priority) Automate promotion updates via scraping bank/wallet sites. Explicitly deprioritized — see Risks section.
 
@@ -306,23 +306,23 @@ model Installment {
 }
 
 // ============================================================
-// MONTHLY DISCOUNT CAP PER BANK
+// MONTHLY DISCOUNT CAP PER PROMOTION
 // ============================================================
 
-// Reintegro caps are typically monthly and per bank/wallet (entity), shared
-// across all promotions from that entity — not per transaction, not per
-// individual promotion. E.g. if $20,000 of Santander's cap was already used
-// this month, a new Santander purchase should get no further discount, even
-// under a different promotion from the same entity.
+// Reintegro caps are monthly and per promotion (each promo has its own tope),
+// not per bank/entity and not per transaction. E.g. spending against
+// Santander's "Carnave" promo does NOT consume the cap of Santander's
+// "ChangoMás 20%" promo — they are independent. Only once a specific promo's
+// own monthly cap is exhausted does that promo stop applying a discount.
 model MonthlyCapUsage {
   id          String    @id @default(cuid())
   householdId String
   household   Household @relation(fields: [householdId], references: [id])
-  entity      String    // "Santander", "Galicia", "BBVA", etc.
+  promotionId String    // cap is tracked per promotion
   yearMonth   String    // format "2026-07"
   usedAmount  Decimal   @db.Decimal(12, 2) @default(0)
 
-  @@unique([householdId, entity, yearMonth])
+  @@unique([householdId, promotionId, yearMonth])
   @@index([householdId, yearMonth])
 }
 
@@ -411,9 +411,9 @@ This is the next piece to build. Requirements gathered so far:
 
 - Given `{ householdId, date, store, paymentMethodId }`, find candidate promotions matching entity + day-of-week + (store or store-agnostic) + payment method type.
 - Prefer store-specific promotions over store-agnostic ones when both match.
-- For each candidate, look up (or lazily create) a `MonthlyCapUsage` row keyed by `(householdId, promotion.entity, yearMonth)`.
+- For each candidate, look up (or lazily create) a `MonthlyCapUsage` row keyed by `(householdId, promotion.id, yearMonth)`.
 - `remainingCap = promotion.discountCap != null ? max(promotion.discountCap - usedAmount, 0) : Infinity`.
-- **If `remainingCap <= 0`, skip this candidate — no discount should be applied for that bank this month, even though the promotion itself is "active."** This is the behavior explicitly requested: e.g. if Santander's $20,000 monthly cap was already consumed by an earlier purchase, a later Santander purchase gets no discount, while BBVA or Galicia (different entities, independent caps) remain available.
+- **If `remainingCap <= 0`, skip this candidate — no discount should be applied for that promotion this month, even though the promotion itself is "active."** Caps are per promotion: e.g. if the "ChangoMás 20%" promo's $25,000 monthly cap was already consumed, that promo gives no further discount, while a different promo (even from the same bank) keeps its own independent cap.
 - If a valid candidate is found, apply `calculateDiscount(grossAmount, promotion.discountPercentage, remainingCap)`, then increment `MonthlyCapUsage.usedAmount` by the `discountAmount` actually applied.
 - If no candidate survives the cap check, the purchase is saved with `discountAmount = 0`, `netAmount = grossAmount`, `promotionId = null`.
 
@@ -421,8 +421,8 @@ Suggested service shape (pseudocode, to be implemented in NestJS with Prisma):
 
 ```ts
 interface CapUsageRepository {
-  getUsedAmount(householdId: string, entity: string, yearMonth: string): Promise<number>;
-  incrementUsedAmount(householdId: string, entity: string, yearMonth: string, amount: number): Promise<void>;
+  getUsedAmount(householdId: string, promotionId: string, yearMonth: string): Promise<number>;
+  incrementUsedAmount(householdId: string, promotionId: string, yearMonth: string, amount: number): Promise<void>;
 }
 
 class PromotionSuggestionService {

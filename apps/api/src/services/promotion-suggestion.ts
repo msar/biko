@@ -81,9 +81,9 @@ export interface Suggestion {
   estimatedNet: number | null;
 }
 
-async function getUsedAmount(db: Db, householdId: string, entityId: string, yearMonth: string): Promise<number> {
+async function getUsedAmount(db: Db, householdId: string, promotionId: string, yearMonth: string): Promise<number> {
   const row = await db.monthlyCapUsage.findUnique({
-    where: { householdId_entityId_yearMonth: { householdId, entityId, yearMonth } },
+    where: { householdId_promotionId_yearMonth: { householdId, promotionId, yearMonth } },
   });
   return row?.usedAmount.toNumber() ?? 0;
 }
@@ -91,22 +91,23 @@ async function getUsedAmount(db: Db, householdId: string, entityId: string, year
 export async function incrementCapUsage(
   db: Db,
   householdId: string,
-  entityId: string,
+  promotionId: string,
   yearMonth: string,
   amount: number,
 ): Promise<void> {
   if (amount <= 0) return;
   await db.monthlyCapUsage.upsert({
-    where: { householdId_entityId_yearMonth: { householdId, entityId, yearMonth } },
-    create: { householdId, entityId, yearMonth, usedAmount: amount },
+    where: { householdId_promotionId_yearMonth: { householdId, promotionId, yearMonth } },
+    create: { householdId, promotionId, yearMonth, usedAmount: amount },
     update: { usedAmount: { increment: amount } },
   });
 }
 
 /**
  * Sugiere la mejor promo aplicable a una compra, respetando el tope mensual
- * compartido por entidad: si el tope de un banco ya se consumió este mes, sus
- * promos se saltean aunque estén activas; otras entidades no se ven afectadas.
+ * propio de cada promoción: si el tope de una promo ya se consumió este mes, se
+ * saltea aunque siga activa; otras promos (aún del mismo banco) no se ven
+ * afectadas.
  */
 export async function suggestPromotion(
   db: Db,
@@ -168,7 +169,7 @@ export async function suggestPromotion(
         estimatedNet: est?.netAmount ?? null,
       };
     }
-    const used = await getUsedAmount(db, householdId, promo.entityId, yearMonth);
+    const used = await getUsedAmount(db, householdId, promo.id, yearMonth);
     const remainingCap = Math.max(promo.discountCap - used, 0);
     // Tope agotado: se saltea la promo aunque siga "activa".
     if (remainingCap <= 0) continue;
@@ -214,7 +215,7 @@ export async function applyPromotionById(
     };
   }
 
-  const used = await getUsedAmount(db, params.householdId, promo.entityId, yearMonth);
+  const used = await getUsedAmount(db, params.householdId, promo.id, yearMonth);
   const remainingCap = Math.max(promo.discountCap.toNumber() - used, 0);
   if (remainingCap <= 0) return null;
 

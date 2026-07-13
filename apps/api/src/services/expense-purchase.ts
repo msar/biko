@@ -52,7 +52,7 @@ interface ResolvedDiscount {
   discountLabelApplied: string | null;
   discountAmount: number;
   netAmount: number;
-  capUsage: { entityId: string; amount: number } | null;
+  capUsage: { promotionId: string; amount: number } | null;
 }
 
 async function getHouseholdMemberIds(db: Db, householdId: string): Promise<string[]> {
@@ -119,7 +119,7 @@ async function resolveExpenseDiscount(
         discountAmount,
         netAmount,
         capUsage:
-          discountAmount > 0 ? { entityId: applied.promotion.entityId, amount: discountAmount } : null,
+          discountAmount > 0 ? { promotionId: applied.promotion.id, amount: discountAmount } : null,
       };
     }
 
@@ -174,7 +174,7 @@ async function resolveExpenseDiscount(
     discountLabelApplied: null,
     discountAmount,
     netAmount,
-    capUsage: discountAmount > 0 ? { entityId: suggestion.promotion.entityId, amount: discountAmount } : null,
+    capUsage: discountAmount > 0 ? { promotionId: suggestion.promotion.id, amount: discountAmount } : null,
   };
 }
 
@@ -183,15 +183,14 @@ export async function rollbackPurchaseCapUsage(
   purchase: {
     householdId: string;
     promotionId: string | null;
-    promotion: { entityId: string } | null;
     discountAmount: Decimal;
     purchaseDate: Date;
   },
 ): Promise<void> {
-  if (purchase.promotionId && purchase.promotion && purchase.discountAmount.toNumber() > 0) {
+  if (purchase.promotionId && purchase.discountAmount.toNumber() > 0) {
     const yearMonth = yearMonthOf(purchase.purchaseDate);
     await tx.monthlyCapUsage.updateMany({
-      where: { householdId: purchase.householdId, entityId: purchase.promotion.entityId, yearMonth },
+      where: { householdId: purchase.householdId, promotionId: purchase.promotionId, yearMonth },
       data: { usedAmount: { decrement: purchase.discountAmount } },
     });
   }
@@ -204,7 +203,7 @@ async function persistPurchaseDiscountCap(
   capUsage: ResolvedDiscount['capUsage'],
 ): Promise<void> {
   if (!capUsage || capUsage.amount <= 0) return;
-  await incrementCapUsage(tx, householdId, capUsage.entityId, yearMonthOf(purchaseDate), capUsage.amount);
+  await incrementCapUsage(tx, householdId, capUsage.promotionId, yearMonthOf(purchaseDate), capUsage.amount);
 }
 
 export async function createPurchaseWithAllocations(

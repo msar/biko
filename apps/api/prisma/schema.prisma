@@ -80,7 +80,6 @@ model Entity {
 
   definitions PaymentMethodDefinition[]
   promotions  Promotion[]
-  capUsages   MonthlyCapUsage[]
 }
 
 // Combinación estándar entidad + tipo + red: "Santander Visa (crédito)",
@@ -253,6 +252,7 @@ model Promotion {
 
   purchases          Purchase[]
   categories         PromotionCategory[]
+  capUsages          MonthlyCapUsage[]
 
   @@unique([externalSource, externalId])
   @@index([entityId, active])
@@ -375,16 +375,19 @@ model Installment {
 // ni por promoción individual. Ej: si ya usaste $20.000 de tope con Santander
 // este mes, una nueva compra con Santander no debería recibir más descuento,
 // aunque sea otra promoción distinta de la misma entidad.
+// Tope mensual de reintegro consumido, por promoción (no por entidad): cada
+// promo tiene su propio tope independiente. Ej: gastar en la promo "Carnave"
+// de Santander no consume el tope de la promo "ChangoMás 20%" del mismo banco.
 model MonthlyCapUsage {
   id          String    @id @default(cuid())
   householdId String
   household   Household @relation(fields: [householdId], references: [id])
-  entityId    String
-  entity      Entity    @relation(fields: [entityId], references: [id])
+  promotionId String
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
   yearMonth   String    // formato "2026-07"
   usedAmount  Decimal   @db.Decimal(12, 2) @default(0)
 
-  @@unique([householdId, entityId, yearMonth])
+  @@unique([householdId, promotionId, yearMonth])
   @@index([householdId, yearMonth])
 }
 
