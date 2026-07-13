@@ -52,7 +52,7 @@ interface ResolvedDiscount {
   discountLabelApplied: string | null;
   discountAmount: number;
   netAmount: number;
-  capUsage: { promotionId: string; amount: number } | null;
+  capUsage: { promotionId: string; entityId: string; amount: number } | null;
 }
 
 async function getHouseholdMemberIds(db: Db, householdId: string): Promise<string[]> {
@@ -97,6 +97,7 @@ async function resolveExpenseDiscount(
         date: body.purchaseDate,
         grossAmount: body.grossAmount,
         promotionId: body.promotionId,
+        entityId: paymentMethod.definition.entityId,
       });
       if (!applied) {
         throw new ExpenseValidationError('Promoción inválida o tope mensual agotado');
@@ -119,7 +120,9 @@ async function resolveExpenseDiscount(
         discountAmount,
         netAmount,
         capUsage:
-          discountAmount > 0 ? { promotionId: applied.promotion.id, amount: discountAmount } : null,
+          discountAmount > 0 && paymentMethod.definition.entityId
+            ? { promotionId: applied.promotion.id, entityId: paymentMethod.definition.entityId, amount: discountAmount }
+            : null,
       };
     }
 
@@ -174,7 +177,10 @@ async function resolveExpenseDiscount(
     discountLabelApplied: null,
     discountAmount,
     netAmount,
-    capUsage: discountAmount > 0 ? { promotionId: suggestion.promotion.id, amount: discountAmount } : null,
+    capUsage:
+      discountAmount > 0 && paymentMethod.definition.entityId
+        ? { promotionId: suggestion.promotion.id, entityId: paymentMethod.definition.entityId, amount: discountAmount }
+        : null,
   };
 }
 
@@ -185,12 +191,18 @@ export async function rollbackPurchaseCapUsage(
     promotionId: string | null;
     discountAmount: Decimal;
     purchaseDate: Date;
+    entityId: string | null;
   },
 ): Promise<void> {
-  if (purchase.promotionId && purchase.discountAmount.toNumber() > 0) {
+  if (purchase.promotionId && purchase.entityId && purchase.discountAmount.toNumber() > 0) {
     const yearMonth = yearMonthOf(purchase.purchaseDate);
     await tx.monthlyCapUsage.updateMany({
-      where: { householdId: purchase.householdId, promotionId: purchase.promotionId, yearMonth },
+      where: {
+        householdId: purchase.householdId,
+        promotionId: purchase.promotionId,
+        entityId: purchase.entityId,
+        yearMonth,
+      },
       data: { usedAmount: { decrement: purchase.discountAmount } },
     });
   }
@@ -203,7 +215,14 @@ async function persistPurchaseDiscountCap(
   capUsage: ResolvedDiscount['capUsage'],
 ): Promise<void> {
   if (!capUsage || capUsage.amount <= 0) return;
-  await incrementCapUsage(tx, householdId, capUsage.promotionId, yearMonthOf(purchaseDate), capUsage.amount);
+  await incrementCapUsage(
+    tx,
+    householdId,
+    capUsage.promotionId,
+    capUsage.entityId,
+    yearMonthOf(purchaseDate),
+    capUsage.amount,
+  );
 }
 
 export async function createPurchaseWithAllocations(
@@ -315,11 +334,17 @@ export async function updatePurchaseWithAllocations(
 ) {
   const existing = await tx.purchase.findFirst({
     where: { id: purchaseId, householdId },
-    include: { promotion: true },
+    include: { paymentMethod: { include: { definition: true } } },
   });
   if (!existing) throw new ExpenseNotFoundError();
 
-  await rollbackPurchaseCapUsage(tx, existing);
+  await rollbackPurchaseCapUsage(tx, {
+    householdId: existing.householdId,
+    promotionId: existing.promotionId,
+    discountAmount: existing.discountAmount,
+    purchaseDate: existing.purchaseDate,
+    entityId: existing.paymentMethod.definition.entityId,
+  });
   await tx.installment.deleteMany({ where: { purchaseId } });
   await tx.purchaseAllocation.deleteMany({ where: { purchaseId } });
 

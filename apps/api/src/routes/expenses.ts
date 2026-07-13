@@ -142,12 +142,18 @@ export default async function expenseRoutes(app: FastifyInstance) {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const purchase = await app.prisma.purchase.findFirst({
       where: { id, householdId: request.user.householdId },
-      include: { promotion: true },
+      include: { paymentMethod: { include: { definition: true } } },
     });
     if (!purchase) return reply.code(404).send({ error: 'Gasto no encontrado' });
 
     await app.prisma.$transaction(async (tx) => {
-      await rollbackPurchaseCapUsage(tx, purchase);
+      await rollbackPurchaseCapUsage(tx, {
+        householdId: purchase.householdId,
+        promotionId: purchase.promotionId,
+        discountAmount: purchase.discountAmount,
+        purchaseDate: purchase.purchaseDate,
+        entityId: purchase.paymentMethod.definition.entityId,
+      });
       await tx.purchase.delete({ where: { id } });
     });
     return reply.code(204).send();

@@ -12,7 +12,7 @@ Core differentiator vs. generic finance apps (YNAB, Ualá, Fintonic): native mod
 2. Categorize expenses (butcher, produce, supermarket, poultry shop, etc.).
 3. Track credit card purchases paid in installments (cuotas), correctly reflected in the month they actually bill.
 4. Maintain a catalog of bank/wallet promotions (e.g. "Mondays, ChangoMás, MODO, 25% off up to $20,000") and recommend which payment method to use per day/store.
-5. Track savings with accurate cap enforcement, including **per-promotion monthly caps** (each promo has its own independent tope).
+5. Track savings with accurate cap enforcement, including **per-promotion, per-bank monthly caps** (each promo has its own tope, tracked separately for each paying bank).
 6. (Later) Bulk-load expenses from bank statement PDFs/CSVs.
 7. (Later, lower priority) Automate promotion updates via scraping bank/wallet sites. Explicitly deprioritized — see Risks section.
 
@@ -306,23 +306,26 @@ model Installment {
 }
 
 // ============================================================
-// MONTHLY DISCOUNT CAP PER PROMOTION
+// MONTHLY DISCOUNT CAP PER PROMOTION + PAYING BANK
 // ============================================================
 
-// Reintegro caps are monthly and per promotion (each promo has its own tope),
-// not per bank/entity and not per transaction. E.g. spending against
-// Santander's "Carnave" promo does NOT consume the cap of Santander's
-// "ChangoMás 20%" promo — they are independent. Only once a specific promo's
-// own monthly cap is exhausted does that promo stop applying a discount.
+// Reintegro caps are monthly and tracked per (promotion, paying bank), not per
+// transaction. Each promo has its own tope, and each participating bank manages
+// it independently. E.g. a MODO promo in ChangoMás paid with Santander consumes
+// Santander's cap for that promo; the same promo paid with BBVA uses BBVA's own
+// (independent) cap. A different promo from the same bank also has its own cap.
+// `entityId` is the entity of the payment method used (the bank), not the
+// promo's entity (which for MODO is the wallet).
 model MonthlyCapUsage {
   id          String    @id @default(cuid())
   householdId String
   household   Household @relation(fields: [householdId], references: [id])
   promotionId String    // cap is tracked per promotion
+  entityId    String    // ...and per paying bank (payment method entity)
   yearMonth   String    // format "2026-07"
   usedAmount  Decimal   @db.Decimal(12, 2) @default(0)
 
-  @@unique([householdId, promotionId, yearMonth])
+  @@unique([householdId, promotionId, entityId, yearMonth])
   @@index([householdId, yearMonth])
 }
 
@@ -411,9 +414,9 @@ This is the next piece to build. Requirements gathered so far:
 
 - Given `{ householdId, date, store, paymentMethodId }`, find candidate promotions matching entity + day-of-week + (store or store-agnostic) + payment method type.
 - Prefer store-specific promotions over store-agnostic ones when both match.
-- For each candidate, look up (or lazily create) a `MonthlyCapUsage` row keyed by `(householdId, promotion.id, yearMonth)`.
+- For each candidate, look up (or lazily create) a `MonthlyCapUsage` row keyed by `(householdId, promotion.id, payingBankEntityId, yearMonth)`.
 - `remainingCap = promotion.discountCap != null ? max(promotion.discountCap - usedAmount, 0) : Infinity`.
-- **If `remainingCap <= 0`, skip this candidate — no discount should be applied for that promotion this month, even though the promotion itself is "active."** Caps are per promotion: e.g. if the "ChangoMás 20%" promo's $25,000 monthly cap was already consumed, that promo gives no further discount, while a different promo (even from the same bank) keeps its own independent cap.
+- **If `remainingCap <= 0`, skip this candidate — no discount should be applied for that promotion + bank this month, even though the promotion itself is "active."** Caps are per promotion and per paying bank: e.g. if the "ChangoMás 20%" promo's $25,000 monthly cap was already consumed with Santander, paying with Santander gives no further discount, while paying the same promo with BBVA (or a different promo) keeps its own independent cap.
 - If a valid candidate is found, apply `calculateDiscount(grossAmount, promotion.discountPercentage, remainingCap)`, then increment `MonthlyCapUsage.usedAmount` by the `discountAmount` actually applied.
 - If no candidate survives the cap check, the purchase is saved with `discountAmount = 0`, `netAmount = grossAmount`, `promotionId = null`.
 
@@ -421,8 +424,8 @@ Suggested service shape (pseudocode, to be implemented in NestJS with Prisma):
 
 ```ts
 interface CapUsageRepository {
-  getUsedAmount(householdId: string, promotionId: string, yearMonth: string): Promise<number>;
-  incrementUsedAmount(householdId: string, promotionId: string, yearMonth: string, amount: number): Promise<void>;
+  getUsedAmount(householdId: string, promotionId: string, entityId: string, yearMonth: string): Promise<number>;
+  incrementUsedAmount(householdId: string, promotionId: string, entityId: string, yearMonth: string, amount: number): Promise<void>;
 }
 
 class PromotionSuggestionService {
