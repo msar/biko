@@ -57,7 +57,7 @@ Proyecto **poetic-intuition** con 4 servicios:
 | **api** | https://api-production-e98e.up.railway.app | Fastify + Prisma (migraciones + seed al arrancar) |
 | **web** | https://web-production-b6d21.up.railway.app | React PWA (`vite preview`) |
 | **Postgres** | (interno) | Base de datos managed |
-| **modo-sync** | (cron, sin URL pública) | Scraper MODO diario `0 9 * * *` UTC |
+| **promotions-sync** | (cron, sin URL pública) | Scraper MODO + Naranja X + Mercado Pago diario `0 9 * * *` UTC |
 
 ### Setup inicial (CLI)
 
@@ -71,7 +71,7 @@ railway link --project poetic-intuition --environment production --service api
 ./scripts/railway-setup.sh
 ```
 
-El script crea `api`, `web` y `modo-sync` (si no existen), configura variables con referencias cruzadas (`${{Postgres.DATABASE_URL}}`, `${{api.RAILWAY_PUBLIC_DOMAIN}}`, etc.), aplica build/start commands vía `railway environment edit`, genera dominios y despliega con `railway up`.
+El script crea `api`, `web` y `promotions-sync` (si no existen), configura variables con referencias cruzadas (`${{Postgres.DATABASE_URL}}`, `${{api.RAILWAY_PUBLIC_DOMAIN}}`, etc.), aplica build/start commands vía `railway environment edit`, genera dominios y despliega con `railway up`.
 
 ### Variables por servicio
 
@@ -83,11 +83,12 @@ El script crea `api`, `web` y `modo-sync` (si no existen), configura variables c
 **web**
 - `VITE_API_URL` → `https://${{api.RAILWAY_PUBLIC_DOMAIN}}` (horneado en build)
 
-**modo-sync**
+**promotions-sync**
 - `DATABASE_URL` → `${{Postgres.DATABASE_URL}}`
 - Cron: `0 9 * * *` (09:00 UTC = 06:00 ART)
+- Corre MODO, Naranja X y Mercado Pago en un solo job (continúa si una fuente falla)
 
-También se puede disparar a mano con el botón "Sincronizar MODO" en la pestaña Promos.
+También se puede disparar a mano con los botones de sync en la pestaña Promos (admin).
 
 ### Redeploy manual
 
@@ -96,7 +97,7 @@ railway up --service api --detach
 railway up --service web --detach
 ```
 
-Config as code de referencia: `apps/api/railway.json`, `apps/web/railway.json`, `apps/api/railway-modo.json`.
+Config as code de referencia: `apps/api/railway.json`, `apps/web/railway.json`, `apps/api/railway-promotions.json`.
 
 ## Decisiones de modelo de datos
 

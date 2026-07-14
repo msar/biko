@@ -12,9 +12,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "sync:modo": "tsx scripts/sync-modo.ts --fresh",
-    "sync:mercadopago": "tsx scripts/sync-mercadopago.ts --fresh",
-    "sync:naranjax": "tsx scripts/sync-naranjax.ts --fresh",
+    "sync:promotions": "tsx scripts/sync-promotions.ts --fresh",
     "railway:release": "prisma migrate deploy && tsx prisma/seed.ts"
   },
   "prisma": {

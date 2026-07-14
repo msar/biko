@@ -1,9 +1,11 @@
 import { getCategorySchedule, getWeeklyRecommendations, householdHasMatchingPaymentMethod, filterHiddenWeeklyGroups, WEEKLY_ESSENTIAL_CATEGORY_NAMES } from '@biko/shared';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { syncMercadoPagoPromotions } from '../services/mercadopago-scraper.js';
-import { syncModoPromotions } from '../services/modo-scraper.js';
-import { syncNaranjaXPromotions } from '../services/naranjax-scraper.js';
+import { mercadoPagoSource } from '../services/mercadopago-scraper.js';
+import { modoSource } from '../services/modo-scraper.js';
+import { naranjaXSource } from '../services/naranjax-scraper.js';
+import { syncAllPromotionSources } from '../services/promotion-sources.js';
+import { syncPromotionSource } from '../services/promotion-sync.js';
 import {
   PROMOTION_INCLUDE,
   suggestForExpense,
@@ -240,7 +242,7 @@ export default async function promotionRoutes(app: FastifyInstance) {
     const query = suggestQuerySchema.parse(request.query);
     const method = await app.prisma.paymentMethod.findFirst({
       where: { id: query.paymentMethodId, householdId: request.user.householdId },
-      include: { definition: true },
+      include: { definition: { include: { entity: true } } },
     });
     if (!method) return reply.code(400).send({ error: 'Medio de pago inválido' });
 
@@ -280,12 +282,12 @@ export default async function promotionRoutes(app: FastifyInstance) {
 
   // Scraping de promos (solo super usuario; en Railway también corre por cron).
   const superUserOnly = [app.authenticate, app.requireSuperUser];
+  const freshQuery = z.object({ fresh: z.coerce.boolean().optional() });
 
   app.post('/promotions/sync/modo', { preHandler: superUserOnly }, async (request, reply) => {
-    const fresh = z.object({ fresh: z.coerce.boolean().optional() }).parse(request.query).fresh ?? false;
+    const fresh = freshQuery.parse(request.query).fresh ?? false;
     try {
-      const result = await syncModoPromotions(app.prisma, app.log, { fresh });
-      return result;
+      return await syncPromotionSource(app.prisma, modoSource, app.log, { fresh });
     } catch (err) {
       app.log.error(err, 'MODO sync failed');
       return reply.code(502).send({ error: 'No se pudo sincronizar con MODO' });
@@ -293,10 +295,9 @@ export default async function promotionRoutes(app: FastifyInstance) {
   });
 
   app.post('/promotions/sync/mercadopago', { preHandler: superUserOnly }, async (request, reply) => {
-    const fresh = z.object({ fresh: z.coerce.boolean().optional() }).parse(request.query).fresh ?? false;
+    const fresh = freshQuery.parse(request.query).fresh ?? false;
     try {
-      const result = await syncMercadoPagoPromotions(app.prisma, app.log, { fresh });
-      return result;
+      return await syncPromotionSource(app.prisma, mercadoPagoSource, app.log, { fresh });
     } catch (err) {
       app.log.error(err, 'Mercado Pago sync failed');
       return reply.code(502).send({ error: 'No se pudo sincronizar con Mercado Pago' });
@@ -304,14 +305,23 @@ export default async function promotionRoutes(app: FastifyInstance) {
   });
 
   app.post('/promotions/sync/naranjax', { preHandler: superUserOnly }, async (request, reply) => {
-    const fresh = z.object({ fresh: z.coerce.boolean().optional() }).parse(request.query).fresh ?? false;
+    const fresh = freshQuery.parse(request.query).fresh ?? false;
     try {
-      const result = await syncNaranjaXPromotions(app.prisma, app.log, { fresh });
-      return result;
+      return await syncPromotionSource(app.prisma, naranjaXSource, app.log, { fresh });
     } catch (err) {
       app.log.error(err, 'Naranja X sync failed');
       return reply.code(502).send({ error: 'No se pudo sincronizar con Naranja X' });
     }
+  });
+
+  app.post('/promotions/sync/all', { preHandler: superUserOnly }, async (request, reply) => {
+    const fresh = freshQuery.parse(request.query).fresh ?? false;
+    const outcomes = await syncAllPromotionSources(app.prisma, app.log, { fresh });
+    const failures = outcomes.filter((o) => !o.ok);
+    if (failures.length === outcomes.length) {
+      return reply.code(502).send({ error: 'No se pudo sincronizar ninguna fuente', outcomes });
+    }
+    return { outcomes };
   });
 
   app.get('/promotions/sync/status', { preHandler: superUserOnly }, async () => {

@@ -1,7 +1,7 @@
 import { inferPromotionProvinces, parseDiscountFromText, parseMinPurchaseAmount } from '@biko/shared';
-import { Prisma, PrismaClient } from '@prisma/client';
 import type { FastifyBaseLogger } from 'fastify';
-import { buildPromoNotes, parsePercentage, type ScrapedPromo, type SyncResult } from './modo-scraper.js';
+import { buildPromoNotes, parsePercentage } from './modo-scraper.js';
+import type { BankResolverCtx, PromotionSource, ScrapedPromo } from './promotion-sync.js';
 
 // ============================================================
 // Scraper de promociones de Naranja X.
@@ -18,10 +18,8 @@ import { buildPromoNotes, parsePercentage, type ScrapedPromo, type SyncResult } 
 // (last-good) y registra el error en PromotionSync.
 // ============================================================
 
-const SOURCE = 'NARANJA_X';
 const API_BASE = 'https://bkn-promotions.naranjax.com/bff-promotions-web';
-const PROMOS_URL = 'https://www.naranjax.com/promociones/';
-const PAGE_SIZE = 50;
+const PROMOS_URL = 'https://www.naranjax.com/promociones/';const PAGE_SIZE = 50;
 const MAX_PAGES = 200;
 
 const NX_HEADERS = {
@@ -470,120 +468,13 @@ export async function fetchNaranjaXPromos(log: FastifyBaseLogger): Promise<Scrap
   return [...byId.values()];
 }
 
-export async function persistNaranjaXPromos(
-  prisma: PrismaClient,
-  scraped: ScrapedPromo[],
-  log: FastifyBaseLogger,
-): Promise<SyncResult> {
-  const entities = await prisma.entity.findMany();
-  const entityByName = new Map(entities.map((e) => [e.name.toLowerCase(), e.id]));
-  const nxEntityId = entityByName.get('naranja x');
-  if (!nxEntityId) throw new Error('Entidad Naranja X no encontrada (falta seed)');
-
-  const categories = await prisma.category.findMany({ where: { householdId: null } });
-  const categoryByName = new Map(categories.map((c) => [c.name, c.id]));
-
-  let imported = 0;
-  let updated = 0;
-  const seenIds: string[] = [];
-
-  for (const promo of scraped) {
-    const categoryId = promo.categoryName ? categoryByName.get(promo.categoryName) : undefined;
-
-    const data = {
-      entityId: nxEntityId,
-      sponsorBank: 'Naranja X',
-      sponsorBanks: [],
-      store: promo.store,
-      paymentMethodType: null,
-      daysOfWeek: promo.daysOfWeek as Prisma.PromotionCreatedaysOfWeekInput['set'],
-      discountKind: promo.discountKind,
-      discountLabel: promo.discountLabel,
-      discountPercentage: promo.discountPercentage,
-      discountCap: promo.discountCap,
-      minPurchaseAmount: promo.minPurchaseAmount,
-      validFrom: promo.validFrom ? new Date(promo.validFrom) : null,
-      validTo: promo.validTo ? new Date(promo.validTo) : null,
-      source: 'SCRAPED' as const,
-      sourceUrl: promo.sourceUrl,
-      active: true,
-      notes: promo.title,
-      imageUrl: promo.imageUrl,
-      details: promo.details,
-      provinces: promo.provinces,
-      storesAdherents: promo.storesAdherents,
-      paymentFlow: promo.paymentFlow,
-    };
-
-    const existing = await prisma.promotion.findUnique({
-      where: { externalSource_externalId: { externalSource: SOURCE, externalId: promo.externalId } },
-    });
-
-    if (existing) {
-      await prisma.promotion.update({
-        where: { id: existing.id },
-        data: {
-          ...data,
-          categories: categoryId ? { deleteMany: {}, create: [{ categoryId }] } : { deleteMany: {} },
-        },
-      });
-      updated++;
-    } else {
-      await prisma.promotion.create({
-        data: {
-          ...data,
-          externalSource: SOURCE,
-          externalId: promo.externalId,
-          categories: categoryId ? { create: [{ categoryId }] } : undefined,
-        },
-      });
-      imported++;
-    }
-    seenIds.push(promo.externalId);
-  }
-
-  const { count: deactivated } = await prisma.promotion.updateMany({
-    where: { externalSource: SOURCE, externalId: { notIn: seenIds }, active: true },
-    data: { active: false },
-  });
-
-  log.info({ imported, updated, deactivated }, 'Naranja X sync persisted');
-  return { imported, updated, deactivated };
+function resolveNaranjaXBanks(_bankNames: string[], ctx: BankResolverCtx) {
+  return { entityId: ctx.defaultEntityId, sponsorBank: 'Naranja X', sponsorBanks: [] };
 }
 
-export async function clearScrapedNaranjaXPromotions(prisma: PrismaClient, log: FastifyBaseLogger): Promise<number> {
-  await prisma.purchase.updateMany({
-    where: { promotion: { externalSource: SOURCE } },
-    data: { promotionId: null },
-  });
-  const { count } = await prisma.promotion.deleteMany({ where: { externalSource: SOURCE } });
-  log.info({ count }, 'Naranja X scraped promos cleared');
-  return count;
-}
-
-export async function syncNaranjaXPromotions(
-  prisma: PrismaClient,
-  log: FastifyBaseLogger,
-  options: { fresh?: boolean } = {},
-): Promise<SyncResult> {
-  try {
-    let cleared = 0;
-    if (options.fresh) cleared = await clearScrapedNaranjaXPromotions(prisma, log);
-    const scraped = await fetchNaranjaXPromos(log);
-    const result = await persistNaranjaXPromos(prisma, scraped, log);
-    await prisma.promotionSync.upsert({
-      where: { source: SOURCE },
-      create: { source: SOURCE, lastRunAt: new Date(), lastError: null, ...result },
-      update: { lastRunAt: new Date(), lastError: null, ...result },
-    });
-    return { ...result, cleared };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await prisma.promotionSync.upsert({
-      where: { source: SOURCE },
-      create: { source: SOURCE, lastRunAt: new Date(), lastError: message },
-      update: { lastRunAt: new Date(), lastError: message },
-    });
-    throw err;
-  }
-}
+export const naranjaXSource: PromotionSource = {
+  source: 'NARANJA_X',
+  entityName: 'naranja x',
+  fetch: fetchNaranjaXPromos,
+  resolveBanks: resolveNaranjaXBanks,
+};

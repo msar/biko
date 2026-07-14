@@ -5,8 +5,8 @@
     "buildCommand": "npm install && npx prisma generate --schema apps/api/prisma/schema.prisma"
   },
   "deploy": {
-    "startCommand": "npm run sync:mercadopago --workspace @biko/api",
-    "cronSchedule": "0 10 * * *",
+    "startCommand": "npm run sync:promotions --workspace @biko/api",
+    "cronSchedule": "0 9 * * *",
     "restartPolicyType": "NEVER"
   }
 }

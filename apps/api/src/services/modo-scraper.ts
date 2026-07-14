@@ -1,6 +1,6 @@
 import { inferPromotionProvinces, mapModoBankToCatalogName, parseDiscountFromText, parseMinPurchaseAmount } from '@biko/shared';
-import { Prisma, PrismaClient } from '@prisma/client';
 import type { FastifyBaseLogger } from 'fastify';
+import type { BankResolverCtx, PromotionSource, ScrapedPromo } from './promotion-sync.js';
 
 // ============================================================
 // Scraper de promociones de MODO.
@@ -17,39 +17,10 @@ import type { FastifyBaseLogger } from 'fastify';
 // existentes como están (last-good) y registra el error en PromotionSync.
 // ============================================================
 
-export interface ScrapedPromo {
-  externalId: string;
-  title: string;
-  store: string | null;
-  categoryName: string | null;
-  bankNames: string[];
-  discountKind: 'PERCENTAGE_REFUND' | 'INSTALLMENTS' | 'FIXED_AMOUNT' | 'OTHER';
-  discountLabel: string;
-  discountPercentage: number;
-  discountCap: number | null;
-  minPurchaseAmount: number | null;
-  daysOfWeek: string[];
-  validFrom: string | null;
-  validTo: string | null;
-  sourceUrl: string;
-  imageUrl: string | null;
-  details: string[];
-  provinces: string[];
-  storesAdherents: boolean;
-  paymentFlow: string | null;
-}
+export type { ScrapedPromo, SyncResult } from './promotion-sync.js';
 
-export interface SyncResult {
-  imported: number;
-  updated: number;
-  deactivated: number;
-  cleared?: number;
-}
-
-const SOURCE = 'MODO';
 const API_BASE = 'https://promoshub.modo.com.ar/promos/api/rewards';
 const PROMOS_URL = 'https://www.modo.com.ar/promos';
-
 export function buildModoSourceUrl(slug: string | null | undefined): string {
   const trimmed = slug?.trim();
   return trimmed ? `${PROMOS_URL}/${trimmed}` : PROMOS_URL;
@@ -163,7 +134,7 @@ export function parseStoreFromTitle(title: string): string | null {
   return null;
 }
 
-export function extractBankNames(rows: ModoCard['content']['row']): string[] {
+export function extractBankNames(rows: NonNullable<ModoCard['content']>['row']): string[] {
   const banks = new Set<string>();
   for (const row of rows ?? []) {
     for (const item of row.extra_data ?? []) {
@@ -337,138 +308,22 @@ export async function fetchModoPromos(log: FastifyBaseLogger): Promise<ScrapedPr
   return [...byId.values()];
 }
 
-export async function persistScrapedPromos(
-  prisma: PrismaClient,
-  scraped: ScrapedPromo[],
-  log: FastifyBaseLogger,
-): Promise<SyncResult> {
-  const entities = await prisma.entity.findMany();
-  const entityByName = new Map(entities.map((e) => [e.name.toLowerCase(), e.id]));
-  const modoEntityId = entityByName.get('modo');
-  if (!modoEntityId) throw new Error('Entidad MODO no encontrada (falta seed)');
-
-  function resolvePromoBanks(rawBankNames: string[]): {
-    entityId: string;
-    sponsorBank: string | null;
-    sponsorBanks: string[];
-  } {
-    const sponsorBanks = [...new Set(rawBankNames.map(mapModoBankToCatalogName))];
-    if (sponsorBanks.length === 0) {
-      return { entityId: modoEntityId, sponsorBank: null, sponsorBanks: [] };
-    }
-    if (sponsorBanks.length === 1) {
-      const name = sponsorBanks[0]!;
-      const entityId = entityByName.get(name.toLowerCase()) ?? modoEntityId;
-      return { entityId, sponsorBank: name, sponsorBanks };
-    }
-    return { entityId: modoEntityId, sponsorBank: null, sponsorBanks };
+function resolveModoBanks(rawBankNames: string[], ctx: BankResolverCtx) {
+  const sponsorBanks = [...new Set(rawBankNames.map(mapModoBankToCatalogName))];
+  if (sponsorBanks.length === 0) {
+    return { entityId: ctx.defaultEntityId, sponsorBank: null, sponsorBanks: [] };
   }
-  const categories = await prisma.category.findMany({ where: { householdId: null } });
-  const categoryByName = new Map(categories.map((c) => [c.name, c.id]));
-
-  let imported = 0;
-  let updated = 0;
-  const seenIds: string[] = [];
-
-  for (const promo of scraped) {
-    const { entityId, sponsorBank, sponsorBanks } = resolvePromoBanks(promo.bankNames);
-    const categoryId = promo.categoryName ? categoryByName.get(promo.categoryName) : undefined;
-
-    const data = {
-      entityId,
-      sponsorBank,
-      sponsorBanks,
-      store: promo.store,
-      paymentMethodType: null,
-      daysOfWeek: promo.daysOfWeek as Prisma.PromotionCreatedaysOfWeekInput['set'],
-      discountKind: promo.discountKind,
-      discountLabel: promo.discountLabel,
-      discountPercentage: promo.discountPercentage,
-      discountCap: promo.discountCap,
-      minPurchaseAmount: promo.minPurchaseAmount,
-      validFrom: promo.validFrom ? new Date(promo.validFrom) : null,
-      validTo: promo.validTo ? new Date(promo.validTo) : null,
-      source: 'SCRAPED' as const,
-      sourceUrl: promo.sourceUrl,
-      active: true,
-      notes: promo.title,
-      imageUrl: promo.imageUrl,
-      details: promo.details,
-      provinces: promo.provinces,
-      storesAdherents: promo.storesAdherents,
-      paymentFlow: promo.paymentFlow,
-    };
-
-    const existing = await prisma.promotion.findUnique({
-      where: { externalSource_externalId: { externalSource: SOURCE, externalId: promo.externalId } },
-    });
-
-    if (existing) {
-      await prisma.promotion.update({
-        where: { id: existing.id },
-        data: {
-          ...data,
-          categories: categoryId ? { deleteMany: {}, create: [{ categoryId }] } : { deleteMany: {} },
-        },
-      });
-      updated++;
-    } else {
-      await prisma.promotion.create({
-        data: {
-          ...data,
-          externalSource: SOURCE,
-          externalId: promo.externalId,
-          categories: categoryId ? { create: [{ categoryId }] } : undefined,
-        },
-      });
-      imported++;
-    }
-    seenIds.push(promo.externalId);
+  if (sponsorBanks.length === 1) {
+    const name = sponsorBanks[0]!;
+    const entityId = ctx.entityByName.get(name.toLowerCase()) ?? ctx.defaultEntityId;
+    return { entityId, sponsorBank: name, sponsorBanks };
   }
-
-  const { count: deactivated } = await prisma.promotion.updateMany({
-    where: { externalSource: SOURCE, externalId: { notIn: seenIds }, active: true },
-    data: { active: false },
-  });
-
-  log.info({ imported, updated, deactivated }, 'MODO sync persisted');
-  return { imported, updated, deactivated };
+  return { entityId: ctx.defaultEntityId, sponsorBank: null, sponsorBanks };
 }
 
-/** Borra todas las promos scrapeadas de MODO para reimportar desde cero. */
-export async function clearScrapedModoPromotions(prisma: PrismaClient, log: FastifyBaseLogger): Promise<number> {
-  await prisma.purchase.updateMany({
-    where: { promotion: { externalSource: SOURCE } },
-    data: { promotionId: null },
-  });
-  const { count } = await prisma.promotion.deleteMany({ where: { externalSource: SOURCE } });
-  log.info({ count }, 'MODO scraped promos cleared');
-  return count;
-}
-
-export async function syncModoPromotions(
-  prisma: PrismaClient,
-  log: FastifyBaseLogger,
-  options: { fresh?: boolean } = {},
-): Promise<SyncResult> {
-  try {
-    let cleared = 0;
-    if (options.fresh) cleared = await clearScrapedModoPromotions(prisma, log);
-    const scraped = await fetchModoPromos(log);
-    const result = await persistScrapedPromos(prisma, scraped, log);
-    await prisma.promotionSync.upsert({
-      where: { source: SOURCE },
-      create: { source: SOURCE, lastRunAt: new Date(), lastError: null, ...result },
-      update: { lastRunAt: new Date(), lastError: null, ...result },
-    });
-    return { ...result, cleared };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await prisma.promotionSync.upsert({
-      where: { source: SOURCE },
-      create: { source: SOURCE, lastRunAt: new Date(), lastError: message },
-      update: { lastRunAt: new Date(), lastError: message },
-    });
-    throw err;
-  }
-}
+export const modoSource: PromotionSource = {
+  source: 'MODO',
+  entityName: 'modo',
+  fetch: fetchModoPromos,
+  resolveBanks: resolveModoBanks,
+};
