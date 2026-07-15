@@ -437,13 +437,25 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
     if (scope === 'PERSONAL') setChargeTo('me');
   }, [scope]);
 
+  // Keep Monto fields aligned with the current estimated net (changes with promos).
   useEffect(() => {
-    if (chargeTo === 'split' && splitSubMode === 'AMOUNT' && estimatedNet > 0 && !myAmount && !partnerAmount) {
-      const half = Math.round(equalShare * 100) / 100;
-      setMyAmount(String(half));
-      setPartnerAmount(String(Math.round((estimatedNet - half) * 100) / 100));
-    }
-  }, [chargeTo, splitSubMode, estimatedNet, equalShare, myAmount, partnerAmount]);
+    if (chargeTo !== 'split' || splitSubMode !== 'AMOUNT' || estimatedNet <= 0) return;
+    setMyAmount((prev) => {
+      if (prev === '' || !Number.isFinite(Number(prev))) {
+        return String(Math.round((estimatedNet / 2) * 100) / 100);
+      }
+      const clamped = Math.min(Math.max(0, Number(prev)), estimatedNet);
+      return String(Math.round(clamped * 100) / 100);
+    });
+  }, [chargeTo, splitSubMode, estimatedNet]);
+
+  useEffect(() => {
+    if (chargeTo !== 'split' || splitSubMode !== 'AMOUNT' || estimatedNet <= 0) return;
+    if (myAmount === '' || !Number.isFinite(Number(myAmount))) return;
+    const mine = Math.min(Math.max(0, Number(myAmount)), estimatedNet);
+    const theirs = Math.round((estimatedNet - mine) * 100) / 100;
+    setPartnerAmount(String(theirs));
+  }, [chargeTo, splitSubMode, estimatedNet, myAmount]);
 
   const buildPayload = (): Omit<OutboxExpense, 'clientId' | 'createdAt'> => {
     const payload: Omit<OutboxExpense, 'clientId' | 'createdAt'> = {
@@ -556,30 +568,42 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
     (manualSource === 'existing' && Boolean(selectedPromotionId)) ||
     (manualSource === 'custom' && Number(manualPct) > 0 && Number(manualPct) <= 100);
 
-  const splitValid =
-    scope !== 'HOUSEHOLD' ||
-    members.length < 2 ||
-    chargeTo === 'me' ||
-    chargeTo === 'partner' ||
-    (splitSubMode === 'EQUAL' && estimatedNet > 0) ||
-    (splitSubMode === 'AMOUNT' &&
-      Number(myAmount) >= 0 &&
-      Number(myAmount) <= estimatedNet &&
-      Math.abs(Number(myAmount) + Number(partnerAmount || estimatedNet - Number(myAmount)) - estimatedNet) < 0.02) ||
-    (splitSubMode === 'SHARES' && Number(myShares) >= 0 && Number(partnerShares) >= 0 && Number(myShares) + Number(partnerShares) > 0) ||
-    (splitSubMode === 'PERCENTAGE' &&
-      Number(myPct) >= 0 &&
-      Number(partnerPct) >= 0 &&
-      Math.abs(Number(myPct) + Number(partnerPct) - 100) < 0.01);
+  const splitValid = (() => {
+    if (scope !== 'HOUSEHOLD' || members.length < 2) return true;
+    if (chargeTo === 'me' || chargeTo === 'partner') return true;
+    // Repartir: partner share is always (net - mine) for Monto.
+    switch (splitSubMode) {
+      case 'EQUAL':
+        return true;
+      case 'AMOUNT': {
+        const mine = Number(myAmount);
+        return Number.isFinite(mine) && mine >= 0 && mine <= estimatedNet + 0.001;
+      }
+      case 'SHARES':
+        return Number(myShares) >= 0 && Number(partnerShares) >= 0 && Number(myShares) + Number(partnerShares) > 0;
+      case 'PERCENTAGE':
+        return (
+          Number(myPct) >= 0 &&
+          Number(partnerPct) >= 0 &&
+          Math.abs(Number(myPct) + Number(partnerPct) - 100) < 0.05
+        );
+      default:
+        return true;
+    }
+  })();
 
-  const canSave =
-    grossAmount > 0 &&
-    categoryId &&
-    paymentMethodId &&
-    store.trim() &&
-    !mutation.isPending &&
-    manualPromoValid &&
-    splitValid;
+  const saveBlockers: string[] = [];
+  if (!(grossAmount > 0)) saveBlockers.push('Ingresá el monto');
+  if (!categoryId) saveBlockers.push('Elegí una categoría');
+  if (!paymentMethodId) saveBlockers.push('Elegí un medio de pago');
+  if (!store.trim()) saveBlockers.push('Ingresá el comercio');
+  if (!manualPromoValid) {
+    if (manualSource === 'existing') saveBlockers.push('Elegí una promoción');
+    else saveBlockers.push('Ingresá un % de descuento válido');
+  }
+  if (!splitValid) saveBlockers.push('Revisá el reparto del gasto');
+
+  const canSave = saveBlockers.length === 0 && !mutation.isPending;
 
   if (savedOffline) {
     return (
@@ -1033,6 +1057,9 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
       </section>
 
       {error && <p className="error">{error}</p>}
+      {saveBlockers.length > 0 && !mutation.isPending && (
+        <p className="hint center">{saveBlockers.join(' · ')}</p>
+      )}
 
       <button className="btn-primary btn-save" disabled={!canSave} onClick={() => mutation.mutate()}>
         {mutation.isPending ? 'Guardando…' : mode === 'edit' ? 'Guardar cambios' : 'Guardar gasto'}
