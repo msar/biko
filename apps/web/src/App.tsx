@@ -93,11 +93,11 @@ export default function App() {
           <NavLink to="/nuevo" className="nav-add" aria-label="Nuevo gasto">
             <span className="nav-add-circle">+</span>
           </NavLink>
-          <NavLink to="/ajustes">
-            <span className="nav-icon">👤</span>Perfil
-          </NavLink>
           <NavLink to="/promos">
             <span className="nav-icon">📅</span>Promos
+          </NavLink>
+          <NavLink to="/ajustes">
+            <span className="nav-icon">👤</span>Perfil
           </NavLink>
         </nav>
       )}
