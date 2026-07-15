@@ -22,6 +22,8 @@ docs/             Brief del proyecto
 - **Sync de promos MODO**: scraper de modo.com.ar/promos (botón manual en la pestaña Promos + cron diario en Railway). Las promos scrapeadas se deduplican por id externo y se dan de baja solas cuando desaparecen del sitio.
 - **Medios de pago estandarizados**: catálogo global seedeado (Santander Visa, Santander Amex, MODO, …). Nada de texto libre tipo "Visa Sant".
 - **Offline**: la PWA se instala desde el navegador, abre sin conexión con los datos cacheados (IndexedDB) y los gastos cargados offline se encolan y sincronizan al volver la red (idempotente vía `clientId`).
+- **Recurrentes**: luz, gas, gym y similares (monto fijo o variable). Los fijos generan el gasto al vencer; los variables quedan pendientes hasta que ingresás el monto. Cambiar un monto fijo aplica *desde ahora* (historial aparte).
+- **Notificaciones**: bandeja in-app + Web Push (PWA). Tipos extensibles (`RECURRING_*` hoy; mismo pipeline para futuros avisos).
 - **Auth**: email/password + JWT. El modelo `User` ya tiene `authProvider`/`externalId` para migrar a Clerk sin migración de datos.
 
 ## Desarrollo local
@@ -79,6 +81,8 @@ El script crea `api`, `web` y `promotions-sync` (si no existen), configura varia
 - `DATABASE_URL` → `${{Postgres.DATABASE_URL}}`
 - `JWT_SECRET` → generado con `${{ secret(...) }}`
 - `CORS_ORIGIN` → `https://${{web.RAILWAY_PUBLIC_DOMAIN}}`
+- `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` → Web Push (`npx web-push generate-vapid-keys`)
+- `CRON_SECRET` → protege `POST /internal/jobs/recurring`
 
 **web**
 - `VITE_API_URL` → `https://${{api.RAILWAY_PUBLIC_DOMAIN}}` (horneado en build)
@@ -87,6 +91,10 @@ El script crea `api`, `web` y `promotions-sync` (si no existen), configura varia
 - `DATABASE_URL` → `${{Postgres.DATABASE_URL}}`
 - Cron: `0 9 * * *` (09:00 UTC = 06:00 ART)
 - Corre MODO, Naranja X y Mercado Pago en un solo job (continúa si una fuente falla)
+
+**recurring-daily** (cron recomendado, o el mismo servicio api)
+- Cron: `0 11 * * *` UTC (08:00 ART)
+- `curl -X POST "$API_URL/internal/jobs/recurring" -H "X-Cron-Secret: $CRON_SECRET"`
 
 También se puede disparar a mano con los botones de sync en la pestaña Promos (admin).
 

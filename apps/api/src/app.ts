@@ -10,6 +10,9 @@ import dashboardRoutes from './routes/dashboard.js';
 import expenseRoutes from './routes/expenses.js';
 import paymentMethodRoutes from './routes/payment-methods.js';
 import promotionRoutes from './routes/promotions.js';
+import recurringRoutes from './routes/recurring.js';
+import notificationRoutes from './routes/notifications.js';
+import internalJobRoutes from './routes/internal-jobs.js';
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -40,6 +43,9 @@ export async function buildApp() {
   await app.register(promotionRoutes);
   await app.register(expenseRoutes);
   await app.register(dashboardRoutes);
+  await app.register(recurringRoutes);
+  await app.register(notificationRoutes);
+  await app.register(internalJobRoutes);
 
   return app;
 }

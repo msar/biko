@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, fmtARS } from '../lib/api';
+import { api, fmtARS, fmtDate } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import type { DashboardScope, MonthlyDashboard } from '../lib/types';
+import type { DashboardScope, MonthlyDashboard, RecurringOccurrence } from '../lib/types';
 
 function monthLabel(month: string): string {
   const [y, m] = month.split('-').map(Number);
@@ -49,6 +49,11 @@ export default function DashboardPage() {
     queryFn: () => api<Array<{ month: string; total: number }>>(`/dashboard/upcoming?scope=${scope}`),
   });
 
+  const { data: pendingOcc } = useQuery({
+    queryKey: ['recurring-occurrences', 'PENDING'],
+    queryFn: () => api<RecurringOccurrence[]>('/recurring-payments/occurrences?status=PENDING&limit=8'),
+  });
+
   const maxGroup = Math.max(1, ...(data?.byGroup.map((g) => g.total) ?? []));
   const showSettle = scope === 'household';
 
@@ -72,10 +77,39 @@ export default function DashboardPage() {
             <button onClick={() => setMonth(shiftMonth(month, 1))}>›</button>
           </div>
         </div>
-        <Link to="/historico" className="btn-link">
-          Largo plazo ›
-        </Link>
+        <div className="header-links">
+          <Link to="/recurrentes" className="btn-link">
+            Recurrentes
+          </Link>
+          <Link to="/historico" className="btn-link">
+            Largo plazo ›
+          </Link>
+        </div>
       </header>
+
+      {pendingOcc && pendingOcc.length > 0 && (
+        <section className="card">
+          <div className="row-between">
+            <h2>Vencimientos</h2>
+            <Link to="/recurrentes" className="btn-link">
+              Ver todos
+            </Link>
+          </div>
+          {pendingOcc.slice(0, 5).map((occ) => (
+            <div key={occ.id} className="list-row">
+              <span>
+                <strong>{occ.recurringPayment.name}</strong>
+                <small>
+                  {' '}
+                  {fmtDate(occ.dueDate)}
+                  {occ.recurringPayment.amountType === 'VARIABLE' ? ' · completar monto' : ''}
+                </small>
+              </span>
+              {occ.amount && <strong>{fmtARS.format(Number(occ.amount))}</strong>}
+            </div>
+          ))}
+        </section>
+      )}
 
       <div className="segmented dashboard-scope">
         <button type="button" className={scope === 'household' ? 'active' : ''} onClick={() => setScope('household')}>

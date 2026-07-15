@@ -1,10 +1,11 @@
 import { ARGENTINE_PROVINCES } from '@biko/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AddPaymentMethodsWizard, EditPaymentMethodForm } from '../components/PaymentMethodForm';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { getPushPermission, pushSupported, subscribeToPush, unsubscribeFromPush } from '../lib/push';
 import {
   groupMethodsByEntity,
   methodSubtitle,
@@ -17,6 +18,17 @@ export default function SettingsPage() {
   const queryClient = useQueryClient();
   const [panel, setPanel] = useState<'none' | 'add' | 'edit'>('none');
   const [editId, setEditId] = useState<string | null>(null);
+  const [pushStatus, setPushStatus] = useState<string>('…');
+  const [pushError, setPushError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getPushPermission().then((p) => {
+      if (p === 'unsupported') setPushStatus('No disponible en este dispositivo');
+      else if (p === 'granted') setPushStatus('Activadas');
+      else if (p === 'denied') setPushStatus('Bloqueadas por el navegador');
+      else setPushStatus('Desactivadas');
+    });
+  }, []);
 
   const { data: methods } = useQuery({
     queryKey: ['payment-methods'],
@@ -115,6 +127,50 @@ export default function SettingsPage() {
           </Link>
         </section>
       )}
+
+      <section className="card">
+        <h2>Notificaciones push</h2>
+        <p className="hint">Estado: {pushStatus}</p>
+        {pushError && <p className="error">{pushError}</p>}
+        {pushSupported() && (
+          <div className="confirm-actions">
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => {
+                setPushError(null);
+                void subscribeToPush(
+                  async () => {
+                    const res = await api<{ publicKey: string }>('/notifications/vapid-public-key');
+                    return res.publicKey;
+                  },
+                  (body) => api('/notifications/push-subscriptions', { method: 'POST', body: JSON.stringify(body) }),
+                )
+                  .then((r) => {
+                    setPushStatus(r === 'granted' ? 'Activadas' : 'No concedidas');
+                  })
+                  .catch((err) => setPushError(err instanceof Error ? err.message : 'No se pudo activar'));
+              }}
+            >
+              Activar alertas
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                void unsubscribeFromPush((body) =>
+                  api('/notifications/push-subscriptions', { method: 'DELETE', body: JSON.stringify(body) }),
+                ).then(() => setPushStatus('Desactivadas'));
+              }}
+            >
+              Desactivar
+            </button>
+          </div>
+        )}
+        <p className="hint">
+          También podés gestionar <Link to="/recurrentes">pagos recurrentes</Link> (luz, gas, gym…).
+        </p>
+      </section>
 
       <section className="card">
         <div className="row-between">

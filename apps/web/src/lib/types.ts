@@ -298,3 +298,47 @@ export interface LongTermDashboard {
     }>;
   }>;
 }
+
+export type RecurringAmountType = 'FIXED' | 'VARIABLE';
+export type RecurringOccurrenceStatus = 'PENDING' | 'COMPLETED' | 'SKIPPED';
+export type NotificationType = 'RECURRING_REMINDER' | 'RECURRING_DUE' | 'RECURRING_AUTO_CREATED';
+
+export interface RecurringPayment {
+  id: string;
+  name: string;
+  categoryId: string;
+  category: Category;
+  paymentMethodId: string | null;
+  paymentMethod: PaymentMethod | null;
+  scope: ExpenseScope;
+  cadence: 'MONTHLY';
+  dueDay: number;
+  amountType: RecurringAmountType;
+  amount: string | null;
+  reminderDaysBefore: number;
+  active: boolean;
+  nextDueDate: string;
+  createdBy: { id: string; name: string };
+}
+
+export interface RecurringOccurrence {
+  id: string;
+  dueDate: string;
+  status: RecurringOccurrenceStatus;
+  amount: string | null;
+  purchaseId: string | null;
+  purchase: { id: string; netAmount: string; store: string } | null;
+  reminderSentAt: string | null;
+  dueNotifiedAt: string | null;
+  recurringPayment: RecurringPayment;
+}
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  data: Record<string, unknown> | null;
+  readAt: string | null;
+  createdAt: string;
+}

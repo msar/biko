@@ -11,6 +11,7 @@ import LoginPage from './pages/LoginPage';
 import LongTermPage from './pages/LongTermPage';
 import NewExpensePage from './pages/NewExpensePage';
 import PromotionsPage from './pages/PromotionsPage';
+import RecurringPaymentsPage from './pages/RecurringPaymentsPage';
 import SettingsPage from './pages/SettingsPage';
 import AppHeader from './components/AppHeader';
 import BrandMark from './components/BrandLogo';
@@ -76,6 +77,7 @@ export default function App() {
           <Route path="/promos" element={<PromotionsPage />} />
           <Route path="/hoy" element={<Navigate to="/promos" replace />} />
           <Route path="/ajustes" element={<SettingsPage />} />
+          <Route path="/recurrentes" element={<RecurringPaymentsPage />} />
           <Route path="/admin" element={<AdminRoute />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

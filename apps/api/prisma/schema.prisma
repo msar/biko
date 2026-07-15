@@ -74,6 +74,27 @@ enum SplitMode {
   PERCENTAGE
 }
 
+enum RecurringAmountType {
+  FIXED
+  VARIABLE
+}
+
+enum RecurringCadence {
+  MONTHLY
+}
+
+enum RecurringOccurrenceStatus {
+  PENDING
+  COMPLETED
+  SKIPPED
+}
+
+enum NotificationType {
+  RECURRING_REMINDER
+  RECURRING_DUE
+  RECURRING_AUTO_CREATED
+}
+
 // ============================================================
 // CATÁLOGO GLOBAL DE ENTIDADES Y MEDIOS DE PAGO (seed, no editable por hogar)
 // ============================================================
@@ -133,6 +154,8 @@ model Household {
   monthlyCapUsages MonthlyCapUsage[]
   hiddenWeeklyPromos HouseholdHiddenWeeklyPromo[]
   favoriteWeeklyPromos HouseholdFavoriteWeeklyPromo[]
+  recurringPayments RecurringPayment[]
+  notifications    Notification[]
 }
 
 model User {
@@ -153,6 +176,10 @@ model User {
   paidPurchases Purchase[] @relation("PurchasePayer")
   ownedMethods PaymentMethod[] @relation("MethodOwner")
   allocations  PurchaseAllocation[]
+  recurringPayments RecurringPayment[] @relation("RecurringCreator")
+  amountHistories RecurringAmountHistory[]
+  notifications Notification[]
+  pushSubscriptions PushSubscription[]
 }
 
 // Comercios/promos que el hogar ocultó en Mi semana (por groupKey de weeklyPromoGroupKey).
@@ -192,6 +219,7 @@ model Category {
 
   purchases   Purchase[]
   promotions  PromotionCategory[]
+  recurringPayments RecurringPayment[]
 
   @@unique([householdId, name])
 }
@@ -216,6 +244,7 @@ model PaymentMethod {
   dueDay       Int?                    // día de vencimiento del resumen (ej: 10 del mes siguiente al cierre)
 
   purchases    Purchase[]
+  recurringPayments RecurringPayment[]
 
   @@unique([householdId, definitionId, lastFour])
   @@index([householdId])
@@ -346,6 +375,7 @@ model Purchase {
 
   installments   Installment[]
   allocations    PurchaseAllocation[]
+  recurringOccurrence RecurringOccurrence?
 
   @@index([householdId, purchaseDate])
   @@index([categoryId])
@@ -432,4 +462,99 @@ model StatementImport {
   importedAt     DateTime @default(now())
 
   @@index([householdId])
+}
+
+// ============================================================
+// PAGOS RECURRENTES Y NOTIFICACIONES
+// ============================================================
+
+model RecurringPayment {
+  id              String              @id @default(cuid())
+  householdId     String
+  household       Household           @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  createdByUserId String
+  createdBy       User                @relation("RecurringCreator", fields: [createdByUserId], references: [id])
+  name            String
+  categoryId      String
+  category        Category            @relation(fields: [categoryId], references: [id])
+  paymentMethodId String?
+  paymentMethod   PaymentMethod?      @relation(fields: [paymentMethodId], references: [id])
+  scope           ExpenseScope        @default(HOUSEHOLD)
+  cadence         RecurringCadence    @default(MONTHLY)
+  dueDay          Int                 // 1–28
+  amountType      RecurringAmountType
+  amount          Decimal?            @db.Decimal(12, 2) // required when FIXED
+  reminderDaysBefore Int              @default(3)
+  active          Boolean             @default(true)
+  nextDueDate     DateTime
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  amountHistory   RecurringAmountHistory[]
+  occurrences     RecurringOccurrence[]
+
+  @@index([householdId, active])
+  @@index([nextDueDate])
+}
+
+model RecurringAmountHistory {
+  id                 String           @id @default(cuid())
+  recurringPaymentId String
+  recurringPayment   RecurringPayment @relation(fields: [recurringPaymentId], references: [id], onDelete: Cascade)
+  amount             Decimal          @db.Decimal(12, 2)
+  effectiveFrom      DateTime
+  createdByUserId    String
+  createdBy          User             @relation(fields: [createdByUserId], references: [id])
+  createdAt          DateTime         @default(now())
+
+  @@index([recurringPaymentId, effectiveFrom])
+}
+
+model RecurringOccurrence {
+  id                 String                    @id @default(cuid())
+  recurringPaymentId String
+  recurringPayment   RecurringPayment          @relation(fields: [recurringPaymentId], references: [id], onDelete: Cascade)
+  dueDate            DateTime
+  status             RecurringOccurrenceStatus @default(PENDING)
+  amount             Decimal?                  @db.Decimal(12, 2)
+  purchaseId         String?                   @unique
+  purchase           Purchase?                 @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  reminderSentAt     DateTime?
+  dueNotifiedAt      DateTime?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+
+  @@unique([recurringPaymentId, dueDate])
+  @@index([dueDate, status])
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  householdId String
+  household   Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  type        NotificationType
+  title       String
+  body        String
+  data        Json?
+  readAt      DateTime?
+  createdAt   DateTime         @default(now())
+
+  @@index([userId, readAt, createdAt])
+  @@index([householdId, createdAt])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, endpoint])
+  @@index([userId])
 }
