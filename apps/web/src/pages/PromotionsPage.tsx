@@ -25,6 +25,38 @@ const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'
 
 const DISCOUNT_KINDS: DiscountKind[] = ['PERCENTAGE_REFUND', 'INSTALLMENTS', 'FIXED_AMOUNT', 'OTHER'];
 
+function normalizeSearch(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .trim()
+    .toLowerCase();
+}
+
+function promoMatchesSearch(
+  promo: Promotion,
+  query: string,
+  categoryNamesById: Map<string, string>,
+): boolean {
+  const q = normalizeSearch(query);
+  if (!q) return true;
+
+  const haystack = [
+    promo.store,
+    promo.discountLabel,
+    promo.sponsorBank,
+    ...promo.sponsorBanks,
+    promo.entity?.name,
+    ...promo.categoryIds.map((id) => categoryNamesById.get(id)),
+    ...promo.details,
+  ]
+    .filter(Boolean)
+    .map((value) => normalizeSearch(String(value)))
+    .join(' ');
+
+  return haystack.includes(q);
+}
+
 function WeeklyCalendar({
   weekly,
   province,
@@ -261,6 +293,7 @@ export default function PromotionsPage() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<'hoy' | 'calendar' | 'when' | 'all'>('hoy');
   const [showForm, setShowForm] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState<string | null>(null);
   const [filterEntity, setFilterEntity] = useState<string | null>(null);
   const [filterDiscountKind, setFilterDiscountKind] = useState<DiscountKind | null>(null);
@@ -364,6 +397,14 @@ export default function PromotionsPage() {
     void queryClient.invalidateQueries({ queryKey: ['promotions'] });
   };
 
+  const categoryNamesById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const cat of categories ?? []) map.set(cat.id, cat.name);
+    return map;
+  }, [categories]);
+
+  const trimmedSearch = searchQuery.trim();
+
   const visiblePromos = filterPromosByLocation(
     promotions?.filter((p) => {
       if (activeOnly && !p.active) return false;
@@ -371,6 +412,7 @@ export default function PromotionsPage() {
       if (filterEntity && p.entityId !== filterEntity) return false;
       if (filterCategory && p.categoryIds.length > 0 && !p.categoryIds.includes(filterCategory)) return false;
       if (filterDiscountKind && p.discountKind !== filterDiscountKind) return false;
+      if (!promoMatchesSearch(p, trimmedSearch, categoryNamesById)) return false;
       return true;
     }) ?? [],
     locationFilter === 'household' ? (me?.household.province ?? null) : null,
@@ -380,6 +422,11 @@ export default function PromotionsPage() {
     () => groupWeeklyPromos(visiblePromos.map(promotionToWeeklyPromo)),
     [visiblePromos],
   );
+
+  const onSearchChange = (value: string) => {
+    setSearchQuery(value);
+    if (value.trim()) setTab('all');
+  };
 
   return (
     <div className="page">
@@ -393,6 +440,21 @@ export default function PromotionsPage() {
       {showForm && entities && categories && (
         <PromoForm entities={entities} categories={categories} onDone={() => setShowForm(false)} />
       )}
+
+      <div className="promo-search">
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Buscar comercio, banco…"
+          aria-label="Buscar promociones"
+        />
+        {trimmedSearch && (
+          <button type="button" className="promo-search-clear" onClick={() => setSearchQuery('')} aria-label="Limpiar búsqueda">
+            ✕
+          </button>
+        )}
+      </div>
 
       <div className="segmented">
         <button className={tab === 'hoy' ? 'active' : ''} onClick={() => setTab('hoy')}>
@@ -545,7 +607,11 @@ export default function PromotionsPage() {
               ))}
             </div>
           ) : (
-            <p className="empty-state">Sin promos que coincidan con los filtros.</p>
+            <p className="empty-state">
+              {trimmedSearch
+                ? `Sin resultados para “${trimmedSearch}”.`
+                : 'Sin promos que coincidan con los filtros.'}
+            </p>
           )}
         </>
       )}

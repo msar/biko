@@ -61,9 +61,6 @@ export default function AppHeader() {
           🔔
           {count > 0 && <span className="notif-badge">{count > 9 ? '9+' : count}</span>}
         </button>
-        <Link to="/ajustes" className="icon-btn" aria-label="Ajustes">
-          ⚙️
-        </Link>
         {open && (
           <div className="notif-panel">
             <div className="row-between">

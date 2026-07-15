@@ -347,7 +347,6 @@ body {
   max-width: 560px;
   background: var(--card);
   display: flex;
-  justify-content: space-around;
   align-items: center;
   padding: 8px 0 max(8px, env(safe-area-inset-bottom));
   border-top: 1px solid #e6e3da;
@@ -355,13 +354,16 @@ body {
 }
 
 .bottom-nav a {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 2px;
   font-size: 0.65rem;
   color: var(--muted);
   text-decoration: none;
+  min-width: 0;
 }
 
 .bottom-nav a.active {
@@ -378,6 +380,14 @@ body {
   height: 4px;
   border-radius: 50%;
   background: var(--accent);
+}
+
+.bottom-nav a.nav-add {
+  gap: 0;
+}
+
+.bottom-nav a.nav-add.active::after {
+  display: none;
 }
 
 .nav-icon {
@@ -1481,6 +1491,29 @@ label {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.promo-search {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.promo-search input {
+  padding-right: 40px;
+}
+
+.promo-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 6px 8px;
+  cursor: pointer;
 }
 
 code {
