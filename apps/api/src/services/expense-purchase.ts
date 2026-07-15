@@ -14,7 +14,13 @@ type Db = PrismaClient | Prisma.TransactionClient;
 export const purchaseInclude = {
   category: true,
   user: { select: { id: true, name: true } },
-  paymentMethod: { include: { definition: { include: { entity: true } } } },
+  paidBy: { select: { id: true, name: true } },
+  paymentMethod: {
+    include: {
+      definition: { include: { entity: true } },
+      owner: { select: { id: true, name: true } },
+    },
+  },
   promotion: { include: { entity: true } },
   installments: { orderBy: { number: 'asc' as const } },
   allocations: { include: { user: { select: { id: true, name: true } } } },
@@ -27,6 +33,8 @@ export interface ManualDiscountInput {
   discountPercentage: number;
   discountCap?: number | null;
 }
+
+export type SplitModeInput = 'EQUAL' | 'ASSIGN' | 'AMOUNT' | 'SHARES' | 'PERCENTAGE';
 
 export interface ExpenseInput {
   paymentMethodId: string;
@@ -42,7 +50,11 @@ export interface ExpenseInput {
   promotionId?: string;
   manualDiscount?: ManualDiscountInput;
   scope: 'HOUSEHOLD' | 'PERSONAL';
+  /** @deprecated Prefer splitMode + splitValues / assignToUserId */
   myShareAmount?: number;
+  splitMode?: SplitModeInput;
+  assignToUserId?: string;
+  splitValues?: { userId: string; value: number }[];
 }
 
 interface ResolvedDiscount {
@@ -62,6 +74,56 @@ async function getHouseholdMemberIds(db: Db, householdId: string): Promise<strin
     orderBy: { id: 'asc' },
   });
   return users.map((u) => u.id);
+}
+
+function resolveSplitMode(body: ExpenseInput, scope: 'HOUSEHOLD' | 'PERSONAL'): SplitModeInput {
+  if (scope === 'PERSONAL') return 'EQUAL';
+  if (body.splitMode) return body.splitMode;
+  if (body.myShareAmount != null) return 'AMOUNT';
+  return 'EQUAL';
+}
+
+function buildAllocationsForExpense(
+  body: ExpenseInput,
+  userId: string,
+  memberIds: string[],
+  netAmount: number,
+) {
+  if (body.scope === 'PERSONAL') {
+    return buildPurchaseAllocations({
+      scope: 'PERSONAL',
+      netAmount,
+      userId,
+      memberIds,
+    });
+  }
+
+  const splitMode = resolveSplitMode(body, body.scope);
+  if (body.assignToUserId && !memberIds.includes(body.assignToUserId)) {
+    throw new ExpenseValidationError('El usuario asignado no pertenece al hogar');
+  }
+  if (body.splitValues) {
+    for (const entry of body.splitValues) {
+      if (!memberIds.includes(entry.userId)) {
+        throw new ExpenseValidationError('Un valor de reparto apunta a un usuario inválido');
+      }
+    }
+  }
+
+  try {
+    return buildPurchaseAllocations({
+      scope: 'HOUSEHOLD',
+      netAmount,
+      userId,
+      memberIds,
+      splitMode,
+      assignToUserId: body.assignToUserId,
+      splitValues: body.splitValues,
+      myShareAmount: body.myShareAmount,
+    });
+  } catch (error) {
+    throw new ExpenseValidationError(error instanceof Error ? error.message : 'Reparto inválido');
+  }
 }
 
 export function resolvePromotionMode(body: Pick<ExpenseInput, 'promotionMode' | 'applyPromotion'>): PromotionApplyMode {
@@ -262,13 +324,9 @@ export async function createPurchaseWithAllocations(
   }
 
   const memberIds = await getHouseholdMemberIds(tx, householdId);
-  const allocationEntries = buildPurchaseAllocations({
-    scope: body.scope,
-    netAmount: discount.netAmount,
-    userId,
-    memberIds,
-    myShareAmount: body.scope === 'HOUSEHOLD' ? body.myShareAmount : undefined,
-  });
+  const allocationEntries = buildAllocationsForExpense(body, userId, memberIds, discount.netAmount);
+  const splitMode = resolveSplitMode(body, body.scope);
+  const paidByUserId = paymentMethod.ownerUserId ?? userId;
 
   const installments = generateInstallments(discount.netAmount, body.installmentsCount, body.purchaseDate, {
     type: paymentMethod.definition.type,
@@ -282,6 +340,7 @@ export async function createPurchaseWithAllocations(
       clientId,
       householdId,
       userId,
+      paidByUserId,
       paymentMethodId: paymentMethod.id,
       categoryId: category.id,
       store: body.store,
@@ -296,6 +355,7 @@ export async function createPurchaseWithAllocations(
       netAmount: discount.netAmount,
       installmentsCount: isImmediate ? 1 : body.installmentsCount,
       scope: body.scope,
+      splitMode,
       installments: {
         create: installments.map((inst) => ({
           householdId,
@@ -378,13 +438,9 @@ export async function updatePurchaseWithAllocations(
   }
 
   const memberIds = await getHouseholdMemberIds(tx, householdId);
-  const allocationEntries = buildPurchaseAllocations({
-    scope: body.scope,
-    netAmount: discount.netAmount,
-    userId,
-    memberIds,
-    myShareAmount: body.scope === 'HOUSEHOLD' ? body.myShareAmount : undefined,
-  });
+  const allocationEntries = buildAllocationsForExpense(body, userId, memberIds, discount.netAmount);
+  const splitMode = resolveSplitMode(body, body.scope);
+  const paidByUserId = paymentMethod.ownerUserId ?? userId;
 
   const installments = generateInstallments(discount.netAmount, body.installmentsCount, body.purchaseDate, {
     type: paymentMethod.definition.type,
@@ -410,6 +466,8 @@ export async function updatePurchaseWithAllocations(
       netAmount: discount.netAmount,
       installmentsCount: isImmediate ? 1 : body.installmentsCount,
       scope: body.scope,
+      splitMode,
+      paidByUserId,
       installments: {
         create: installments.map((inst) => ({
           householdId,

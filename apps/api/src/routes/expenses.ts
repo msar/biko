@@ -15,6 +15,11 @@ const manualDiscountSchema = z.object({
   discountCap: z.number().positive().nullish(),
 });
 
+const splitValueSchema = z.object({
+  userId: z.string(),
+  value: z.number(),
+});
+
 const expenseFieldsSchema = z.object({
   paymentMethodId: z.string(),
   categoryId: z.string(),
@@ -29,6 +34,9 @@ const expenseFieldsSchema = z.object({
   manualDiscount: manualDiscountSchema.optional(),
   scope: z.enum(['HOUSEHOLD', 'PERSONAL']).default('HOUSEHOLD'),
   myShareAmount: z.number().positive().optional(),
+  splitMode: z.enum(['EQUAL', 'ASSIGN', 'AMOUNT', 'SHARES', 'PERCENTAGE']).optional(),
+  assignToUserId: z.string().optional(),
+  splitValues: z.array(splitValueSchema).optional(),
 });
 
 function validatePromotionMode(
@@ -52,16 +60,57 @@ function validatePromotionMode(
   }
 }
 
+function validateSplitFields(
+  data: z.infer<typeof expenseFieldsSchema>,
+  ctx: z.RefinementCtx,
+): void {
+  if (data.scope === 'PERSONAL') return;
+
+  const mode = data.splitMode ?? (data.myShareAmount != null ? 'AMOUNT' : 'EQUAL');
+  if (mode === 'ASSIGN' && !data.assignToUserId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Indicá a quién se carga el gasto',
+      path: ['assignToUserId'],
+    });
+  }
+  if ((mode === 'SHARES' || mode === 'PERCENTAGE') && (!data.splitValues || data.splitValues.length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Indicá los valores de reparto',
+      path: ['splitValues'],
+    });
+  }
+  if (mode === 'AMOUNT' && !data.myShareAmount && (!data.splitValues || data.splitValues.length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Indicá los montos de reparto',
+      path: ['splitValues'],
+    });
+  }
+}
+
 const expenseBodySchema = expenseFieldsSchema
   .extend({ clientId: z.string().min(8).optional() })
-  .superRefine(validatePromotionMode);
+  .superRefine(validatePromotionMode)
+  .superRefine(validateSplitFields);
 
-const updateExpenseSchema = expenseFieldsSchema.superRefine(validatePromotionMode);
+const updateExpenseSchema = expenseFieldsSchema
+  .superRefine(validatePromotionMode)
+  .superRefine(validateSplitFields);
 
 const listQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
+
+/** HOUSEHOLD for everyone; PERSONAL only for the creator. */
+export function visiblePurchaseWhere(householdId: string, userId: string) {
+  return {
+    householdId,
+    OR: [{ scope: 'HOUSEHOLD' as const }, { scope: 'PERSONAL' as const, userId }],
+  };
+}
 
 function handleExpenseError(error: unknown, reply: { code: (n: number) => { send: (body: unknown) => unknown } }) {
   if (error instanceof ExpenseValidationError) {
@@ -83,7 +132,15 @@ export default async function expenseRoutes(app: FastifyInstance) {
         where: { clientId: body.clientId },
         include: purchaseInclude,
       });
-      if (existing) return reply.code(200).send(existing);
+      if (existing) {
+        if (existing.householdId !== householdId) {
+          return reply.code(404).send({ error: 'Gasto no encontrado' });
+        }
+        if (existing.scope === 'PERSONAL' && existing.userId !== userId) {
+          return reply.code(404).send({ error: 'Gasto no encontrado' });
+        }
+        return reply.code(200).send(existing);
+      }
     }
 
     try {
@@ -98,9 +155,10 @@ export default async function expenseRoutes(app: FastifyInstance) {
 
   app.get('/expenses', { preHandler: [app.authenticate] }, async (request) => {
     const query = listQuerySchema.parse(request.query);
-    const where: { householdId: string; purchaseDate?: { gte: Date; lt: Date } } = {
-      householdId: request.user.householdId,
-    };
+    const { householdId, userId } = request.user;
+    const where: ReturnType<typeof visiblePurchaseWhere> & {
+      purchaseDate?: { gte: Date; lt: Date };
+    } = visiblePurchaseWhere(householdId, userId);
     if (query.month) {
       const [y, m] = query.month.split('-').map(Number);
       where.purchaseDate = { gte: new Date(y!, m! - 1, 1), lt: new Date(y!, m!, 1) };
@@ -115,8 +173,9 @@ export default async function expenseRoutes(app: FastifyInstance) {
 
   app.get('/expenses/:id', { preHandler: [app.authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
+    const { householdId, userId } = request.user;
     const purchase = await app.prisma.purchase.findFirst({
-      where: { id, householdId: request.user.householdId },
+      where: { id, ...visiblePurchaseWhere(householdId, userId) },
       include: purchaseInclude,
     });
     if (!purchase) return reply.code(404).send({ error: 'Gasto no encontrado' });
@@ -127,6 +186,15 @@ export default async function expenseRoutes(app: FastifyInstance) {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const body = updateExpenseSchema.parse(request.body);
     const { householdId, userId } = request.user;
+
+    const existing = await app.prisma.purchase.findFirst({
+      where: { id, householdId },
+      select: { id: true, scope: true, userId: true },
+    });
+    if (!existing) return reply.code(404).send({ error: 'Gasto no encontrado' });
+    if (existing.scope === 'PERSONAL' && existing.userId !== userId) {
+      return reply.code(403).send({ error: 'No podés editar un gasto personal ajeno' });
+    }
 
     try {
       const purchase = await app.prisma.$transaction((tx) =>
@@ -140,11 +208,15 @@ export default async function expenseRoutes(app: FastifyInstance) {
 
   app.delete('/expenses/:id', { preHandler: [app.authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
+    const { householdId, userId } = request.user;
     const purchase = await app.prisma.purchase.findFirst({
-      where: { id, householdId: request.user.householdId },
+      where: { id, householdId },
       include: { paymentMethod: { include: { definition: true } } },
     });
     if (!purchase) return reply.code(404).send({ error: 'Gasto no encontrado' });
+    if (purchase.scope === 'PERSONAL' && purchase.userId !== userId) {
+      return reply.code(403).send({ error: 'No podés eliminar un gasto personal ajeno' });
+    }
 
     await app.prisma.$transaction(async (tx) => {
       await rollbackPurchaseCapUsage(tx, {

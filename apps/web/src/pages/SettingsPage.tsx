@@ -10,7 +10,7 @@ import {
   methodSubtitle,
   paymentMethodDisplayName,
 } from '../lib/payment-method-catalog';
-import type { PaymentMethod, PaymentMethodDefinition } from '../lib/types';
+import type { HouseholdMember, PaymentMethod, PaymentMethodDefinition } from '../lib/types';
 
 export default function SettingsPage() {
   const { user, logout } = useAuth();
@@ -27,15 +27,25 @@ export default function SettingsPage() {
     queryFn: () => api<PaymentMethodDefinition[]>('/catalog/payment-method-definitions'),
   });
   const { data: me } = useQuery({
-    queryKey: ['me'],
-    queryFn: () => api<{ household: { name: string; inviteCode: string; province: string | null } }>('/auth/me'),
+    queryKey: ['auth', 'me'],
+    queryFn: () =>
+      api<{
+        household: {
+          name: string;
+          inviteCode: string;
+          province: string | null;
+          members: HouseholdMember[];
+        };
+      }>('/auth/me'),
   });
+
+  const members = me?.household.members ?? [];
 
   const provinceMutation = useMutation({
     mutationFn: (province: string | null) =>
       api('/household', { method: 'PATCH', body: JSON.stringify({ province }) }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['me'] });
+      void queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
       void queryClient.invalidateQueries({ queryKey: ['promotions'] });
     },
   });
@@ -127,13 +137,19 @@ export default function SettingsPage() {
           <AddPaymentMethodsWizard
             definitions={definitions}
             existingMethods={methods}
+            defaultOwnerUserId={user?.id ?? null}
             onDone={closePanel}
             onCancel={closePanel}
           />
         )}
 
         {panel === 'edit' && editMethod && (
-          <EditPaymentMethodForm method={editMethod} onDone={closePanel} onCancel={closePanel} />
+          <EditPaymentMethodForm
+            method={editMethod}
+            members={members}
+            onDone={closePanel}
+            onCancel={closePanel}
+          />
         )}
 
         {grouped.map((group) => (
@@ -144,6 +160,7 @@ export default function SettingsPage() {
                 <div>
                   <strong>{paymentMethodDisplayName(m)}</strong>
                   {methodSubtitle(m) && <small> {methodSubtitle(m)}</small>}
+                  {m.owner && <small> · Dueño: {m.owner.name}</small>}
                 </div>
                 <div className="list-row-actions">
                   <button

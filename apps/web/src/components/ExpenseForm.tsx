@@ -18,8 +18,12 @@ import type {
   Promotion,
   PromotionApplyMode,
   Purchase,
+  SplitMode,
   Suggestion,
 } from '../lib/types';
+
+type ChargeTo = 'me' | 'partner' | 'split';
+type SplitSubMode = 'EQUAL' | 'AMOUNT' | 'SHARES' | 'PERCENTAGE';
 
 function promotionOptionLabel(p: Promotion, categories: Category[] | undefined): string {
   const pct = Number(p.discountPercentage);
@@ -130,20 +134,46 @@ export interface ExpenseFormInitial {
   manualPct: string;
   manualCap: string;
   scope: ExpenseScope;
-  splitMode: 'equal' | 'custom';
-  myShare: string;
+  chargeTo: ChargeTo;
+  splitSubMode: SplitSubMode;
+  myAmount: string;
+  partnerAmount: string;
+  myShares: string;
+  partnerShares: string;
+  myPct: string;
+  partnerPct: string;
 }
 
 function initialFromPurchase(purchase: Purchase, userId: string): ExpenseFormInitial {
   const promoState = resolvePromotionStateFromPurchase(purchase);
-  const myAllocation = purchase.allocations.find((a) => a.userId === userId);
+  const partnerAlloc = purchase.allocations.find((a) => a.userId !== userId);
+  const myAlloc = purchase.allocations.find((a) => a.userId === userId);
   const netAmount = Number(purchase.netAmount);
-  const memberCount = purchase.allocations.length;
-  const equalShare = memberCount > 0 ? netAmount / memberCount : netAmount;
-  const myAmount = myAllocation ? Number(myAllocation.amount) : equalShare;
-  const isEqual =
-    purchase.scope === 'HOUSEHOLD' &&
-    purchase.allocations.every((a) => Math.abs(Number(a.amount) - equalShare) < 0.02);
+  const myAmount = myAlloc ? Number(myAlloc.amount) : 0;
+  const partnerAmount = partnerAlloc ? Number(partnerAlloc.amount) : Math.max(0, netAmount - myAmount);
+  const mode = purchase.splitMode ?? 'EQUAL';
+
+  let chargeTo: ChargeTo = 'split';
+  let splitSubMode: SplitSubMode = 'EQUAL';
+
+  if (purchase.scope === 'PERSONAL') {
+    chargeTo = 'me';
+    splitSubMode = 'EQUAL';
+  } else if (mode === 'ASSIGN') {
+    if (myAmount >= netAmount - 0.02) chargeTo = 'me';
+    else if (partnerAmount >= netAmount - 0.02) chargeTo = 'partner';
+    else chargeTo = 'split';
+    splitSubMode = 'EQUAL';
+  } else if (mode === 'EQUAL') {
+    chargeTo = 'split';
+    splitSubMode = 'EQUAL';
+  } else {
+    chargeTo = 'split';
+    splitSubMode = mode;
+  }
+
+  const myPct = netAmount > 0 ? Math.round((myAmount / netAmount) * 1000) / 10 : 50;
+  const partnerPct = Math.round((100 - myPct) * 10) / 10;
 
   return {
     amount: String(Number(purchase.grossAmount)),
@@ -154,8 +184,14 @@ function initialFromPurchase(purchase: Purchase, userId: string): ExpenseFormIni
     installments: purchase.installmentsCount,
     ...promoState,
     scope: purchase.scope,
-    splitMode: purchase.scope === 'PERSONAL' || isEqual ? 'equal' : 'custom',
-    myShare: String(Math.round(myAmount)),
+    chargeTo,
+    splitSubMode,
+    myAmount: String(Math.round(myAmount * 100) / 100),
+    partnerAmount: String(Math.round(partnerAmount * 100) / 100),
+    myShares: '1',
+    partnerShares: '1',
+    myPct: String(myPct),
+    partnerPct: String(partnerPct),
   };
 }
 
@@ -184,8 +220,14 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
   const [manualPct, setManualPct] = useState(initial?.manualPct ?? '');
   const [manualCap, setManualCap] = useState(initial?.manualCap ?? '');
   const [scope, setScope] = useState<ExpenseScope>(initial?.scope ?? 'HOUSEHOLD');
-  const [splitMode, setSplitMode] = useState<'equal' | 'custom'>(initial?.splitMode ?? 'equal');
-  const [myShare, setMyShare] = useState(initial?.myShare ?? '');
+  const [chargeTo, setChargeTo] = useState<ChargeTo>(initial?.chargeTo ?? 'split');
+  const [splitSubMode, setSplitSubMode] = useState<SplitSubMode>(initial?.splitSubMode ?? 'EQUAL');
+  const [myAmount, setMyAmount] = useState(initial?.myAmount ?? '');
+  const [partnerAmount, setPartnerAmount] = useState(initial?.partnerAmount ?? '');
+  const [myShares, setMyShares] = useState(initial?.myShares ?? '1');
+  const [partnerShares, setPartnerShares] = useState(initial?.partnerShares ?? '1');
+  const [myPct, setMyPct] = useState(initial?.myPct ?? '50');
+  const [partnerPct, setPartnerPct] = useState(initial?.partnerPct ?? '50');
   const [error, setError] = useState<string | null>(null);
   const [savedOffline, setSavedOffline] = useState(false);
 
@@ -349,16 +391,59 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
   }, [grossAmount, promotionMode, manualDiscountPreview, suggestion, best, paymentMethodId, offlineSuggestion]);
 
   const equalShare = members.length > 0 ? estimatedNet / members.length : estimatedNet;
-  const myShareAmount = splitMode === 'custom' && scope === 'HOUSEHOLD' ? Number(myShare) || 0 : equalShare;
-  const partnerShare = scope === 'HOUSEHOLD' ? Math.max(0, estimatedNet - myShareAmount) : 0;
+
+  const previewShares = useMemo(() => {
+    if (scope !== 'HOUSEHOLD' || !user?.id) {
+      return { me: estimatedNet, partner: 0 };
+    }
+    if (chargeTo === 'me') return { me: estimatedNet, partner: 0 };
+    if (chargeTo === 'partner') return { me: 0, partner: estimatedNet };
+    if (splitSubMode === 'EQUAL') {
+      return { me: equalShare, partner: Math.max(0, estimatedNet - equalShare) };
+    }
+    if (splitSubMode === 'AMOUNT') {
+      const mine = Number(myAmount) || 0;
+      return { me: mine, partner: Math.max(0, estimatedNet - mine) };
+    }
+    if (splitSubMode === 'SHARES') {
+      const a = Number(myShares) || 0;
+      const b = Number(partnerShares) || 0;
+      const total = a + b;
+      if (total <= 0) return { me: 0, partner: 0 };
+      const me = Math.round(((estimatedNet * a) / total) * 100) / 100;
+      return { me, partner: Math.round((estimatedNet - me) * 100) / 100 };
+    }
+    const a = Number(myPct) || 0;
+    const me = Math.round(((estimatedNet * a) / 100) * 100) / 100;
+    return { me, partner: Math.round((estimatedNet - me) * 100) / 100 };
+  }, [
+    scope,
+    user?.id,
+    chargeTo,
+    splitSubMode,
+    equalShare,
+    estimatedNet,
+    myAmount,
+    myShares,
+    partnerShares,
+    myPct,
+  ]);
 
   useEffect(() => {
     if (!isCredit) setInstallments(1);
   }, [isCredit]);
 
   useEffect(() => {
-    if (scope === 'PERSONAL') setSplitMode('equal');
+    if (scope === 'PERSONAL') setChargeTo('me');
   }, [scope]);
+
+  useEffect(() => {
+    if (chargeTo === 'split' && splitSubMode === 'AMOUNT' && estimatedNet > 0 && !myAmount && !partnerAmount) {
+      const half = Math.round(equalShare * 100) / 100;
+      setMyAmount(String(half));
+      setPartnerAmount(String(Math.round((estimatedNet - half) * 100) / 100));
+    }
+  }, [chargeTo, splitSubMode, estimatedNet, equalShare, myAmount, partnerAmount]);
 
   const buildPayload = (): Omit<OutboxExpense, 'clientId' | 'createdAt'> => {
     const payload: Omit<OutboxExpense, 'clientId' | 'createdAt'> = {
@@ -383,8 +468,37 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
         };
       }
     }
-    if (scope === 'HOUSEHOLD' && splitMode === 'custom' && myShareAmount > 0) {
-      payload.myShareAmount = myShareAmount;
+    if (scope === 'HOUSEHOLD' && members.length > 1 && user?.id && partner) {
+      if (chargeTo === 'me') {
+        payload.splitMode = 'ASSIGN';
+        payload.assignToUserId = user.id;
+      } else if (chargeTo === 'partner') {
+        payload.splitMode = 'ASSIGN';
+        payload.assignToUserId = partner.id;
+      } else {
+        const mode: SplitMode = splitSubMode;
+        payload.splitMode = mode;
+        if (mode === 'EQUAL') {
+          // nothing else
+        } else if (mode === 'AMOUNT') {
+          const mine = Number(myAmount) || 0;
+          const theirs = Math.round((estimatedNet - mine) * 100) / 100;
+          payload.splitValues = [
+            { userId: user.id, value: mine },
+            { userId: partner.id, value: theirs },
+          ];
+        } else if (mode === 'SHARES') {
+          payload.splitValues = [
+            { userId: user.id, value: Number(myShares) || 0 },
+            { userId: partner.id, value: Number(partnerShares) || 0 },
+          ];
+        } else if (mode === 'PERCENTAGE') {
+          payload.splitValues = [
+            { userId: user.id, value: Number(myPct) || 0 },
+            { userId: partner.id, value: Number(partnerPct) || 0 },
+          ];
+        }
+      }
     }
     return payload;
   };
@@ -442,6 +556,22 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
     (manualSource === 'existing' && Boolean(selectedPromotionId)) ||
     (manualSource === 'custom' && Number(manualPct) > 0 && Number(manualPct) <= 100);
 
+  const splitValid =
+    scope !== 'HOUSEHOLD' ||
+    members.length < 2 ||
+    chargeTo === 'me' ||
+    chargeTo === 'partner' ||
+    (splitSubMode === 'EQUAL' && estimatedNet > 0) ||
+    (splitSubMode === 'AMOUNT' &&
+      Number(myAmount) >= 0 &&
+      Number(myAmount) <= estimatedNet &&
+      Math.abs(Number(myAmount) + Number(partnerAmount || estimatedNet - Number(myAmount)) - estimatedNet) < 0.02) ||
+    (splitSubMode === 'SHARES' && Number(myShares) >= 0 && Number(partnerShares) >= 0 && Number(myShares) + Number(partnerShares) > 0) ||
+    (splitSubMode === 'PERCENTAGE' &&
+      Number(myPct) >= 0 &&
+      Number(partnerPct) >= 0 &&
+      Math.abs(Number(myPct) + Number(partnerPct) - 100) < 0.01);
+
   const canSave =
     grossAmount > 0 &&
     categoryId &&
@@ -449,7 +579,7 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
     store.trim() &&
     !mutation.isPending &&
     manualPromoValid &&
-    (scope !== 'HOUSEHOLD' || splitMode !== 'custom' || (myShareAmount > 0 && myShareAmount <= estimatedNet));
+    splitValid;
 
   if (savedOffline) {
     return (
@@ -497,44 +627,179 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
           </button>
         </div>
         {scope === 'PERSONAL' && (
-          <p className="hint">No suma al total del hogar; solo aparece en tu desglose personal.</p>
+          <p className="hint">Solo vos lo ves. No suma al total del hogar ni al balance con tu pareja.</p>
         )}
       </section>
 
-      {scope === 'HOUSEHOLD' && members.length > 1 && (
+      {scope === 'HOUSEHOLD' && members.length > 1 && partner && (
         <section>
-          <h2 className="field-label">Reparto</h2>
+          <h2 className="field-label">Cargo a</h2>
           <div className="segmented">
-            <button type="button" className={splitMode === 'equal' ? 'active' : ''} onClick={() => setSplitMode('equal')}>
-              Reparto igual
+            <button type="button" className={chargeTo === 'me' ? 'active' : ''} onClick={() => setChargeTo('me')}>
+              Yo
             </button>
-            <button type="button" className={splitMode === 'custom' ? 'active' : ''} onClick={() => setSplitMode('custom')}>
-              Mi parte custom
+            <button
+              type="button"
+              className={chargeTo === 'partner' ? 'active' : ''}
+              onClick={() => setChargeTo('partner')}
+            >
+              {partner.name}
+            </button>
+            <button type="button" className={chargeTo === 'split' ? 'active' : ''} onClick={() => setChargeTo('split')}>
+              Repartir
             </button>
           </div>
-          {splitMode === 'equal' && estimatedNet > 0 && (
+          {chargeTo !== 'split' && estimatedNet > 0 && (
             <p className="hint">
-              {fmtARS.format(equalShare)} por persona ({members.length} miembros)
+              {chargeTo === 'me' ? 'Vos' : partner.name} asume {fmtARS.format(estimatedNet)}
             </p>
           )}
-          {splitMode === 'custom' && (
-            <div className="field-row split-fields">
-              <label>
-                Mi parte
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  value={myShare}
-                  onChange={(e) => setMyShare(e.target.value)}
-                  placeholder={String(Math.round(equalShare))}
-                />
-              </label>
-              {partner && estimatedNet > 0 && (
-                <p className="split-partner">
-                  {partner.name}: {fmtARS.format(partnerShare)} de {fmtARS.format(estimatedNet)}
+
+          {chargeTo === 'split' && (
+            <>
+              <h2 className="field-label">Cómo repartir</h2>
+              <div className="segmented segmented-wrap">
+                <button
+                  type="button"
+                  className={splitSubMode === 'EQUAL' ? 'active' : ''}
+                  onClick={() => setSplitSubMode('EQUAL')}
+                >
+                  Igual
+                </button>
+                <button
+                  type="button"
+                  className={splitSubMode === 'AMOUNT' ? 'active' : ''}
+                  onClick={() => setSplitSubMode('AMOUNT')}
+                >
+                  Monto
+                </button>
+                <button
+                  type="button"
+                  className={splitSubMode === 'SHARES' ? 'active' : ''}
+                  onClick={() => setSplitSubMode('SHARES')}
+                >
+                  Partes
+                </button>
+                <button
+                  type="button"
+                  className={splitSubMode === 'PERCENTAGE' ? 'active' : ''}
+                  onClick={() => setSplitSubMode('PERCENTAGE')}
+                >
+                  %
+                </button>
+              </div>
+
+              {splitSubMode === 'EQUAL' && estimatedNet > 0 && (
+                <p className="hint">
+                  {fmtARS.format(equalShare)} c/u · Vos {fmtARS.format(previewShares.me)} · {partner.name}{' '}
+                  {fmtARS.format(previewShares.partner)}
                 </p>
               )}
-            </div>
+
+              {splitSubMode === 'AMOUNT' && (
+                <div className="field-row split-fields">
+                  <label>
+                    Tu parte $
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      value={myAmount}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setMyAmount(v);
+                        const mine = Number(v) || 0;
+                        setPartnerAmount(String(Math.max(0, Math.round((estimatedNet - mine) * 100) / 100)));
+                      }}
+                      placeholder={String(Math.round(equalShare))}
+                    />
+                  </label>
+                  <label>
+                    {partner.name} $
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      value={partnerAmount}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setPartnerAmount(v);
+                        const theirs = Number(v) || 0;
+                        setMyAmount(String(Math.max(0, Math.round((estimatedNet - theirs) * 100) / 100)));
+                      }}
+                      placeholder={String(Math.round(equalShare))}
+                    />
+                  </label>
+                </div>
+              )}
+
+              {splitSubMode === 'SHARES' && (
+                <div className="field-row split-fields">
+                  <label>
+                    Tus partes
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      value={myShares}
+                      onChange={(e) => setMyShares(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Partes {partner.name}
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      value={partnerShares}
+                      onChange={(e) => setPartnerShares(e.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
+
+              {splitSubMode === 'PERCENTAGE' && (
+                <div className="field-row split-fields">
+                  <label>
+                    Tu %
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      max="100"
+                      value={myPct}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setMyPct(v);
+                        const mine = Number(v) || 0;
+                        setPartnerPct(String(Math.round((100 - mine) * 100) / 100));
+                      }}
+                    />
+                  </label>
+                  <label>
+                    % {partner.name}
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      max="100"
+                      value={partnerPct}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setPartnerPct(v);
+                        const theirs = Number(v) || 0;
+                        setMyPct(String(Math.round((100 - theirs) * 100) / 100));
+                      }}
+                    />
+                  </label>
+                </div>
+              )}
+
+              {chargeTo === 'split' && splitSubMode !== 'EQUAL' && estimatedNet > 0 && (
+                <p className="split-partner">
+                  Vos {fmtARS.format(previewShares.me)} · {partner.name} {fmtARS.format(previewShares.partner)} de{' '}
+                  {fmtARS.format(estimatedNet)}
+                </p>
+              )}
+            </>
           )}
         </section>
       )}
@@ -576,11 +841,25 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
                 >
                   {paymentMethodDisplayName(m)}
                   {m.lastFour ? ` ···${m.lastFour}` : ''}
+                  {m.owner ? ` · ${m.owner.name}` : ''}
                 </button>
               ))}
             </div>
           </div>
         ))}
+        {selectedMethod && (
+          <p className="hint">
+            Pagado por:{' '}
+            <strong>
+              {selectedMethod.owner
+                ? selectedMethod.owner.id === user?.id
+                  ? 'Vos'
+                  : selectedMethod.owner.name
+                : 'Vos'}
+            </strong>
+            {!selectedMethod.owner && ' (sin dueño en el medio — se asume quien carga)'}
+          </p>
+        )}
       </section>
 
       <section className="field-row">

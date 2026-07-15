@@ -1,6 +1,7 @@
 import { allocationShareForInstallment, attributionMonth, computeSettleTransfers } from '@biko/shared';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { resolvePurchasePayer } from '../services/purchase-payer.js';
 
 const monthQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
@@ -36,6 +37,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
     const { month } = monthQuerySchema.parse(request.query);
     const range = monthRange(month);
     const householdId = request.user.householdId;
+    const viewerId = request.user.userId;
 
     const installments = await app.prisma.installment.findMany({
       where: {
@@ -50,6 +52,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
           include: {
             category: true,
             user: { select: { id: true, name: true } },
+            paidBy: { select: { id: true, name: true } },
             paymentMethod: {
               include: { definition: { include: { entity: true } }, owner: { select: { id: true, name: true } } },
             },
@@ -92,12 +95,15 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         pmEntry.total += amount;
         byPaymentMethod.set(pm.id, pmEntry);
 
-        const payer = purchase.paymentMethod.owner ?? purchase.user;
+        const payer = resolvePurchasePayer(purchase);
         memberNames.set(payer.id, payer.name);
         paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + amount);
       }
 
       for (const allocation of purchase.allocations) {
+        // Personal spend of the partner stays private — skip in byUser.
+        if (!isHousehold && purchase.userId !== viewerId) continue;
+
         const share = allocationShareForInstallment(amount, allocation.amount.toNumber(), netAmount);
         if (share <= 0) continue;
         const userEntry = byUser.get(allocation.userId) ?? {
@@ -147,7 +153,9 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         perUser: perUser.sort((a, b) => b.balance - a.balance),
         transfers,
       },
-      installments: installments.map((i) => ({
+      installments: installments
+        .filter((i) => i.purchase.scope === 'HOUSEHOLD' || i.purchase.userId === viewerId)
+        .map((i) => ({
         id: i.id,
         amount: i.amount.toNumber(),
         dueDate: i.dueDate,
@@ -197,6 +205,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       where: { householdId, scope: 'HOUSEHOLD' },
       include: {
         user: { select: { id: true, name: true } },
+        paidBy: { select: { id: true, name: true } },
         paymentMethod: { select: { owner: { select: { id: true, name: true } } } },
         allocations: { include: { user: { select: { id: true, name: true } } } },
       },
@@ -208,7 +217,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
     const shareByUser = new Map<string, number>();
 
     for (const purchase of purchases) {
-      const payer = purchase.paymentMethod.owner ?? purchase.user;
+      const payer = resolvePurchasePayer(purchase);
       memberNames.set(payer.id, payer.name);
       paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + purchase.netAmount.toNumber());
       for (const allocation of purchase.allocations) {

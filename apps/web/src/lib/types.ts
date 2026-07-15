@@ -15,6 +15,8 @@ export interface HouseholdMember {
 
 export type ExpenseScope = 'HOUSEHOLD' | 'PERSONAL';
 
+export type SplitMode = 'EQUAL' | 'ASSIGN' | 'AMOUNT' | 'SHARES' | 'PERCENTAGE';
+
 export type PromotionApplyMode = 'auto' | 'manual' | 'off';
 
 export interface ManualDiscount {
@@ -160,8 +162,10 @@ export interface Purchase {
   netAmount: string;
   installmentsCount: number;
   scope: ExpenseScope;
+  splitMode: SplitMode;
   category: Category;
   user: { id: string; name: string };
+  paidBy: { id: string; name: string } | null;
   paymentMethod: PaymentMethod;
   promotion: (Promotion & { entity: Entity }) | null;
   installments: Installment[];

@@ -496,6 +496,12 @@ label {
   border-radius: 10px;
   padding: 3px;
   gap: 3px;
+  flex-wrap: wrap;
+}
+
+.segmented-wrap button {
+  flex: 1 1 auto;
+  min-width: 4.25rem;
 }
 
 .segmented button {

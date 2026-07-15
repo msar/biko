@@ -12,11 +12,12 @@ import {
   listIssuerEntities,
   walletDefinitionFor,
 } from '../lib/payment-method-catalog';
-import type { PaymentMethod, PaymentMethodDefinition } from '../lib/types';
+import type { HouseholdMember, PaymentMethod, PaymentMethodDefinition } from '../lib/types';
 
 interface AddPaymentMethodsWizardProps {
   definitions: PaymentMethodDefinition[];
   existingMethods: PaymentMethod[];
+  defaultOwnerUserId?: string | null;
   onDone: () => void;
   onCancel: () => void;
 }
@@ -24,6 +25,7 @@ interface AddPaymentMethodsWizardProps {
 export function AddPaymentMethodsWizard({
   definitions,
   existingMethods,
+  defaultOwnerUserId,
   onDone,
   onCancel,
 }: AddPaymentMethodsWizardProps) {
@@ -69,7 +71,7 @@ export function AddPaymentMethodsWizard({
     try {
       await api('/payment-methods', {
         method: 'POST',
-        body: JSON.stringify({ definitionId: def.id }),
+        body: JSON.stringify({ definitionId: def.id, ownerUserId: defaultOwnerUserId ?? null }),
       });
       void queryClient.invalidateQueries({ queryKey: ['payment-methods'] });
       if (closeOnSuccess) onDone();
@@ -90,7 +92,7 @@ export function AddPaymentMethodsWizard({
     try {
       await api('/payment-methods', {
         method: 'POST',
-        body: JSON.stringify({ definitionId }),
+        body: JSON.stringify({ definitionId, ownerUserId: defaultOwnerUserId ?? null }),
       });
       void queryClient.invalidateQueries({ queryKey: ['payment-methods'] });
       onDone();
@@ -122,6 +124,7 @@ export function AddPaymentMethodsWizard({
             definitionId: def.id,
             closingDay: Number(closingDay),
             dueDay: Number(dueDay),
+            ownerUserId: defaultOwnerUserId ?? null,
           }),
         });
         added++;
@@ -317,15 +320,17 @@ export function AddPaymentMethodsWizard({
 
 interface EditPaymentMethodFormProps {
   method: PaymentMethod;
+  members: HouseholdMember[];
   onDone: () => void;
   onCancel: () => void;
 }
 
-export function EditPaymentMethodForm({ method, onDone, onCancel }: EditPaymentMethodFormProps) {
+export function EditPaymentMethodForm({ method, members, onDone, onCancel }: EditPaymentMethodFormProps) {
   const queryClient = useQueryClient();
   const isCredit = method.definition.type === 'CREDIT_CARD';
   const isCard = isCredit || method.definition.type === 'DEBIT_CARD';
   const [error, setError] = useState<string | null>(null);
+  const [ownerUserId, setOwnerUserId] = useState(method.owner?.id ?? '');
 
   const mutation = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -345,6 +350,7 @@ export function EditPaymentMethodForm({ method, onDone, onCancel }: EditPaymentM
       lastFour: String(data.get('lastFour')) || null,
       closingDay: data.get('closingDay') ? Number(data.get('closingDay')) : null,
       dueDay: data.get('dueDay') ? Number(data.get('dueDay')) : null,
+      ownerUserId: ownerUserId || null,
     });
   };
 
@@ -360,6 +366,17 @@ export function EditPaymentMethodForm({ method, onDone, onCancel }: EditPaymentM
       <label>
         Nombre
         <input name="nickname" defaultValue={method.nickname ?? ''} placeholder={method.definition.name} />
+      </label>
+      <label>
+        Dueño (quien paga con este medio)
+        <select value={ownerUserId} onChange={(e) => setOwnerUserId(e.target.value)}>
+          <option value="">Sin dueño (quien carga el gasto)</option>
+          {members.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
       </label>
       {isCard && (
         <label>

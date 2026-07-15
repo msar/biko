@@ -4,7 +4,7 @@
 import { get, set } from 'idb-keyval';
 import { api } from './api';
 import { rememberStoreFromExpense } from './store-suggestions';
-import type { ExpenseScope, ManualDiscount, PromotionApplyMode } from './types';
+import type { ExpenseScope, ManualDiscount, PromotionApplyMode, SplitMode } from './types';
 
 export interface OutboxExpense {
   clientId: string;
@@ -21,7 +21,11 @@ export interface OutboxExpense {
   promotionId?: string;
   manualDiscount?: ManualDiscount;
   scope?: ExpenseScope;
+  /** @deprecated Prefer splitMode + splitValues / assignToUserId */
   myShareAmount?: number;
+  splitMode?: SplitMode;
+  assignToUserId?: string;
+  splitValues?: { userId: string; value: number }[];
   createdAt: string;
 }
 

@@ -50,10 +50,16 @@ export default async function paymentMethodRoutes(app: FastifyInstance) {
     if (definition.type === 'CREDIT_CARD' && (body.closingDay == null || body.dueDay == null)) {
       return reply.code(400).send({ error: 'Las tarjetas de crédito requieren día de cierre y de vencimiento' });
     }
+    if (body.ownerUserId) {
+      const owner = await app.prisma.user.findFirst({
+        where: { id: body.ownerUserId, householdId: request.user.householdId },
+      });
+      if (!owner) return reply.code(400).send({ error: 'El dueño debe pertenecer al hogar' });
+    }
     try {
       const method = await app.prisma.paymentMethod.create({
         data: { ...body, householdId: request.user.householdId },
-        include: { definition: { include: { entity: true } } },
+        include: { definition: { include: { entity: true } }, owner: { select: { id: true, name: true } } },
       });
       return reply.code(201).send(method);
     } catch (error) {
@@ -78,12 +84,18 @@ export default async function paymentMethodRoutes(app: FastifyInstance) {
     if (existing.definition.type === 'CREDIT_CARD' && (closingDay == null || dueDay == null)) {
       return reply.code(400).send({ error: 'Las tarjetas de crédito requieren día de cierre y de vencimiento' });
     }
+    if (body.ownerUserId) {
+      const owner = await app.prisma.user.findFirst({
+        where: { id: body.ownerUserId, householdId: request.user.householdId },
+      });
+      if (!owner) return reply.code(400).send({ error: 'El dueño debe pertenecer al hogar' });
+    }
 
     try {
       return await app.prisma.paymentMethod.update({
         where: { id },
         data: body,
-        include: { definition: { include: { entity: true } } },
+        include: { definition: { include: { entity: true } }, owner: { select: { id: true, name: true } } },
       });
     } catch (error) {
       if (isUniqueViolation(error)) {

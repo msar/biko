@@ -13,9 +13,20 @@ function splitLabel(exp: Purchase, userId: string): string | null {
   if (!myAlloc || !exp.allocations?.length) return null;
   const net = Number(exp.netAmount);
   const myAmount = Number(myAlloc.amount);
+  if (exp.splitMode === 'ASSIGN') {
+    if (myAmount >= net - 0.02) return 'Cargo: vos';
+    if (myAmount <= 0.02) return 'Cargo: pareja';
+  }
   const equalShare = net / exp.allocations.length;
   if (Math.abs(myAmount - equalShare) < 0.02) return null;
-  return `Mi parte: ${fmtARS.format(myAmount)} / ${fmtARS.format(net)}`;
+  return `Tu parte: ${fmtARS.format(myAmount)} / ${fmtARS.format(net)}`;
+}
+
+function payerLabel(exp: Purchase, userId: string): string | null {
+  const payer = exp.paidBy ?? exp.paymentMethod.owner ?? null;
+  if (!payer) return null;
+  if (payer.id === exp.user.id) return null;
+  return payer.id === userId ? 'Pagó: vos' : `Pagó: ${payer.name}`;
 }
 
 export default function ExpensesPage() {
@@ -90,6 +101,7 @@ export default function ExpensesPage() {
 
       {expenses?.map((exp) => {
         const badge = user ? splitLabel(exp, user.id) : null;
+        const paidBadge = user ? payerLabel(exp, user.id) : null;
         return (
           <div
             key={exp.id}
@@ -109,11 +121,12 @@ export default function ExpensesPage() {
             <div className="expense-main">
               <strong>{exp.store}</strong>
               <small>
-                {fmtDate(exp.purchaseDate)} · {exp.user.name} ·{' '}
+                {fmtDate(exp.purchaseDate)} · cargó {exp.user.name} ·{' '}
                 {exp.paymentMethod.nickname ?? exp.paymentMethod.definition.name}
                 {exp.installmentsCount > 1 && ` · ${exp.installmentsCount} cuotas`}
               </small>
               {badge && <small className="expense-badge">{badge}</small>}
+              {paidBadge && <small className="expense-badge">{paidBadge}</small>}
               {Number(exp.discountAmount) > 0 && (
                 <small className="savings-tag">
                   ✨ {exp.discountLabelApplied ?? exp.promotion?.entity.name ?? 'Descuento'}: −

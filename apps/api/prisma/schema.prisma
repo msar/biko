@@ -66,6 +66,14 @@ enum ExpenseScope {
   PERSONAL
 }
 
+enum SplitMode {
+  EQUAL
+  ASSIGN
+  AMOUNT
+  SHARES
+  PERCENTAGE
+}
+
 // ============================================================
 // CATÁLOGO GLOBAL DE ENTIDADES Y MEDIOS DE PAGO (seed, no editable por hogar)
 // ============================================================
@@ -142,6 +150,7 @@ model User {
   createdAt    DateTime  @default(now())
 
   purchases    Purchase[]
+  paidPurchases Purchase[] @relation("PurchasePayer")
   ownedMethods PaymentMethod[] @relation("MethodOwner")
   allocations  PurchaseAllocation[]
 }
@@ -325,6 +334,13 @@ model Purchase {
   // HOUSEHOLD = gasto compartido (default); PERSONAL = solo impacta al usuario que lo cargó.
   scope ExpenseScope @default(HOUSEHOLD)
 
+  // Cómo se calculó el reparto (las filas en allocations son la fuente de verdad monetaria).
+  splitMode SplitMode @default(EQUAL)
+
+  // Snapshot de quién pagó al momento de la compra (dueño del medio, o quien cargó).
+  paidByUserId String?
+  paidBy       User?   @relation("PurchasePayer", fields: [paidByUserId], references: [id])
+
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -333,6 +349,7 @@ model Purchase {
 
   @@index([householdId, purchaseDate])
   @@index([categoryId])
+  @@index([paidByUserId])
 }
 
 // Reparto del netAmount entre miembros del hogar (para dashboard "por persona").
