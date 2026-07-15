@@ -220,11 +220,32 @@ export interface DayRecommendation {
   }>;
 }
 
+export type DashboardScope = 'household' | 'personal' | 'all';
+
+export interface DashboardCategorySpend {
+  categoryId: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  total: number;
+}
+
+export interface DashboardGroupSpend {
+  groupId: string;
+  name: string;
+  icon: string;
+  color: string;
+  total: number;
+  categories: DashboardCategorySpend[];
+}
+
 export interface MonthlyDashboard {
   month: string;
+  scope: DashboardScope;
   total: number;
   totalSavings: number;
-  byCategory: Array<{ categoryId: string; name: string; icon: string | null; color: string | null; total: number }>;
+  byCategory: DashboardCategorySpend[];
+  byGroup: DashboardGroupSpend[];
   byUser: Array<{ userId: string; name: string; total: number }>;
   byPaymentMethod: Array<{ paymentMethodId: string; name: string; total: number }>;
   settleUp: {
@@ -241,10 +262,12 @@ export interface MonthlyDashboard {
     store: string;
     category: string;
     userName: string;
+    scope?: 'HOUSEHOLD' | 'PERSONAL';
   }>;
 }
 
 export interface LongTermDashboard {
+  scope: DashboardScope;
   balance: {
     perUser: Array<{ userId: string; name: string; paid: number; share: number; balance: number }>;
     transfers: Array<{ fromUserId: string; fromName: string; toUserId: string; toName: string; amount: number }>;
@@ -257,5 +280,21 @@ export interface LongTermDashboard {
     color: string | null;
     total: number;
     byMonth: Array<{ month: string; total: number }>;
+  }>;
+  groups: Array<{
+    groupId: string;
+    name: string;
+    icon: string;
+    color: string;
+    total: number;
+    byMonth: Array<{ month: string; total: number }>;
+    categories: Array<{
+      categoryId: string;
+      name: string;
+      icon: string | null;
+      color: string | null;
+      total: number;
+      byMonth: Array<{ month: string; total: number }>;
+    }>;
   }>;
 }

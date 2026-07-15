@@ -1,14 +1,30 @@
-import { allocationShareForInstallment, attributionMonth, computeSettleTransfers } from '@biko/shared';
+import {
+  allocationShareForInstallment,
+  attributionMonth,
+  computeSettleTransfers,
+  groupCategories,
+  groupCategoriesByMonth,
+} from '@biko/shared';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { resolvePurchasePayer } from '../services/purchase-payer.js';
 
+export type DashboardScope = 'household' | 'personal' | 'all';
+
+const scopeSchema = z.enum(['household', 'personal', 'all']).default('household');
+
 const monthQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  scope: scopeSchema,
 });
 
 const longTermQuerySchema = z.object({
   months: z.coerce.number().int().min(1).max(36).optional(),
+  scope: scopeSchema,
+});
+
+const upcomingQuerySchema = z.object({
+  scope: scopeSchema,
 });
 
 /** Devuelve los últimos `count` meses en formato `YYYY-MM`, del más viejo al más reciente. */
@@ -32,9 +48,49 @@ function monthRange(month?: string): { gte: Date; lt: Date; label: string } {
   };
 }
 
+/** Whether a purchase counts toward the selected dashboard scope for this viewer. */
+export function purchaseMatchesScope(
+  purchase: { scope: 'HOUSEHOLD' | 'PERSONAL'; userId: string },
+  viewerId: string,
+  dashboardScope: DashboardScope,
+): boolean {
+  if (purchase.scope === 'PERSONAL' && purchase.userId !== viewerId) return false;
+  if (dashboardScope === 'household') return purchase.scope === 'HOUSEHOLD';
+  if (dashboardScope === 'personal') return purchase.scope === 'PERSONAL';
+  return true; // all = household + own personal
+}
+
+function purchaseScopeWhere(viewerId: string, dashboardScope: DashboardScope) {
+  if (dashboardScope === 'household') {
+    return { scope: 'HOUSEHOLD' as const };
+  }
+  if (dashboardScope === 'personal') {
+    return { scope: 'PERSONAL' as const, userId: viewerId };
+  }
+  return {
+    OR: [
+      { scope: 'HOUSEHOLD' as const },
+      { scope: 'PERSONAL' as const, userId: viewerId },
+    ],
+  };
+}
+
+/** Merge dashboard scope with extra purchase predicates (dates, installment count). */
+function purchaseWhere(
+  viewerId: string,
+  dashboardScope: DashboardScope,
+  extra: Record<string, unknown>,
+) {
+  const scopePart = purchaseScopeWhere(viewerId, dashboardScope);
+  if ('OR' in scopePart) {
+    return { AND: [scopePart, extra] };
+  }
+  return { ...scopePart, ...extra };
+}
+
 export default async function dashboardRoutes(app: FastifyInstance) {
   app.get('/dashboard/monthly', { preHandler: [app.authenticate] }, async (request) => {
-    const { month } = monthQuerySchema.parse(request.query);
+    const { month, scope: dashboardScope } = monthQuerySchema.parse(request.query);
     const range = monthRange(month);
     const householdId = request.user.householdId;
     const viewerId = request.user.userId;
@@ -43,8 +99,18 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       where: {
         householdId,
         OR: [
-          { purchase: { installmentsCount: 1, purchaseDate: { gte: range.gte, lt: range.lt } } },
-          { purchase: { installmentsCount: { gte: 2 } }, dueDate: { gte: range.gte, lt: range.lt } },
+          {
+            purchase: purchaseWhere(viewerId, dashboardScope, {
+              installmentsCount: 1,
+              purchaseDate: { gte: range.gte, lt: range.lt },
+            }),
+          },
+          {
+            purchase: purchaseWhere(viewerId, dashboardScope, {
+              installmentsCount: { gte: 2 },
+            }),
+            dueDate: { gte: range.gte, lt: range.lt },
+          },
         ],
       },
       include: {
@@ -63,19 +129,20 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       orderBy: { dueDate: 'asc' },
     });
 
-    const total = installments.reduce((sum, inst) => {
-      if (inst.purchase.scope === 'PERSONAL') return sum;
-      return sum + inst.amount.toNumber();
-    }, 0);
+    const total = installments.reduce((sum, inst) => sum + inst.amount.toNumber(), 0);
 
-    const byCategory = new Map<string, { categoryId: string; name: string; icon: string | null; color: string | null; total: number }>();
+    const byCategory = new Map<
+      string,
+      { categoryId: string; name: string; icon: string | null; color: string | null; total: number }
+    >();
     const byUser = new Map<string, { userId: string; name: string; total: number }>();
     const byPaymentMethod = new Map<string, { paymentMethodId: string; name: string; total: number }>();
 
-    // Settle-up: only HOUSEHOLD spend creates shared debt.
+    // Settle-up: only HOUSEHOLD spend creates shared debt (and only when viewing hogar).
     const memberNames = new Map<string, string>();
     const paidByUser = new Map<string, number>();
     const shareByUser = new Map<string, number>();
+    const includeSettle = dashboardScope === 'household';
 
     for (const inst of installments) {
       const amount = inst.amount.toNumber();
@@ -83,27 +150,30 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       const netAmount = purchase.netAmount.toNumber();
       const isHousehold = purchase.scope === 'HOUSEHOLD';
 
-      if (isHousehold) {
-        const cat = purchase.category;
-        const catEntry = byCategory.get(cat.id) ?? { categoryId: cat.id, name: cat.name, icon: cat.icon, color: cat.color, total: 0 };
-        catEntry.total += amount;
-        byCategory.set(cat.id, catEntry);
+      const cat = purchase.category;
+      const catEntry = byCategory.get(cat.id) ?? {
+        categoryId: cat.id,
+        name: cat.name,
+        icon: cat.icon,
+        color: cat.color,
+        total: 0,
+      };
+      catEntry.total += amount;
+      byCategory.set(cat.id, catEntry);
 
-        const pm = purchase.paymentMethod;
-        const pmName = pm.nickname ?? pm.definition.name;
-        const pmEntry = byPaymentMethod.get(pm.id) ?? { paymentMethodId: pm.id, name: pmName, total: 0 };
-        pmEntry.total += amount;
-        byPaymentMethod.set(pm.id, pmEntry);
+      const pm = purchase.paymentMethod;
+      const pmName = pm.nickname ?? pm.definition.name;
+      const pmEntry = byPaymentMethod.get(pm.id) ?? { paymentMethodId: pm.id, name: pmName, total: 0 };
+      pmEntry.total += amount;
+      byPaymentMethod.set(pm.id, pmEntry);
 
+      if (includeSettle && isHousehold) {
         const payer = resolvePurchasePayer(purchase);
         memberNames.set(payer.id, payer.name);
         paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + amount);
       }
 
       for (const allocation of purchase.allocations) {
-        // Personal spend of the partner stays private — skip in byUser.
-        if (!isHousehold && purchase.userId !== viewerId) continue;
-
         const share = allocationShareForInstallment(amount, allocation.amount.toNumber(), netAmount);
         if (share <= 0) continue;
         const userEntry = byUser.get(allocation.userId) ?? {
@@ -114,7 +184,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         userEntry.total += share;
         byUser.set(allocation.userId, userEntry);
 
-        if (isHousehold) {
+        if (includeSettle && isHousehold) {
           memberNames.set(allocation.userId, allocation.user.name);
           shareByUser.set(allocation.userId, (shareByUser.get(allocation.userId) ?? 0) + share);
         }
@@ -137,25 +207,43 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       }),
     );
 
+    const categoryRows = [...byCategory.values()].map((c) => ({ ...c, total: round2(c.total) }));
+    const byGroup = groupCategories(categoryRows);
+
     const savings = await app.prisma.purchase.aggregate({
-      where: { householdId, purchaseDate: { gte: range.gte, lt: range.lt } },
+      where: {
+        householdId,
+        purchaseDate: { gte: range.gte, lt: range.lt },
+        ...purchaseScopeWhere(viewerId, dashboardScope),
+      },
       _sum: { discountAmount: true },
     });
 
     return {
       month: range.label,
-      total,
-      byCategory: [...byCategory.values()].sort((a, b) => b.total - a.total),
-      byUser: [...byUser.values()].sort((a, b) => b.total - a.total),
-      byPaymentMethod: [...byPaymentMethod.values()].sort((a, b) => b.total - a.total),
+      scope: dashboardScope,
+      total: round2(total),
+      byCategory: categoryRows.sort((a, b) => b.total - a.total),
+      byGroup: byGroup.map((g) => ({
+        groupId: g.id,
+        name: g.name,
+        icon: g.icon,
+        color: g.color,
+        total: g.total,
+        categories: g.categories,
+      })),
+      byUser: [...byUser.values()].map((u) => ({ ...u, total: round2(u.total) })).sort((a, b) => b.total - a.total),
+      byPaymentMethod: [...byPaymentMethod.values()]
+        .map((p) => ({ ...p, total: round2(p.total) }))
+        .sort((a, b) => b.total - a.total),
       totalSavings: savings._sum.discountAmount?.toNumber() ?? 0,
-      settleUp: {
-        perUser: perUser.sort((a, b) => b.balance - a.balance),
-        transfers,
-      },
-      installments: installments
-        .filter((i) => i.purchase.scope === 'HOUSEHOLD' || i.purchase.userId === viewerId)
-        .map((i) => ({
+      settleUp: includeSettle
+        ? {
+            perUser: perUser.sort((a, b) => b.balance - a.balance),
+            transfers,
+          }
+        : { perUser: [], transfers: [] },
+      installments: installments.map((i) => ({
         id: i.id,
         amount: i.amount.toNumber(),
         dueDate: i.dueDate,
@@ -171,7 +259,9 @@ export default async function dashboardRoutes(app: FastifyInstance) {
   });
 
   app.get('/dashboard/upcoming', { preHandler: [app.authenticate] }, async (request) => {
+    const { scope: dashboardScope } = upcomingQuerySchema.parse(request.query);
     const householdId = request.user.householdId;
+    const viewerId = request.user.userId;
     const start = new Date();
     start.setDate(1);
     start.setHours(0, 0, 0, 0);
@@ -181,7 +271,9 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         householdId,
         dueDate: { gte: start },
         paid: false,
-        purchase: { installmentsCount: { gte: 2 } },
+        purchase: purchaseWhere(viewerId, dashboardScope, {
+          installmentsCount: { gte: 2 },
+        }),
       },
       select: { amount: true, dueDate: true },
     });
@@ -196,52 +288,61 @@ export default async function dashboardRoutes(app: FastifyInstance) {
   });
 
   app.get('/dashboard/long-term', { preHandler: [app.authenticate] }, async (request) => {
-    const { months: monthsParam } = longTermQuerySchema.parse(request.query);
+    const { months: monthsParam, scope: dashboardScope } = longTermQuerySchema.parse(request.query);
     const monthsCount = monthsParam ?? 12;
     const householdId = request.user.householdId;
-
-    // --- Balance acumulado (toda la historia) ---
-    const purchases = await app.prisma.purchase.findMany({
-      where: { householdId, scope: 'HOUSEHOLD' },
-      include: {
-        user: { select: { id: true, name: true } },
-        paidBy: { select: { id: true, name: true } },
-        paymentMethod: { select: { owner: { select: { id: true, name: true } } } },
-        allocations: { include: { user: { select: { id: true, name: true } } } },
-      },
-    });
+    const viewerId = request.user.userId;
+    const includeBalance = dashboardScope === 'household';
 
     const round2 = (v: number) => Math.round(v * 100) / 100;
-    const memberNames = new Map<string, string>();
-    const paidByUser = new Map<string, number>();
-    const shareByUser = new Map<string, number>();
+    let perUser: Array<{ userId: string; name: string; paid: number; share: number; balance: number }> = [];
+    let transfers: Array<{
+      fromUserId: string;
+      fromName: string;
+      toUserId: string;
+      toName: string;
+      amount: number;
+    }> = [];
 
-    for (const purchase of purchases) {
-      const payer = resolvePurchasePayer(purchase);
-      memberNames.set(payer.id, payer.name);
-      paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + purchase.netAmount.toNumber());
-      for (const allocation of purchase.allocations) {
-        memberNames.set(allocation.userId, allocation.user.name);
-        shareByUser.set(allocation.userId, (shareByUser.get(allocation.userId) ?? 0) + allocation.amount.toNumber());
+    if (includeBalance) {
+      const purchases = await app.prisma.purchase.findMany({
+        where: { householdId, scope: 'HOUSEHOLD' },
+        include: {
+          user: { select: { id: true, name: true } },
+          paidBy: { select: { id: true, name: true } },
+          paymentMethod: { select: { owner: { select: { id: true, name: true } } } },
+          allocations: { include: { user: { select: { id: true, name: true } } } },
+        },
+      });
+
+      const memberNames = new Map<string, string>();
+      const paidByUser = new Map<string, number>();
+      const shareByUser = new Map<string, number>();
+
+      for (const purchase of purchases) {
+        const payer = resolvePurchasePayer(purchase);
+        memberNames.set(payer.id, payer.name);
+        paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + purchase.netAmount.toNumber());
+        for (const allocation of purchase.allocations) {
+          memberNames.set(allocation.userId, allocation.user.name);
+          shareByUser.set(allocation.userId, (shareByUser.get(allocation.userId) ?? 0) + allocation.amount.toNumber());
+        }
       }
-    }
 
-    const perUser = [...memberNames.entries()].map(([userId, name]) => {
-      const paid = round2(paidByUser.get(userId) ?? 0);
-      const share = round2(shareByUser.get(userId) ?? 0);
-      return { userId, name, paid, share, balance: round2(paid - share) };
-    });
-    const transfers = computeSettleTransfers(perUser.map((u) => ({ userId: u.userId, balance: u.balance }))).map(
-      (t) => ({
+      perUser = [...memberNames.entries()].map(([userId, name]) => {
+        const paid = round2(paidByUser.get(userId) ?? 0);
+        const share = round2(shareByUser.get(userId) ?? 0);
+        return { userId, name, paid, share, balance: round2(paid - share) };
+      });
+      transfers = computeSettleTransfers(perUser.map((u) => ({ userId: u.userId, balance: u.balance }))).map((t) => ({
         fromUserId: t.fromUserId,
         fromName: memberNames.get(t.fromUserId) ?? '',
         toUserId: t.toUserId,
         toName: memberNames.get(t.toUserId) ?? '',
         amount: t.amount,
-      }),
-    );
+      }));
+    }
 
-    // --- Series por mes y por categoría (ventana de `monthsCount` meses) ---
     const windowMonths = recentMonths(monthsCount);
     const windowSet = new Set(windowMonths);
     const windowStart = new Date();
@@ -254,10 +355,19 @@ export default async function dashboardRoutes(app: FastifyInstance) {
     const windowInstallments = await app.prisma.installment.findMany({
       where: {
         householdId,
-        purchase: { scope: 'HOUSEHOLD' },
         OR: [
-          { purchase: { installmentsCount: 1, purchaseDate: { gte: windowStart, lt: windowEnd } } },
-          { purchase: { installmentsCount: { gte: 2 } }, dueDate: { gte: windowStart, lt: windowEnd } },
+          {
+            purchase: purchaseWhere(viewerId, dashboardScope, {
+              installmentsCount: 1,
+              purchaseDate: { gte: windowStart, lt: windowEnd },
+            }),
+          },
+          {
+            purchase: purchaseWhere(viewerId, dashboardScope, {
+              installmentsCount: { gte: 2 },
+            }),
+            dueDate: { gte: windowStart, lt: windowEnd },
+          },
         ],
       },
       include: {
@@ -299,22 +409,36 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       categories.set(cat.id, entry);
     }
 
+    const categoryRows = [...categories.values()]
+      .sort((a, b) => b.total - a.total)
+      .map((c) => ({
+        categoryId: c.categoryId,
+        name: c.name,
+        icon: c.icon,
+        color: c.color,
+        total: round2(c.total),
+        byMonth: windowMonths.map((month) => ({ month, total: round2(c.byMonth.get(month) ?? 0) })),
+      }));
+
+    const groups = groupCategoriesByMonth(categoryRows, windowMonths).map((g) => ({
+      groupId: g.id,
+      name: g.name,
+      icon: g.icon,
+      color: g.color,
+      total: g.total,
+      byMonth: g.byMonth,
+      categories: g.categories,
+    }));
+
     return {
+      scope: dashboardScope,
       balance: {
         perUser: perUser.sort((a, b) => b.balance - a.balance),
         transfers,
       },
       months: windowMonths.map((month) => ({ month, total: round2(monthTotals.get(month) ?? 0) })),
-      categories: [...categories.values()]
-        .sort((a, b) => b.total - a.total)
-        .map((c) => ({
-          categoryId: c.categoryId,
-          name: c.name,
-          icon: c.icon,
-          color: c.color,
-          total: round2(c.total),
-          byMonth: windowMonths.map((month) => ({ month, total: round2(c.byMonth.get(month) ?? 0) })),
-        })),
+      categories: categoryRows,
+      groups,
     };
   });
 }

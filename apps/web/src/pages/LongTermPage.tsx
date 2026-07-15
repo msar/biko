@@ -1,27 +1,41 @@
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import StackedBars from '../components/charts/StackedBars';
 import { api, fmtARS } from '../lib/api';
-import type { LongTermDashboard } from '../lib/types';
+import type { DashboardScope, LongTermDashboard } from '../lib/types';
 
 const FALLBACK_COLORS = ['#1e305e', '#00a8b5', '#e8b93c', '#b3423f', '#10683f', '#7b5ea7', '#d97742', '#4a90d9'];
 
 export default function LongTermPage() {
+  const [scope, setScope] = useState<DashboardScope>('household');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
   const { data, isLoading } = useQuery({
-    queryKey: ['dashboard', 'long-term', 12],
-    queryFn: () => api<LongTermDashboard>('/dashboard/long-term?months=12'),
+    queryKey: ['dashboard', 'long-term', 12, scope],
+    queryFn: () => api<LongTermDashboard>(`/dashboard/long-term?months=12&scope=${scope}`),
   });
 
-  const categorySeries =
-    data?.categories.map((cat, i) => ({
-      id: cat.categoryId,
-      name: cat.name,
-      color: cat.color ?? FALLBACK_COLORS[i % FALLBACK_COLORS.length]!,
-      values: cat.byMonth.map((b) => b.total),
+  const groupSeries =
+    data?.groups.map((group, i) => ({
+      id: group.groupId,
+      name: group.name,
+      color: group.color || FALLBACK_COLORS[i % FALLBACK_COLORS.length]!,
+      values: group.byMonth.map((b) => b.total),
     })) ?? [];
 
   const months = data?.months.map((m) => m.month) ?? [];
-  const hasSpend = (data?.months.some((m) => m.total > 0) ?? false) || categorySeries.length > 0;
+  const hasSpend = (data?.months.some((m) => m.total > 0) ?? false) || groupSeries.length > 0;
+  const showBalance = scope === 'household';
+
+  const toggleGroup = (groupId: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  };
 
   return (
     <div className="page">
@@ -34,9 +48,21 @@ export default function LongTermPage() {
         </Link>
       </header>
 
+      <div className="segmented dashboard-scope">
+        <button type="button" className={scope === 'household' ? 'active' : ''} onClick={() => setScope('household')}>
+          Hogar
+        </button>
+        <button type="button" className={scope === 'personal' ? 'active' : ''} onClick={() => setScope('personal')}>
+          Personal
+        </button>
+        <button type="button" className={scope === 'all' ? 'active' : ''} onClick={() => setScope('all')}>
+          Todo
+        </button>
+      </div>
+
       {isLoading && !data && <p className="empty-state">Cargando…</p>}
 
-      {data && data.balance.perUser.length > 1 && (
+      {showBalance && data && data.balance.perUser.length > 1 && (
         <section className="card">
           <h2>Balance acumulado</h2>
           {data.balance.perUser.map((u) => (
@@ -79,21 +105,37 @@ export default function LongTermPage() {
         </section>
       )}
 
-      {data && categorySeries.length > 0 && (
+      {data && groupSeries.length > 0 && (
         <section className="card">
-          <h2>Gasto por categoría</h2>
-          <StackedBars months={months} series={categorySeries} formatValue={(n) => fmtARS.format(n)} />
+          <h2>Gasto por grupo</h2>
+          <StackedBars months={months} series={groupSeries} formatValue={(n) => fmtARS.format(n)} />
           <div className="chart-legend">
-            {data.categories.map((cat, i) => (
-              <span key={cat.categoryId} className="chart-legend-item">
-                <span
-                  className="chart-legend-dot"
-                  style={{ background: cat.color ?? FALLBACK_COLORS[i % FALLBACK_COLORS.length]! }}
-                />
-                {cat.icon} {cat.name}
-                <span className="chart-legend-amount">{fmtARS.format(cat.total)}</span>
-              </span>
-            ))}
+            {data.groups.map((group, i) => {
+              const open = expandedGroups.has(group.groupId);
+              return (
+                <div key={group.groupId} className="chart-legend-group">
+                  <button type="button" className="chart-legend-item chart-legend-toggle" onClick={() => toggleGroup(group.groupId)}>
+                    <span
+                      className="chart-legend-dot"
+                      style={{ background: group.color || FALLBACK_COLORS[i % FALLBACK_COLORS.length]! }}
+                    />
+                    <span className="group-chevron">{open ? '▾' : '▸'}</span>
+                    {group.icon} {group.name}
+                    <span className="chart-legend-amount">{fmtARS.format(group.total)}</span>
+                  </button>
+                  {open && (
+                    <div className="chart-legend-nested">
+                      {group.categories.map((cat) => (
+                        <span key={cat.categoryId} className="chart-legend-item nested">
+                          {cat.icon} {cat.name}
+                          <span className="chart-legend-amount">{fmtARS.format(cat.total)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
       )}

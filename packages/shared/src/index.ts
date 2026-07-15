@@ -11,3 +11,4 @@ export * from './promotion-suggester';
 export * from './provinces';
 export * from './weekly-promo-quality';
 export * from './super-user';
+export * from './category-groups';
