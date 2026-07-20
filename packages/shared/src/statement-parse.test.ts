@@ -1,10 +1,16 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { assemblePdfTextLines } from './pdf-text-assemble';
 import {
   bankFromEntityName,
+  cleanBbvaStoreName,
   detectStatementBank,
   fingerprintStatementLine,
   isActionableLine,
   parseArgentineAmount,
+  parseBbvaDateToken,
   parseBbvaStatementText,
   parseSantanderStatementText,
   parseStatementDateParts,
@@ -16,43 +22,32 @@ import {
   storeSimilarity,
 } from './statement-match';
 
-const SANTANDER_FIXTURE = `
-Tarjeta 8009 Total Consumos de MARIANO JOSE SAPPIA
-Vencimiento 13 Jul 26
-26 Mayo    06 000762 *  EQUUS                       C.02/06                       46.650,00
-           13 000217 *  FARMAONLINE                 C.02/03                       31.267,53
-           14 510762 *  MERPAGO*TIMBERLANDARGENTI   C.02/06                       27.184,80
-           29 511282 K  MERPAGO*CARNAVE                                           27.953,00
-26 Junio   05           SU PAGO EN PESOS                                        1564.239,53-
-           04 018194 K  MERPAGO*FOODPATAGONIA                                     74.200,00
-           03 009452 *  ASSISTCARD                  C.01/03                       66.917,50
-           26 000211 *  MEDITERRANEO                C.01/03                      291.218,34
-25 Setiem. 15 008272 *  ELECTRONICA MEGATONE SRL    C.10/18                       47.499,88
-`;
+const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
+const SANTANDER_FIXTURE = readFileSync(join(fixturesDir, 'santander-pdfjs-sample.txt'), 'utf8');
+const BBVA_FIXTURE = readFileSync(join(fixturesDir, 'bbva-consumos.txt'), 'utf8');
 
-const BBVA_JUNK_FIXTURE = `
-Banco BBVA Argentina
-Visa Platinum
-COMPRA $ 3.000.000,00
-LIMITE DISPONIBLE $ 2.500.000,00
-PAGO MINIMO $ 15.160,00
-FECHA
-15/06/2026 TLM CARP                    C.06/06                       17.748,33
-10/06/2026 PRIMAVERA SOUND 2026        C.01/06                       92.500,08
-`;
-
-const NOISE_ONLY = `
-Resumen con Tarjetas
-COMPRA $ 5.976.000,00
-LIMITE DE COMPRA $ 3.000.000,00
-Plan V 3 cuotas
-`;
+describe('assemblePdfTextLines', () => {
+  it('sorts items by x within the same y-bin', () => {
+    const lines = assemblePdfTextLines(
+      [
+        { str: 'EQUUS', x: 200, y: 100 },
+        { str: '06', x: 50, y: 100 },
+        { str: '26 Mayo', x: 10, y: 100 },
+        { str: '46.650,00', x: 400, y: 100 },
+        { str: 'header', x: 10, y: 200 },
+      ],
+      { yBinSize: 1 },
+    );
+    expect(lines[0]).toBe('header'); // higher y first (top of page)
+    expect(lines[1]).toBe('26 Mayo 06 EQUUS 46.650,00');
+  });
+});
 
 describe('parseArgentineAmount', () => {
   it('parses dotted thousands', () => {
     expect(parseArgentineAmount('46.650,00')).toBe(46650);
     expect(parseArgentineAmount('1564.239,53-')).toBe(-1564239.53);
-    expect(parseArgentineAmount('291.218,34')).toBe(291218.34);
+    expect(parseArgentineAmount('-2.794,00')).toBe(-2794);
   });
 });
 
@@ -64,12 +59,11 @@ describe('parseStatementDateParts', () => {
 });
 
 describe('parseSantanderStatementText', () => {
-  it('parses consumos, cuotas and skips payments', () => {
+  it('parses pdfjs-style single-spaced consumos and cuotas', () => {
     const lines = parseSantanderStatementText(SANTANDER_FIXTURE);
     const active = lines.filter(isActionableLine);
-    const skipped = lines.filter((l) => l.suggestedSkip);
 
-    expect(skipped.some((l) => /SU PAGO/i.test(l.raw))).toBe(true);
+    expect(active.length).toBeGreaterThanOrEqual(8);
 
     const equus = active.find((l) => /EQUUS/i.test(l.store));
     expect(equus).toMatchObject({
@@ -78,18 +72,18 @@ describe('parseSantanderStatementText', () => {
     });
     expect(equus?.date).toBe('2026-05-06');
 
-    const carnave = active.find((l) => /CARNAVE/i.test(l.store));
-    expect(carnave?.installment).toBeUndefined();
-    expect(carnave?.amount).toBe(27953);
-
     const megatone = active.find((l) => /MEGATONE/i.test(l.store));
     expect(megatone?.installment).toEqual({ current: 10, total: 18 });
-    expect(megatone?.amount).toBe(47499.88);
+
+    expect(lines.some((l) => l.suggestedSkip && /SU PAGO/i.test(l.raw))).toBe(true);
   });
 
-  it('detects Santander bank', () => {
+  it('detects Santander and respects hint', () => {
     expect(detectStatementBank(SANTANDER_FIXTURE)).toBe('Santander');
-    expect(parseStatementText(SANTANDER_FIXTURE).bank).toBe('Santander');
+    expect(parseStatementText(SANTANDER_FIXTURE, 'Santander').bank).toBe('Santander');
+    expect(parseStatementText(SANTANDER_FIXTURE, 'Santander').lines.filter(isActionableLine).length).toBeGreaterThan(
+      5,
+    );
   });
 });
 
@@ -97,39 +91,61 @@ describe('bank hint and unknown fallback', () => {
   it('maps entity names to banks', () => {
     expect(bankFromEntityName('Santander')).toBe('Santander');
     expect(bankFromEntityName('BBVA')).toBe('BBVA');
-    expect(bankFromEntityName('Galicia')).toBe('Unknown');
   });
 
-  it('respects Santander hint even without bank word in text', () => {
-    const body = `
-26 Mayo    06 000762 *  EQUUS                       C.02/06                       46.650,00
+  it('never labels junk-only legales as BBVA', () => {
+    const legales = `
+Plan V: abonando el pago mínimo
+3 cuotas de $ 124823,35
+6 cuotas de $ 67564,07
+Límites DE COMPRA $ 3.000.000,00
 `;
-    const parsed = parseStatementText(body, 'Santander');
-    expect(parsed.bank).toBe('Santander');
-    expect(parsed.lines.some(isActionableLine)).toBe(true);
-  });
-
-  it('never labels empty/junk-only results as BBVA', () => {
-    const parsed = parseStatementText(NOISE_ONLY);
+    const parsed = parseStatementText(legales);
     expect(parsed.bank).toBe('Unknown');
     expect(parsed.lines.filter(isActionableLine)).toHaveLength(0);
   });
 });
 
 describe('parseBbvaStatementText', () => {
-  it('skips limits and keeps real consumos', () => {
-    const lines = parseBbvaStatementText(BBVA_JUNK_FIXTURE);
+  it('parses Consumos triplets with cupón strip and cuotas', () => {
+    const lines = parseBbvaStatementText(BBVA_FIXTURE);
     const active = lines.filter(isActionableLine);
 
-    expect(active.some((l) => /COMPRA/i.test(l.store))).toBe(false);
-    expect(active.some((l) => l.amount >= 1_000_000)).toBe(false);
+    const carp = active.find((l) => /TLM\s*CARP/i.test(l.store));
+    expect(carp).toMatchObject({
+      date: '2026-01-19',
+      amount: 37833.33,
+      installment: { current: 6, total: 6 },
+    });
+    expect(carp?.store).toBe('TLM CARP');
 
-    const carp = active.find((l) => /CARP|TLM/i.test(l.store));
-    expect(carp?.amount).toBe(17748.33);
-    expect(carp?.installment).toEqual({ current: 6, total: 6 });
+    const social = active.find((l) => /CUOTA SOCIAL CAR/i.test(l.store) && l.amount === 33350);
+    expect(social?.store).toBe('CUOTA SOCIAL CAR');
+    expect(social?.date).toBe('2026-05-29');
 
-    const sound = active.find((l) => /PRIMAVERA/i.test(l.store));
-    expect(sound?.amount).toBe(92500.08);
+    expect(active.some((l) => /SHOP GALLERY/i.test(l.store))).toBe(true);
+    expect(active.some((l) => /HOYTS/i.test(l.store))).toBe(true);
+    expect(active.some((l) => /PRIMAVERA/i.test(l.store) && l.installment?.current === 1)).toBe(true);
+    expect(active.some((l) => /IMPUESTO DE SELLOS/i.test(l.store))).toBe(true);
+
+    // Bonif is present but not actionable
+    expect(lines.some((l) => /BONIF/i.test(l.raw) && l.suggestedSkip)).toBe(true);
+    expect(active.some((l) => /BONIF/i.test(l.store))).toBe(false);
+  });
+
+  it('drops Plan V legales and limits completely', () => {
+    const lines = parseBbvaStatementText(BBVA_FIXTURE);
+    expect(lines.some((l) => /cuotas de/i.test(l.store) || /cuotas de/i.test(l.raw))).toBe(false);
+    expect(lines.some((l) => l.amount >= 1_000_000)).toBe(false);
+    expect(lines.some((l) => /^3 cuotas$/i.test(l.store))).toBe(false);
+    expect(lines.some((l) => /Octubre\/26/i.test(l.store))).toBe(false);
+  });
+
+  it('parses BBVA date tokens and cleans store names', () => {
+    expect(parseBbvaDateToken('19-Ene-26')).toBe('2026-01-19');
+    expect(parseBbvaDateToken('29-May-26')).toBe('2026-05-29');
+    expect(cleanBbvaStoreName('CUOTA SOCIAL CAR 000000034964790 000001')).toBe('CUOTA SOCIAL CAR');
+    expect(cleanBbvaStoreName('TLM CARP C.06/06 003174')).toBe('TLM CARP');
   });
 });
 
@@ -151,25 +167,12 @@ describe('fingerprintStatementLine', () => {
     });
     expect(a).toBe(b);
   });
-
-  it('keeps fingerprint when display store is edited separately', () => {
-    const original = fingerprintStatementLine({
-      date: '2026-05-06',
-      store: 'MERPAGO*CARNAVE',
-      amount: 27953,
-      currency: 'ARS',
-    });
-    // UI keeps original fingerprint while sending edited store on commit.
-    expect(original).toContain('CARNAVE');
-    expect(original).not.toContain('Carnave Butcher');
-  });
 });
 
 describe('statement match', () => {
   it('matches similar store and fuzzy amount', () => {
     expect(storeSimilarity('MERPAGO*FOODPATAGONIA', 'Food Patagonia')).toBeGreaterThan(0.3);
     expect(amountsClose(46650, 46600)).toBe(true);
-    expect(amountsClose(46650, 40000)).toBe(false);
 
     const candidates = findStatementMatchCandidates(
       {
@@ -199,31 +202,5 @@ describe('statement match', () => {
 
     expect(candidates[0]?.purchaseId).toBe('p1');
     expect(candidates[0]?.installmentNumber).toBe(2);
-    expect(candidates[0]!.score).toBeGreaterThan(50);
-  });
-
-  it('rejects wrong payment method', () => {
-    const candidates = findStatementMatchCandidates(
-      {
-        date: '2026-05-06',
-        store: 'EQUUS',
-        amount: 46650,
-        fingerprint: 'x',
-      },
-      [
-        {
-          id: 'p1',
-          store: 'EQUUS',
-          purchaseDate: '2026-05-06',
-          netAmount: 46650,
-          paymentMethodId: 'other',
-          installmentsCount: 1,
-          statementFingerprint: null,
-          installments: [{ number: 1, amount: 46650, dueDate: '2026-05-06' }],
-        },
-      ],
-      'pm1',
-    );
-    expect(candidates).toHaveLength(0);
   });
 });

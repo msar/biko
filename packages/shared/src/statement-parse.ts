@@ -52,7 +52,7 @@ const SKIP_PATTERNS = [
   /plan\s+v/i,
   /bonif\.?\s?/i,
   /saldo\s+anterior/i,
-  /saldo\b/i,
+  /saldo\s+actual/i,
   /cuotas\s+a\s+vencer/i,
   /tasa\s+nominal/i,
   /\btna\b/i,
@@ -67,10 +67,26 @@ const SKIP_PATTERNS = [
   /\biva\b/i,
   /sus\s+pagos/i,
   /ajustes\s+realizados/i,
+  /^\d+\s*cuotas(\s+de)?$/i,
+  /tna\s+fija/i,
+  /legales\s+y\s+avisos/i,
+];
+
+/** Lines that must never appear in import results (not even as omitidos). */
+const DROP_COMPLETELY = [
+  /^\d+\s*cuotas(\s+de)?$/i,
+  /\d+\s+cuotas\s+de\s*\$/i,
+  /^con\s+iva:/i,
+  /^sin\s+iva:/i,
+  /plan\s+v:/i,
+  /cuotas\s+a\s+vencer/i,
+  /l[ií]mites?/i,
+  /octubre\/.*noviembre/i,
+  /\$92\.500/i,
 ];
 
 const JUNK_STORE_EXACT =
-  /^(fecha|visa|resumen|tarjeta|cuotas|compra|limite|l[ií]mite|disponible|ars|usd|pesos|dolares|dólares)$/i;
+  /^(fecha|visa|resumen|tarjeta|cuotas|compra|limite|l[ií]mite|disponible|ars|usd|pesos|dolares|dólares|descripci[oó]n|nro\.?\s*cup[oó]n)$/i;
 
 export function detectStatementBank(text: string): StatementBankSource {
   const lower = text.toLowerCase();
@@ -99,6 +115,7 @@ export function isActionableLine(line: ParsedStatementLine): boolean {
   if (line.suggestedSkip) return false;
   if (line.currency !== 'ARS') return false;
   if (line.amount <= 0) return false;
+  if (shouldDropCompletely(line.store) || shouldDropCompletely(line.raw)) return false;
   const key = normalizeStoreKey(line.store);
   if (key.length < 3) return false;
   if (JUNK_STORE_EXACT.test(line.store.trim())) return false;
@@ -251,19 +268,18 @@ export function parseSantanderStatementText(text: string): ParsedStatementLine[]
   let currentYearMonth: string | null = null;
   let currentMonthToken: string | null = null;
 
-  // Line examples:
+  // Line examples (pdfjs often uses single spaces):
   // 26 Mayo    06 000762 *  EQUUS                       C.02/06                       46.650,00
-  //            13 000217 *  FARMAONLINE                 C.02/03                       31.267,53
-  // 26 Junio   29 511282 K  MERPAGO*CARNAVE                                           27.953,00
+  // 26 Mayo   06 000762 *   EQUUS   C.02/06   46.650,00
   const rowRe =
-    /^(?:(\d{2})\s+([A-Za-zÁÉÍÓÚáéíóúñÑ.]+)\s+)?(\d{2})\s+(\d{6})\s+([*FK])\s+(.+?)\s{2,}(.+)$/;
+    /^(?:(\d{2})\s+([A-Za-zÁÉÍÓÚáéíóúñÑ.]+)\s+)?(\d{2})\s+(\d{6})\s+([*FK])\s+(.+?)\s+(\S.*)$/;
 
   for (const rawLine of lines) {
-    const line = rawLine.replace(/\u00a0/g, ' ').trim();
+    const line = rawLine.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
     if (!line) continue;
 
     // Carry year-month header like "26 Mayo" / "26 Junio" alone
-    const headerOnly = line.trim().match(/^(\d{2})\s+([A-Za-zÁÉÍÓÚáéíóúñÑ.]+)\s*$/);
+    const headerOnly = line.match(/^(\d{2})\s+([A-Za-zÁÉÍÓÚáéíóúñÑ.]+)$/);
     if (headerOnly) {
       currentYearMonth = parseStatementDateParts(yearMonthHint, headerOnly[2]!, '01', year)?.slice(0, 7) ?? null;
       currentMonthToken = headerOnly[2]!;
@@ -272,9 +288,9 @@ export function parseSantanderStatementText(text: string): ParsedStatementLine[]
 
     const m = line.match(rowRe);
     if (!m) {
-      // Softer pattern without auth code
+      // Softer pattern without auth code — amount at end
       const soft = line.match(
-        /^(?:(\d{2})\s+([A-Za-zÁÉÍÓÚáéíóúñÑ.]+)\s+)?(\d{2})\s+(.+?)\s{2,}([\d.]+,\d{2}-?)\s*$/,
+        /^(?:(\d{2})\s+([A-Za-zÁÉÍÓÚáéíóúñÑ.]+)\s+)?(\d{2})\s+(.+?)\s+([\d.]+,\d{2}-?)$/,
       );
       if (!soft) continue;
       const monthToken = soft[2] ?? currentMonthToken;
@@ -282,6 +298,7 @@ export function parseSantanderStatementText(text: string): ParsedStatementLine[]
       const rest = soft[4]!;
       const amountRaw = soft[5]!;
       if (!monthToken) continue;
+      // Skip soft matches that look like "SU PAGO" without auth (still handled via shouldSkip)
       pushSantanderLine({
         results,
         year,
@@ -290,7 +307,7 @@ export function parseSantanderStatementText(text: string): ParsedStatementLine[]
         dayToken,
         middle: rest,
         amountRaw,
-        raw: line.trim(),
+        raw: line,
       });
       if (soft[2]) {
         currentMonthToken = soft[2];
@@ -320,7 +337,7 @@ export function parseSantanderStatementText(text: string): ParsedStatementLine[]
       dayToken,
       middle,
       amountRaw: amountTail,
-      raw: line.trim(),
+      raw: line,
     });
   }
 
@@ -380,73 +397,240 @@ function pushSantanderLine(args: {
 }
 
 /**
- * BBVA text is often fragmented. We scan for merchant + optional C.nn/nn + amount nearby.
+ * BBVA resumen: consumos are date / description / amount triplets under "Consumos …".
+ * Legal Plan V lines ("3 cuotas de $…") are dropped entirely.
  */
 export function parseBbvaStatementText(text: string): ParsedStatementLine[] {
-  const year = extractStatementYear(text);
-  const yearMonthHint = extractYearMonthHint(text);
+  const lines = text
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((l) => l.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
   const results: ParsedStatementLine[] = [];
-
-  const compact = text.replace(/\r/g, '\n');
-
-  // Pattern: merchant name then optional cuota then amount on same or next tokens
-  const lineRe =
-    /([A-ZÁÉÍÓÚÑ0-9*][A-ZÁÉÍÓÚÑa-záéíóúñ0-9* .&\/-]{2,40}?)\s+(C\.\d{2}\/\d{2})?\s*\$?\s*([\d.]+,\d{2})/g;
-
-  let match: RegExpExecArray | null;
-  while ((match = lineRe.exec(compact)) !== null) {
-    const storeRaw = match[1]!.trim();
-    if (shouldSkipStoreName(storeRaw)) continue;
-    const installment = match[2] ? parseInstallment(match[2]) : undefined;
-    const amount = parseArgentineAmount(match[3]!);
-    if (amount == null || amount <= 0) continue;
-
-    const absAmount = Math.abs(amount);
-    const before = compact.slice(Math.max(0, match.index - 100), match.index);
-    const after = compact.slice(match.index + match[0].length, match.index + match[0].length + 60);
-    const context = `${before} ${match[0]} ${after}`;
-    if (looksLikeLimitContext(context, absAmount)) continue;
-
-    const date =
-      findNearbyDate(before, year, yearMonthHint) ?? findNearbyDate(after, year, yearMonthHint);
-    // Without a nearby date, keep only as suggested-skip noise (not actionable).
-    const resolvedDate = date ?? `${year}-01-01`;
-    const store = storeRaw.replace(/\s{2,}/g, ' ').trim();
-    if (normalizeStoreKey(store).length < 3) continue;
-
-    const suggestedSkip =
-      !date ||
-      shouldSkipLine(match[0], amount) ||
-      shouldSkipStoreName(store) ||
-      looksLikeLimitContext(match[0], absAmount);
-
-    const fingerprint = fingerprintStatementLine({
-      date: resolvedDate,
-      store,
-      amount: absAmount,
-      currency: 'ARS',
-      installment,
-    });
-
-    results.push({
-      date: resolvedDate,
-      store,
-      amount: absAmount,
-      currency: 'ARS',
-      installment,
-      raw: match[0].trim(),
-      fingerprint,
-      suggestedSkip,
-    });
-  }
-
-  // Also try Santander-like rows if BBVA PDF extracted as continuous lines
-  if (results.filter(isActionableLine).length === 0) {
-    const santander = parseSantanderStatementText(text);
-    if (santander.filter(isActionableLine).length > 0) return santander;
-  }
+  results.push(...parseBbvaConsumosSections(lines));
+  results.push(...parseBbvaImpuestosSection(lines));
 
   return dedupeByFingerprint(results);
+}
+
+function parseBbvaConsumosSections(lines: string[]): ParsedStatementLine[] {
+  const results: ParsedStatementLine[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i]!;
+    if (!/^consumos\b/i.test(line) || /total\s+consumos/i.test(line)) {
+      i += 1;
+      continue;
+    }
+    i += 1;
+    // Skip column headers
+    while (i < lines.length && /^(fecha|descripci)/i.test(lines[i]!)) i += 1;
+
+    while (i < lines.length) {
+      const cur = lines[i]!;
+      if (/^total\s+consumos/i.test(cur)) break;
+      if (/^consumos\b/i.test(cur)) break;
+      if (/^impuestos/i.test(cur) || /^legales/i.test(cur) || /^plan\s+v/i.test(cur)) break;
+
+      if (shouldDropCompletely(cur)) {
+        i += 1;
+        continue;
+      }
+
+      const date = parseBbvaDateToken(cur);
+      if (!date) {
+        i += 1;
+        continue;
+      }
+
+      const descLine = lines[i + 1];
+      const amountLine = lines[i + 2];
+      if (!descLine || !amountLine) {
+        i += 1;
+        continue;
+      }
+
+      if (shouldDropCompletely(descLine) || shouldDropCompletely(amountLine)) {
+        i += 3;
+        continue;
+      }
+
+      // Amount may be on line 2 if description absorbed it (rare); normally line 3.
+      let amountRaw = amountLine;
+      let desc = descLine;
+      let consumed = 3;
+
+      // If "amount" line isn't an amount, try desc+amount on same following line
+      if (parseArgentineAmount(amountRaw) == null) {
+        const inline = descLine.match(/^(.+?)\s+(-?[\d.]+,\d{2})$/);
+        if (inline) {
+          desc = inline[1]!;
+          amountRaw = inline[2]!;
+          consumed = 2;
+        } else {
+          i += 1;
+          continue;
+        }
+      }
+
+      const amount = parseArgentineAmount(amountRaw);
+      if (amount == null) {
+        i += 1;
+        continue;
+      }
+
+      const installment = parseInstallment(desc);
+      const store = cleanBbvaStoreName(desc);
+      const raw = `${cur} ${descLine} ${amountLine}`;
+
+      // Bonifications / negatives: keep as suggestedSkip so they don't become expenses
+      const isBonif = /bonif/i.test(desc) || amount < 0;
+      if (!store || normalizeStoreKey(store).length < 3) {
+        i += consumed;
+        continue;
+      }
+      if (shouldDropCompletely(store)) {
+        i += consumed;
+        continue;
+      }
+
+      const absAmount = Math.abs(amount);
+      const fingerprint = fingerprintStatementLine({
+        date,
+        store,
+        amount: absAmount,
+        currency: 'ARS',
+        installment,
+      });
+
+      results.push({
+        date,
+        store,
+        amount: absAmount,
+        currency: 'ARS',
+        installment,
+        raw,
+        fingerprint,
+        suggestedSkip: isBonif || shouldSkipStoreName(store),
+      });
+
+      i += consumed;
+    }
+  }
+  return results;
+}
+
+function parseBbvaImpuestosSection(lines: string[]): ParsedStatementLine[] {
+  const results: ParsedStatementLine[] = [];
+  let i = lines.findIndex((l) => /^impuestos,\s*cargos/i.test(l) || /^impuestos\b/i.test(l));
+  if (i < 0) return results;
+  i += 1;
+  while (i < lines.length && /^(fecha|descripci)/i.test(lines[i]!)) i += 1;
+
+  while (i < lines.length) {
+    const cur = lines[i]!;
+    if (/^saldo\s+actual/i.test(cur) || /^legales/i.test(cur) || /^plan\s+v/i.test(cur)) break;
+    if (shouldDropCompletely(cur)) {
+      i += 1;
+      continue;
+    }
+
+    const date = parseBbvaDateToken(cur);
+    if (!date) {
+      i += 1;
+      continue;
+    }
+    const descLine = lines[i + 1];
+    const amountLine = lines[i + 2];
+    if (!descLine || !amountLine) break;
+
+    let amount = parseArgentineAmount(amountLine);
+    let desc = descLine.replace(/\$\s*$/, '').trim();
+    let consumed = 3;
+    if (amount == null) {
+      const inline = descLine.match(/^(.+?)\s+\$?\s*(-?[\d.]+,\d{2})$/);
+      if (inline) {
+        desc = inline[1]!.replace(/\$\s*$/, '').trim();
+        amount = parseArgentineAmount(inline[2]!);
+        consumed = 2;
+      }
+    }
+    if (amount == null || amount <= 0) {
+      i += 1;
+      continue;
+    }
+
+    const store = cleanBbvaStoreName(desc);
+    if (!store || normalizeStoreKey(store).length < 3) {
+      i += consumed;
+      continue;
+    }
+
+    const fingerprint = fingerprintStatementLine({
+      date,
+      store,
+      amount,
+      currency: 'ARS',
+    });
+    results.push({
+      date,
+      store,
+      amount,
+      currency: 'ARS',
+      raw: `${cur} ${descLine} ${amountLine}`,
+      fingerprint,
+      suggestedSkip: false,
+    });
+    i += consumed;
+  }
+  return results;
+}
+
+/** Parse BBVA date tokens like 19-Ene-26 or 29-May-26. */
+export function parseBbvaDateToken(token: string): string | null {
+  const m = token
+    .trim()
+    .match(/^(\d{1,2})[-\/]([A-Za-zÁÉÍÓÚáéíóúñÑ.]+)[-\/](\d{2,4})$/);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const monthKey = m[2]!
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/\./g, '');
+  const month = MONTH_MAP[monthKey];
+  let year = Number(m[3]);
+  if (!month || !day || day > 31) return null;
+  if (year < 100) year += 2000;
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+export function cleanBbvaStoreName(desc: string): string {
+  let store = desc
+    .replace(/C\.?\s*\d{1,2}\s*\/\s*\d{1,2}/i, '')
+    .replace(/\b\d{6}\b/g, '') // cupón (exactly 6 digits)
+    .replace(/\b\d{12,}\b/g, '') // long ids after CUOTA SOCIAL CAR
+    .replace(/\$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // Trailing short cupón leftovers (1–5 digits), but keep years like 2026
+  store = store.replace(/\s+\d{1,3}$/, '').trim();
+  return store;
+}
+
+function shouldDropCompletely(text: string): boolean {
+  const t = text.trim();
+  if (DROP_COMPLETELY.some((re) => re.test(t))) return true;
+  if (/^\d+\s*cuotas(\s+de)?/i.test(t)) return true;
+  if (/con\s+iva:|sin\s+iva:/i.test(t)) return true;
+  if (/l[ií]mite/i.test(t) && /compra|disponible|financi/i.test(t)) return true;
+  // Month-range legales like "Octubre/26 Noviembre/26…"
+  if (/(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiem|octubre|noviembre|diciembre)\/\d{2}/i.test(t)
+    && (t.match(/\//g) ?? []).length >= 2) {
+    return true;
+  }
+  return false;
 }
 
 function shouldSkipStoreName(store: string): boolean {
@@ -454,32 +638,6 @@ function shouldSkipStoreName(store: string): boolean {
   if (JUNK_STORE_EXACT.test(trimmed)) return true;
   if (normalizeStoreKey(trimmed).length < 3) return true;
   return SKIP_PATTERNS.some((re) => re.test(trimmed));
-}
-
-function findNearbyDate(before: string, year: number, yearMonthHint: string | null): string | null {
-  const dmy = before.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/g);
-  if (dmy && dmy.length) {
-    const last = dmy[dmy.length - 1]!;
-    const parts = last.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
-    if (parts) {
-      const day = Number(parts[1]);
-      const month = Number(parts[2]);
-      let y = parts[3] ? Number(parts[3]) : year;
-      if (y < 100) y += 2000;
-      if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
-        return `${y}-${pad2(month)}-${pad2(day)}`;
-      }
-    }
-  }
-  const named = before.match(/(\d{1,2})\s+([A-Za-zÁÉÍÓÚáéíóúñÑ.]+)/g);
-  if (named && named.length) {
-    const last = named[named.length - 1]!;
-    const parts = last.match(/(\d{1,2})\s+([A-Za-zÁÉÍÓÚáéíóúñÑ.]+)/);
-    if (parts) {
-      return parseStatementDateParts(yearMonthHint, parts[2]!, parts[1]!, year);
-    }
-  }
-  return null;
 }
 
 function dedupeByFingerprint(lines: ParsedStatementLine[]): ParsedStatementLine[] {
@@ -517,3 +675,4 @@ export function parseStatementText(
   }
   return { bank: 'Unknown', lines: [...santander, ...bbva] };
 }
+

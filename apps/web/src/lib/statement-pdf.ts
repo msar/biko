@@ -1,8 +1,9 @@
 import {
-  bankFromEntityName,
+  assemblePdfTextLines,
   parseStatementText,
   type ParsedStatementLine,
   type StatementBankSource,
+  bankFromEntityName,
 } from '@biko/shared';
 import * as pdfjs from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -30,25 +31,26 @@ export async function extractPdfText(file: File): Promise<string> {
   const buffer = new Uint8Array(await file.arrayBuffer());
   const data = unwrapPdfBytes(buffer);
   const doc = await pdfjs.getDocument({ data }).promise;
-  const parts: string[] = [];
+  const pageTexts: string[] = [];
+
   for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
     const page = await doc.getPage(pageNum);
     const content = await page.getTextContent();
-    const lineMap = new Map<number, string[]>();
-    for (const item of content.items) {
-      if (!('str' in item) || !item.str) continue;
-      const y = Math.round((item.transform?.[5] ?? 0) * 10) / 10;
-      const row = lineMap.get(y) ?? [];
-      row.push(item.str);
-      lineMap.set(y, row);
-    }
-    const sortedYs = [...lineMap.keys()].sort((a, b) => b - a);
-    for (const y of sortedYs) {
-      parts.push((lineMap.get(y) ?? []).join(' '));
-    }
-    parts.push('');
+    const items = content.items.flatMap((item) => {
+      if (!('str' in item) || !item.str) return [];
+      const transform = item.transform;
+      return [
+        {
+          str: item.str,
+          x: transform?.[4] ?? 0,
+          y: transform?.[5] ?? 0,
+        },
+      ];
+    });
+    pageTexts.push(assemblePdfTextLines(items, { yBinSize: 1 }).join('\n'));
   }
-  return parts.join('\n');
+
+  return pageTexts.join('\n\n');
 }
 
 export async function parseStatementPdf(
