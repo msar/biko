@@ -50,16 +50,27 @@ const SKIP_PATTERNS = [
   /total\s+de\s+cuotas/i,
   /pago\s+m[ií]nimo/i,
   /plan\s+v/i,
-  /bonif\.?\s/i,
+  /bonif\.?\s?/i,
   /saldo\s+anterior/i,
+  /saldo\b/i,
   /cuotas\s+a\s+vencer/i,
   /tasa\s+nominal/i,
+  /\btna\b/i,
+  /\btea\b/i,
   /cftea/i,
-  /compra\s+\$/i,
-  /l[ií]mite\s+de\s+compra/i,
+  /compra\s*\$/i,
+  /l[ií]mite(\s+de\s+compra)?/i,
+  /disponible/i,
   /vencimiento/i,
   /resumen\s+con/i,
+  /\binteres/i,
+  /\biva\b/i,
+  /sus\s+pagos/i,
+  /ajustes\s+realizados/i,
 ];
+
+const JUNK_STORE_EXACT =
+  /^(fecha|visa|resumen|tarjeta|cuotas|compra|limite|l[ií]mite|disponible|ars|usd|pesos|dolares|dólares)$/i;
 
 export function detectStatementBank(text: string): StatementBankSource {
   const lower = text.toLowerCase();
@@ -73,6 +84,33 @@ export function detectStatementBank(text: string): StatementBankSource {
     return 'BBVA';
   }
   return 'Unknown';
+}
+
+/** Map a catalog entity name (or free text) to a statement bank. */
+export function bankFromEntityName(name: string | null | undefined): StatementBankSource {
+  if (!name) return 'Unknown';
+  const lower = name.toLowerCase();
+  if (lower.includes('bbva') || lower.includes('franc')) return 'BBVA';
+  if (lower.includes('santander')) return 'Santander';
+  return 'Unknown';
+}
+
+export function isActionableLine(line: ParsedStatementLine): boolean {
+  if (line.suggestedSkip) return false;
+  if (line.currency !== 'ARS') return false;
+  if (line.amount <= 0) return false;
+  const key = normalizeStoreKey(line.store);
+  if (key.length < 3) return false;
+  if (JUNK_STORE_EXACT.test(line.store.trim())) return false;
+  if (SKIP_PATTERNS.some((re) => re.test(line.store) || re.test(line.raw))) return false;
+  // Placeholder date used when BBVA couldn't find a nearby date — treat as non-actionable.
+  if (/^\d{4}-01-01$/.test(line.date) && !line.installment) return false;
+  return true;
+}
+
+function looksLikeLimitContext(raw: string, amount: number): boolean {
+  if (amount < 1_000_000) return false;
+  return /l[ií]mite|disponible|compra\s*\$|compra\s+total/i.test(raw);
 }
 
 export function fingerprintStatementLine(input: {
@@ -125,6 +163,7 @@ function pad2(n: number): string {
 
 function shouldSkipLine(raw: string, amount: number | null): boolean {
   if (amount != null && amount <= 0) return true;
+  if (amount != null && looksLikeLimitContext(raw, Math.abs(amount))) return true;
   return SKIP_PATTERNS.some((re) => re.test(raw));
 }
 
@@ -348,7 +387,6 @@ export function parseBbvaStatementText(text: string): ParsedStatementLine[] {
   const yearMonthHint = extractYearMonthHint(text);
   const results: ParsedStatementLine[] = [];
 
-  // Join PDF Tj fragments that may be one-per-line already
   const compact = text.replace(/\r/g, '\n');
 
   // Pattern: merchant name then optional cuota then amount on same or next tokens
@@ -363,24 +401,37 @@ export function parseBbvaStatementText(text: string): ParsedStatementLine[] {
     const amount = parseArgentineAmount(match[3]!);
     if (amount == null || amount <= 0) continue;
 
-    // Try to find a nearby date (DD/MM or DD Mon) within 80 chars before
-    const before = compact.slice(Math.max(0, match.index - 80), match.index);
-    const date = findNearbyDate(before, year, yearMonthHint) ?? `${year}-01-01`;
+    const absAmount = Math.abs(amount);
+    const before = compact.slice(Math.max(0, match.index - 100), match.index);
+    const after = compact.slice(match.index + match[0].length, match.index + match[0].length + 60);
+    const context = `${before} ${match[0]} ${after}`;
+    if (looksLikeLimitContext(context, absAmount)) continue;
 
+    const date =
+      findNearbyDate(before, year, yearMonthHint) ?? findNearbyDate(after, year, yearMonthHint);
+    // Without a nearby date, keep only as suggested-skip noise (not actionable).
+    const resolvedDate = date ?? `${year}-01-01`;
     const store = storeRaw.replace(/\s{2,}/g, ' ').trim();
-    const suggestedSkip = shouldSkipLine(match[0], amount) || shouldSkipStoreName(store);
+    if (normalizeStoreKey(store).length < 3) continue;
+
+    const suggestedSkip =
+      !date ||
+      shouldSkipLine(match[0], amount) ||
+      shouldSkipStoreName(store) ||
+      looksLikeLimitContext(match[0], absAmount);
+
     const fingerprint = fingerprintStatementLine({
-      date,
+      date: resolvedDate,
       store,
-      amount: Math.abs(amount),
+      amount: absAmount,
       currency: 'ARS',
       installment,
     });
 
     results.push({
-      date,
+      date: resolvedDate,
       store,
-      amount: Math.abs(amount),
+      amount: absAmount,
       currency: 'ARS',
       installment,
       raw: match[0].trim(),
@@ -390,15 +441,19 @@ export function parseBbvaStatementText(text: string): ParsedStatementLine[] {
   }
 
   // Also try Santander-like rows if BBVA PDF extracted as continuous lines
-  if (results.length === 0) {
-    return parseSantanderStatementText(text);
+  if (results.filter(isActionableLine).length === 0) {
+    const santander = parseSantanderStatementText(text);
+    if (santander.filter(isActionableLine).length > 0) return santander;
   }
 
   return dedupeByFingerprint(results);
 }
 
 function shouldSkipStoreName(store: string): boolean {
-  return SKIP_PATTERNS.some((re) => re.test(store)) || /^(fecha|visa|resumen|tarjeta|cuotas)$/i.test(store.trim());
+  const trimmed = store.trim();
+  if (JUNK_STORE_EXACT.test(trimmed)) return true;
+  if (normalizeStoreKey(trimmed).length < 3) return true;
+  return SKIP_PATTERNS.some((re) => re.test(trimmed));
 }
 
 function findNearbyDate(before: string, year: number, yearMonthHint: string | null): string | null {
@@ -443,16 +498,22 @@ export function parseStatementText(
   bank?: StatementBankSource,
 ): { bank: StatementBankSource; lines: ParsedStatementLine[] } {
   const detected = bank && bank !== 'Unknown' ? bank : detectStatementBank(text);
+
   if (detected === 'BBVA') {
-    return { bank: detected, lines: parseBbvaStatementText(text) };
+    return { bank: 'BBVA', lines: parseBbvaStatementText(text) };
   }
   if (detected === 'Santander') {
-    return { bank: detected, lines: parseSantanderStatementText(text) };
+    return { bank: 'Santander', lines: parseSantanderStatementText(text) };
   }
-  // Try Santander first (more structured), fall back to BBVA heuristics
+
+  // Unknown: try Santander first (structured), then BBVA. Never label a failure as BBVA.
   const santander = parseSantanderStatementText(text);
-  if (santander.filter((l) => !l.suggestedSkip).length > 0) {
+  if (santander.some(isActionableLine)) {
     return { bank: 'Santander', lines: santander };
   }
-  return { bank: 'BBVA', lines: parseBbvaStatementText(text) };
+  const bbva = parseBbvaStatementText(text);
+  if (bbva.some(isActionableLine)) {
+    return { bank: 'BBVA', lines: bbva };
+  }
+  return { bank: 'Unknown', lines: [...santander, ...bbva] };
 }

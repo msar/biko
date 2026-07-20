@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bankFromEntityName,
   detectStatementBank,
   fingerprintStatementLine,
+  isActionableLine,
   parseArgentineAmount,
+  parseBbvaStatementText,
   parseSantanderStatementText,
   parseStatementDateParts,
   parseStatementText,
@@ -27,6 +30,24 @@ Vencimiento 13 Jul 26
 25 Setiem. 15 008272 *  ELECTRONICA MEGATONE SRL    C.10/18                       47.499,88
 `;
 
+const BBVA_JUNK_FIXTURE = `
+Banco BBVA Argentina
+Visa Platinum
+COMPRA $ 3.000.000,00
+LIMITE DISPONIBLE $ 2.500.000,00
+PAGO MINIMO $ 15.160,00
+FECHA
+15/06/2026 TLM CARP                    C.06/06                       17.748,33
+10/06/2026 PRIMAVERA SOUND 2026        C.01/06                       92.500,08
+`;
+
+const NOISE_ONLY = `
+Resumen con Tarjetas
+COMPRA $ 5.976.000,00
+LIMITE DE COMPRA $ 3.000.000,00
+Plan V 3 cuotas
+`;
+
 describe('parseArgentineAmount', () => {
   it('parses dotted thousands', () => {
     expect(parseArgentineAmount('46.650,00')).toBe(46650);
@@ -45,7 +66,7 @@ describe('parseStatementDateParts', () => {
 describe('parseSantanderStatementText', () => {
   it('parses consumos, cuotas and skips payments', () => {
     const lines = parseSantanderStatementText(SANTANDER_FIXTURE);
-    const active = lines.filter((l) => !l.suggestedSkip);
+    const active = lines.filter(isActionableLine);
     const skipped = lines.filter((l) => l.suggestedSkip);
 
     expect(skipped.some((l) => /SU PAGO/i.test(l.raw))).toBe(true);
@@ -72,6 +93,46 @@ describe('parseSantanderStatementText', () => {
   });
 });
 
+describe('bank hint and unknown fallback', () => {
+  it('maps entity names to banks', () => {
+    expect(bankFromEntityName('Santander')).toBe('Santander');
+    expect(bankFromEntityName('BBVA')).toBe('BBVA');
+    expect(bankFromEntityName('Galicia')).toBe('Unknown');
+  });
+
+  it('respects Santander hint even without bank word in text', () => {
+    const body = `
+26 Mayo    06 000762 *  EQUUS                       C.02/06                       46.650,00
+`;
+    const parsed = parseStatementText(body, 'Santander');
+    expect(parsed.bank).toBe('Santander');
+    expect(parsed.lines.some(isActionableLine)).toBe(true);
+  });
+
+  it('never labels empty/junk-only results as BBVA', () => {
+    const parsed = parseStatementText(NOISE_ONLY);
+    expect(parsed.bank).toBe('Unknown');
+    expect(parsed.lines.filter(isActionableLine)).toHaveLength(0);
+  });
+});
+
+describe('parseBbvaStatementText', () => {
+  it('skips limits and keeps real consumos', () => {
+    const lines = parseBbvaStatementText(BBVA_JUNK_FIXTURE);
+    const active = lines.filter(isActionableLine);
+
+    expect(active.some((l) => /COMPRA/i.test(l.store))).toBe(false);
+    expect(active.some((l) => l.amount >= 1_000_000)).toBe(false);
+
+    const carp = active.find((l) => /CARP|TLM/i.test(l.store));
+    expect(carp?.amount).toBe(17748.33);
+    expect(carp?.installment).toEqual({ current: 6, total: 6 });
+
+    const sound = active.find((l) => /PRIMAVERA/i.test(l.store));
+    expect(sound?.amount).toBe(92500.08);
+  });
+});
+
 describe('fingerprintStatementLine', () => {
   it('is stable for same logical line', () => {
     const a = fingerprintStatementLine({
@@ -89,6 +150,18 @@ describe('fingerprintStatementLine', () => {
       installment: { current: 2, total: 6 },
     });
     expect(a).toBe(b);
+  });
+
+  it('keeps fingerprint when display store is edited separately', () => {
+    const original = fingerprintStatementLine({
+      date: '2026-05-06',
+      store: 'MERPAGO*CARNAVE',
+      amount: 27953,
+      currency: 'ARS',
+    });
+    // UI keeps original fingerprint while sending edited store on commit.
+    expect(original).toContain('CARNAVE');
+    expect(original).not.toContain('Carnave Butcher');
   });
 });
 

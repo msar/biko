@@ -1,8 +1,15 @@
-import { parseStatementText, type ParsedStatementLine, type StatementBankSource } from '@biko/shared';
+import {
+  bankFromEntityName,
+  parseStatementText,
+  type ParsedStatementLine,
+  type StatementBankSource,
+} from '@biko/shared';
 import * as pdfjs from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
+
+export { bankFromEntityName };
 
 /** Strip MIME multipart wrappers some banks email as .pdf */
 export function unwrapPdfBytes(bytes: Uint8Array): Uint8Array {
@@ -51,6 +58,25 @@ export async function parseStatementPdf(
   const text = await extractPdfText(file);
   const parsed = parseStatementText(text, bankHint);
   return { bank: parsed.bank, text, lines: parsed.lines };
+}
+
+export function bankFromPaymentMethod(method: {
+  definition: { entity: { name: string } | null };
+}): StatementBankSource {
+  return bankFromEntityName(method.definition.entity?.name);
+}
+
+/** Resolve parser bank hint from UI override + selected card. */
+export function resolveBankHint(
+  override: StatementBankSource | 'Auto',
+  paymentMethod: { definition: { entity: { name: string } | null } } | null | undefined,
+): StatementBankSource | undefined {
+  if (override !== 'Auto') return override;
+  if (paymentMethod) {
+    const fromCard = bankFromPaymentMethod(paymentMethod);
+    if (fromCard !== 'Unknown') return fromCard;
+  }
+  return undefined;
 }
 
 export function guessPaymentMethodId(

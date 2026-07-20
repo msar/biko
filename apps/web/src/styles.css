@@ -1596,6 +1596,30 @@ code {
   opacity: 0.65;
 }
 
+.statement-store-edit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-right: 12px;
+}
+
+.statement-store-edit label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.statement-store-edit input {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 6px 8px;
+}
+
 .merge-box {
   display: flex;
   flex-direction: column;
