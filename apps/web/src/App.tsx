@@ -13,6 +13,7 @@ import NewExpensePage from './pages/NewExpensePage';
 import PromotionsPage from './pages/PromotionsPage';
 import RecurringPaymentsPage from './pages/RecurringPaymentsPage';
 import SettingsPage from './pages/SettingsPage';
+import ImportStatementPage from './pages/ImportStatementPage';
 import AppHeader from './components/AppHeader';
 import BrandMark from './components/BrandLogo';
 
@@ -61,7 +62,10 @@ export default function App() {
   }
   if (!user) return <LoginPage />;
 
-  const hideNav = location.pathname === '/nuevo' || location.pathname.startsWith('/gastos/');
+  const hideNav =
+    location.pathname === '/nuevo' ||
+    location.pathname.startsWith('/gastos/') ||
+    location.pathname.startsWith('/importar-resumen');
 
   return (
     <div className="app">
@@ -77,6 +81,7 @@ export default function App() {
           <Route path="/promos" element={<PromotionsPage />} />
           <Route path="/hoy" element={<Navigate to="/promos" replace />} />
           <Route path="/ajustes" element={<SettingsPage />} />
+          <Route path="/importar-resumen" element={<ImportStatementPage />} />
           <Route path="/recurrentes" element={<RecurringPaymentsPage />} />
           <Route path="/admin" element={<AdminRoute />} />
           <Route path="*" element={<Navigate to="/" replace />} />

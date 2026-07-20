@@ -168,8 +168,17 @@ export default function SettingsPage() {
           </div>
         )}
         <p className="hint">
-          También podés gestionar <Link to="/recurrentes">pagos recurrentes</Link> (luz, gas, gym…).
+          También podés gestionar <Link to="/recurrentes">pagos recurrentes</Link> (luz, gas, gym…) o{' '}
+          <Link to="/importar-resumen">importar un resumen</Link> de tarjeta.
         </p>
+      </section>
+
+      <section className="card">
+        <h2>Importar resumen</h2>
+        <p className="hint">Cargá el PDF de Santander o BBVA y categorizá los consumos nuevos.</p>
+        <Link to="/importar-resumen" className="btn-link">
+          Importar resumen de tarjeta →
+        </Link>
       </section>
 
       <section className="card">

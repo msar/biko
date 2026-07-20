@@ -1569,3 +1569,47 @@ code {
   gap: 10px;
   margin-top: 4px;
 }
+
+/* Statement import */
+.file-picker {
+  display: block;
+  padding: 14px 16px;
+  border: 2px dashed var(--border, #d0cbc2);
+  border-radius: 12px;
+  background: var(--card);
+  cursor: pointer;
+  margin-bottom: 16px;
+  color: var(--ink);
+}
+
+.file-picker input[type='file'] {
+  display: none;
+}
+
+.statement-line {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.statement-line.muted {
+  opacity: 0.65;
+}
+
+.merge-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #f0eee8;
+  border-radius: 10px;
+}
+
+.sticky-actions {
+  position: sticky;
+  bottom: 12px;
+  padding: 12px;
+  background: var(--bg, #f6f4ef);
+  border-radius: 12px;
+  z-index: 5;
+}
