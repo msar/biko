@@ -61,6 +61,18 @@ enum StatementImportStatus {
   FAILED
 }
 
+enum StatementImportLineStatus {
+  PENDING
+  NEW
+  MERGED
+  SKIPPED
+}
+
+enum StatementAmountResolution {
+  KEEP_EXISTING
+  USE_STATEMENT
+}
+
 enum ExpenseScope {
   HOUSEHOLD
   PERSONAL
@@ -180,6 +192,7 @@ model User {
   amountHistories RecurringAmountHistory[]
   notifications Notification[]
   pushSubscriptions PushSubscription[]
+  statementImports StatementImport[]
 }
 
 // Comercios/promos que el hogar ocultó en Mi semana (por groupKey de weeklyPromoGroupKey).
@@ -245,6 +258,7 @@ model PaymentMethod {
 
   purchases    Purchase[]
   recurringPayments RecurringPayment[]
+  statementImports StatementImport[]
 
   @@unique([householdId, definitionId, lastFour])
   @@index([householdId])
@@ -373,10 +387,16 @@ model Purchase {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  // Huella del consumo bancario cuando el gasto nace o se fusiona desde un resumen.
+  // No es unique: una compra en cuotas puede vincularse a varias líneas a lo largo de los meses.
+  statementFingerprint String?
+
   installments   Installment[]
   allocations    PurchaseAllocation[]
   recurringOccurrence RecurringOccurrence?
+  statementImportLines StatementImportLine[]
 
+  @@index([householdId, statementFingerprint])
   @@index([householdId, purchaseDate])
   @@index([categoryId])
   @@index([paidByUserId])
@@ -447,21 +467,56 @@ model MonthlyCapUsage {
 }
 
 // ============================================================
-// IMPORTACIÓN DE RESÚMENES BANCARIOS (Fase 3, tabla ya prevista)
+// IMPORTACIÓN DE RESÚMENES BANCARIOS
 // ============================================================
 
 model StatementImport {
-  id             String   @id @default(cuid())
-  householdId    String
-  household      Household @relation(fields: [householdId], references: [id])
-  fileName       String
-  bankSource     String   // "Galicia", "Santander", etc.
-  status         StatementImportStatus @default(PENDING)
-  processedCount Int      @default(0)
-  errorLog       String?
-  importedAt     DateTime @default(now())
+  id              String                @id @default(cuid())
+  householdId     String
+  household       Household             @relation(fields: [householdId], references: [id])
+  userId          String
+  user            User                  @relation(fields: [userId], references: [id])
+  paymentMethodId String?
+  paymentMethod   PaymentMethod?        @relation(fields: [paymentMethodId], references: [id])
+  fileName        String
+  bankSource      String                // "Santander", "BBVA", etc.
+  status          StatementImportStatus @default(PENDING)
+  processedCount  Int                   @default(0)
+  errorLog        String?
+  importedAt      DateTime              @default(now())
+  committedAt     DateTime?
+
+  lines StatementImportLine[]
 
   @@index([householdId])
+}
+
+model StatementImportLine {
+  id                   String                     @id @default(cuid())
+  importId             String
+  import               StatementImport            @relation(fields: [importId], references: [id], onDelete: Cascade)
+  householdId          String
+  fingerprint          String
+  lineDate             DateTime
+  store                String
+  amount               Decimal                    @db.Decimal(12, 2)
+  currency             String                     @default("ARS")
+  installmentCurrent   Int?
+  installmentTotal     Int?
+  rawText              String
+  suggestedSkip        Boolean                    @default(false)
+  status               StatementImportLineStatus  @default(PENDING)
+  matchedPurchaseId    String?
+  matchedPurchase      Purchase?                  @relation(fields: [matchedPurchaseId], references: [id], onDelete: SetNull)
+  amountResolution     StatementAmountResolution?
+  categoryId           String?
+  scope                ExpenseScope?
+  splitMode            SplitMode?
+  createdPurchaseId    String?
+
+  @@unique([householdId, fingerprint])
+  @@index([importId])
+  @@index([householdId, status])
 }
 
 // ============================================================
