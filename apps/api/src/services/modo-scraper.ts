@@ -31,7 +31,7 @@ const MAX_PAGES_PER_CATEGORY = 2;
 const MODO_CATEGORY_MAP: Record<number, string> = {
   1: 'Supermercado',
   2: 'Restaurante',
-  3: 'Indumentaria',
+  3: 'Compras',
   4: 'Farmacia',
   5: 'Combustible',
   7: 'Hogar',

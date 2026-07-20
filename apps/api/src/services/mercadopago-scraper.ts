@@ -54,7 +54,7 @@ const STORE_CATEGORY_HINTS: Array<{ pattern: RegExp; category: string }> = [
   { pattern: /easy|homecenter|sodimac|hogar|blaisten/i, category: 'Hogar' },
   { pattern: /despegar|turismo|aerol[ií]nea|hotel|almundo/i, category: 'Transporte' },
   { pattern: /shell|ypf|axion|puma|gulf|combustible/i, category: 'Combustible' },
-  { pattern: /zara|falabella|garbarino|indumentaria|nike|adidas|moda/i, category: 'Indumentaria' },
+  { pattern: /zara|falabella|garbarino|indumentaria|nike|adidas|moda/i, category: 'Compras' },
 ];
 
 function dedupeBadges(badges: string[]): string[] {

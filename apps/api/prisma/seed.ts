@@ -38,9 +38,12 @@ const CATEGORIES: Array<{ name: string; icon: string; color: string }> = [
   { name: 'Transporte', icon: '🚌', color: '#5b8a9e' },
   { name: 'Combustible', icon: '⛽', color: '#8a6b4f' },
   { name: 'Restaurante', icon: '🍽️', color: '#b5567a' },
-  { name: 'Indumentaria', icon: '👕', color: '#6b8ab5' },
+  { name: 'Compras', icon: '🛍️', color: '#6b8ab5' },
   { name: 'Hogar', icon: '🏠', color: '#8a7f5b' },
   { name: 'Salud', icon: '🏥', color: '#5ba38a' },
+  { name: 'Deportes', icon: '⚽', color: '#3d8a6b' },
+  { name: 'Entretenimiento', icon: '🎬', color: '#8a5b9e' },
+  { name: 'Viajes', icon: '✈️', color: '#4a7fb5' },
   { name: 'Otros', icon: '📦', color: '#888888' },
 ];
 
@@ -156,6 +159,64 @@ async function main() {
   }
 
   // --- Categorías globales ---
+  // One-time rename: Indumentaria → Compras (preserve IDs when possible).
+  const comprasMeta = CATEGORIES.find((c) => c.name === 'Compras')!;
+  const oldIndumentaria = await prisma.category.findFirst({
+    where: { householdId: null, name: 'Indumentaria' },
+  });
+  const existingCompras = await prisma.category.findFirst({
+    where: { householdId: null, name: 'Compras' },
+  });
+  if (oldIndumentaria && !existingCompras) {
+    await prisma.category.update({
+      where: { id: oldIndumentaria.id },
+      data: { name: comprasMeta.name, icon: comprasMeta.icon, color: comprasMeta.color },
+    });
+  } else if (oldIndumentaria && existingCompras) {
+    await prisma.purchase.updateMany({
+      where: { categoryId: oldIndumentaria.id },
+      data: { categoryId: existingCompras.id },
+    });
+    await prisma.recurringPayment.updateMany({
+      where: { categoryId: oldIndumentaria.id },
+      data: { categoryId: existingCompras.id },
+    });
+    const promoLinks = await prisma.promotionCategory.findMany({
+      where: { categoryId: oldIndumentaria.id },
+    });
+    for (const link of promoLinks) {
+      const already = await prisma.promotionCategory.findUnique({
+        where: {
+          promotionId_categoryId: {
+            promotionId: link.promotionId,
+            categoryId: existingCompras.id,
+          },
+        },
+      });
+      if (already) {
+        await prisma.promotionCategory.delete({
+          where: {
+            promotionId_categoryId: {
+              promotionId: link.promotionId,
+              categoryId: oldIndumentaria.id,
+            },
+          },
+        });
+      } else {
+        await prisma.promotionCategory.update({
+          where: {
+            promotionId_categoryId: {
+              promotionId: link.promotionId,
+              categoryId: oldIndumentaria.id,
+            },
+          },
+          data: { categoryId: existingCompras.id },
+        });
+      }
+    }
+    await prisma.category.delete({ where: { id: oldIndumentaria.id } });
+  }
+
   for (const category of CATEGORIES) {
     const existing = await prisma.category.findFirst({ where: { householdId: null, name: category.name } });
     if (existing) {

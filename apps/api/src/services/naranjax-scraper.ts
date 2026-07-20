@@ -33,7 +33,7 @@ const NX_HEADERS = {
 const NX_CATEGORY_MAP: Record<string, string> = {
   SUPERMERCADOS: 'Supermercado',
   GASTRONOMIA: 'Restaurante',
-  MODA_Y_ACCESORIOS: 'Indumentaria',
+  MODA_Y_ACCESORIOS: 'Compras',
   SALUD_Y_BIENESTAR: 'Farmacia',
   ELECTRO_Y_TECNOLOGIA: 'Hogar',
   HOGAR_Y_DECO: 'Hogar',

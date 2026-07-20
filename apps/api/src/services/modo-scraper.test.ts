@@ -98,11 +98,11 @@ describe('normalizeCard', () => {
   };
 
   it('normalizes a real-shaped card with visuals and details', () => {
-    const promo = normalizeCard(card, 'Indumentaria');
+    const promo = normalizeCard(card, 'Compras');
     expect(promo).toMatchObject({
       externalId: '2883db03-1481-48df-b908-3aed68d98c82',
       store: 'Oxford Polo Club',
-      categoryName: 'Indumentaria',
+      categoryName: 'Compras',
       bankNames: ['Comafi'],
       discountKind: 'PERCENTAGE_REFUND',
       discountLabel: '25% de reintegro',
