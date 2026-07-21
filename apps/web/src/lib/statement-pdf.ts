@@ -1,6 +1,7 @@
 import {
   assemblePdfTextLines,
   parseStatementText,
+  unwrapPdfBytes,
   type ParsedStatementLine,
   type StatementBankSource,
   bankFromEntityName,
@@ -10,22 +11,7 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
 
-export { bankFromEntityName };
-
-/** Strip MIME multipart wrappers some banks email as .pdf */
-export function unwrapPdfBytes(bytes: Uint8Array): Uint8Array {
-  const head = new TextDecoder('latin1').decode(bytes.slice(0, Math.min(bytes.length, 512)));
-  if (head.startsWith('%PDF-')) return bytes;
-  const marker = '%PDF-';
-  const text = new TextDecoder('latin1').decode(bytes);
-  const start = text.indexOf(marker);
-  if (start < 0) return bytes;
-  const end = text.lastIndexOf('%%EOF');
-  const slice = end > start ? text.slice(start, end + 5) : text.slice(start);
-  const out = new Uint8Array(slice.length);
-  for (let i = 0; i < slice.length; i++) out[i] = slice.charCodeAt(i) & 0xff;
-  return out;
-}
+export { bankFromEntityName, unwrapPdfBytes };
 
 export async function extractPdfText(file: File): Promise<string> {
   const buffer = new Uint8Array(await file.arrayBuffer());

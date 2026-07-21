@@ -89,6 +89,13 @@ export const CATEGORY_GROUPS: CategoryGroupDef[] = [
     categoryNames: ['Viajes'],
   },
   {
+    id: 'impuestos',
+    name: 'Impuestos',
+    icon: '🧾',
+    color: '#6b6b6b',
+    categoryNames: ['Impuestos'],
+  },
+  {
     id: 'otros',
     name: 'Otros',
     icon: '📦',

@@ -16,3 +16,4 @@ export * from './recurring-dates';
 export * from './statement-parse';
 export * from './statement-match';
 export * from './pdf-text-assemble';
+export * from './pdf-unwrap';
