@@ -5,6 +5,8 @@ export type ParsedStatementLine = {
   amount: number;
   currency: 'ARS' | 'USD';
   installment?: { current: number; total: number };
+  /** Bank bonificación / reintegro applied to this consumo (positive number). */
+  discountAmount?: number;
   raw: string;
   fingerprint: string;
   /** True for payments, totals, Plan V, bonifications, etc. */
@@ -155,23 +157,37 @@ export function normalizeStoreKey(store: string): string {
     .slice(0, 40);
 }
 
+/**
+ * Parse a single Argentine money token (e.g. "27.940,00", "-2.794,00", "1564.239,53-").
+ * Rejects strings with extra digits/noise (page footers, cupón+amount glues).
+ */
 export function parseArgentineAmount(raw: string): number | null {
-  const cleaned = raw.replace(/\s/g, '').replace(/[^\d.,\-]/g, '');
-  if (!cleaned || cleaned === '-' || cleaned === '.' || cleaned === ',') return null;
-  const negative = cleaned.includes('-');
-  const digits = cleaned.replace(/-/g, '');
-  // 1.564.239,53 or 1564.239,53 or 47499,88
-  let normalized: string;
-  if (digits.includes(',')) {
-    normalized = digits.replace(/\./g, '').replace(',', '.');
-  } else if ((digits.match(/\./g) ?? []).length > 1) {
-    normalized = digits.replace(/\./g, '');
-  } else {
-    normalized = digits;
+  let trimmed = raw.trim().replace(/\s/g, '');
+  // Trailing minus (Santander payments) → leading
+  if (trimmed.endsWith('-') && !trimmed.startsWith('-')) {
+    trimmed = `-${trimmed.slice(0, -1)}`;
   }
+  // One money token. Allow "1564.239,53" (missing leading thousand-dot) as well as "1.564.239,53".
+  if (!/^-?\d{1,10}(?:\.\d{3})*,\d{2}$/.test(trimmed)) return null;
+  const negative = trimmed.startsWith('-');
+  const digits = trimmed.replace(/^-/, '');
+  const normalized = digits.replace(/\./g, '').replace(',', '.');
   const value = Number(normalized);
   if (!Number.isFinite(value)) return null;
+  // Sanity: statement line amounts shouldn't be astronomical
+  if (Math.abs(value) > 50_000_000) return null;
   return negative ? -Math.abs(value) : value;
+}
+
+/** Last money token on a line, e.g. "SHOP GALLERY 002430 27.940,00" → 27940 */
+export function extractTrailingArgentineAmount(line: string): { amount: number; before: string } | null {
+  const m = line
+    .trim()
+    .match(/^(.*?)(-?\d{1,10}(?:\.\d{3})*,\d{2}-?)\s*$/);
+  if (!m) return null;
+  const amount = parseArgentineAmount(m[2]!);
+  if (amount == null) return null;
+  return { amount, before: m[1]!.trim() };
 }
 
 function pad2(n: number): string {
@@ -397,7 +413,11 @@ function pushSantanderLine(args: {
 }
 
 /**
- * BBVA resumen: consumos are date / description / amount triplets under "Consumos …".
+ * BBVA resumen: consumos under "Consumos …".
+ * With pdf.js x-sorted text, amount is usually on the description line:
+ *   19-Ene-26
+ *   TLM CARP C.06/06 003174 37.833,33
+ * BONIF. lines become discounts on the matching consumo (not separate expenses).
  * Legal Plan V lines ("3 cuotas de $…") are dropped entirely.
  */
 export function parseBbvaStatementText(text: string): ParsedStatementLine[] {
@@ -410,8 +430,9 @@ export function parseBbvaStatementText(text: string): ParsedStatementLine[] {
   const results: ParsedStatementLine[] = [];
   results.push(...parseBbvaConsumosSections(lines));
   results.push(...parseBbvaImpuestosSection(lines));
+  results.push(...parseBbvaBonificationLines(lines));
 
-  return dedupeByFingerprint(results);
+  return attachBbvaBonifications(dedupeByFingerprint(results));
 }
 
 function parseBbvaConsumosSections(lines: string[]): ParsedStatementLine[] {
@@ -424,7 +445,6 @@ function parseBbvaConsumosSections(lines: string[]): ParsedStatementLine[] {
       continue;
     }
     i += 1;
-    // Skip column headers
     while (i < lines.length && /^(fecha|descripci)/i.test(lines[i]!)) i += 1;
 
     while (i < lines.length) {
@@ -438,43 +458,53 @@ function parseBbvaConsumosSections(lines: string[]): ParsedStatementLine[] {
         continue;
       }
 
-      const date = parseBbvaDateToken(cur);
-      if (!date) {
+      const dateOnly = parseBbvaDateToken(cur);
+      const dateInline = !dateOnly
+        ? cur.match(/^(\d{1,2}[-\/][A-Za-zÁÉÍÓÚáéíóúñÑ.]+[-\/]\d{2,4})\s+(.+)$/)
+        : null;
+
+      let date: string | null = dateOnly;
+      let descCandidate: string | null = null;
+      let consumed = 1;
+
+      if (dateOnly) {
+        descCandidate = lines[i + 1] ?? null;
+        consumed = 2;
+      } else if (dateInline) {
+        date = parseBbvaDateToken(dateInline[1]!);
+        descCandidate = dateInline[2]!;
+        consumed = 1;
+      } else {
         i += 1;
         continue;
       }
 
-      const descLine = lines[i + 1];
-      const amountLine = lines[i + 2];
-      if (!descLine || !amountLine) {
+      if (!date || !descCandidate) {
         i += 1;
         continue;
       }
-
-      if (shouldDropCompletely(descLine) || shouldDropCompletely(amountLine)) {
-        i += 3;
+      if (shouldDropCompletely(descCandidate)) {
+        i += consumed;
         continue;
       }
 
-      // Amount may be on line 2 if description absorbed it (rare); normally line 3.
-      let amountRaw = amountLine;
-      let desc = descLine;
-      let consumed = 3;
-
-      // If "amount" line isn't an amount, try desc+amount on same following line
-      if (parseArgentineAmount(amountRaw) == null) {
-        const inline = descLine.match(/^(.+?)\s+(-?[\d.]+,\d{2})$/);
-        if (inline) {
-          desc = inline[1]!;
-          amountRaw = inline[2]!;
-          consumed = 2;
-        } else {
-          i += 1;
-          continue;
+      let amount: number | null = null;
+      let desc = descCandidate;
+      const trailing = extractTrailingArgentineAmount(descCandidate);
+      if (trailing) {
+        amount = trailing.amount;
+        desc = trailing.before;
+      } else {
+        const next = lines[i + (dateOnly ? 2 : 1)];
+        if (next) {
+          const pure = parseArgentineAmount(next);
+          if (pure != null) {
+            amount = pure;
+            consumed = dateOnly ? 3 : 2;
+          }
         }
       }
 
-      const amount = parseArgentineAmount(amountRaw);
       if (amount == null) {
         i += 1;
         continue;
@@ -482,10 +512,9 @@ function parseBbvaConsumosSections(lines: string[]): ParsedStatementLine[] {
 
       const installment = parseInstallment(desc);
       const store = cleanBbvaStoreName(desc);
-      const raw = `${cur} ${descLine} ${amountLine}`;
+      const raw = dateOnly ? `${cur} ${descCandidate}` : cur;
+      const isBonif = /bonif/i.test(desc) || /bonif/i.test(raw) || amount < 0;
 
-      // Bonifications / negatives: keep as suggestedSkip so they don't become expenses
-      const isBonif = /bonif/i.test(desc) || amount < 0;
       if (!store || normalizeStoreKey(store).length < 3) {
         i += consumed;
         continue;
@@ -512,13 +541,76 @@ function parseBbvaConsumosSections(lines: string[]): ParsedStatementLine[] {
         installment,
         raw,
         fingerprint,
-        suggestedSkip: isBonif || shouldSkipStoreName(store),
+        suggestedSkip: isBonif,
       });
 
       i += consumed;
     }
   }
   return results;
+}
+
+/**
+ * Apply BONIF. CONSUMO / BONIF. PROMO X as discountAmount on matching consumo; drop bonif rows.
+ */
+export function attachBbvaBonifications(lines: ParsedStatementLine[]): ParsedStatementLine[] {
+  const bonifsRaw = lines.filter((l) => /bonif/i.test(l.raw) || /bonif/i.test(l.store));
+  const others = lines.filter((l) => !/bonif/i.test(l.raw) && !/bonif/i.test(l.store));
+
+  // PDF often repeats the same bonif in summary + detalle — keep one per store+amount.
+  const seenBonif = new Set<string>();
+  const bonifs: ParsedStatementLine[] = [];
+  for (const b of bonifsRaw) {
+    const key = `${normalizeStoreKey(b.store)}|${b.amount.toFixed(2)}`;
+    if (seenBonif.has(key)) continue;
+    seenBonif.add(key);
+    bonifs.push(b);
+  }
+
+  for (const bonif of bonifs) {
+    const targetKey = normalizeStoreKey(
+      bonif.store
+        .replace(/^bonif\.?\s*/i, '')
+        .replace(/^(consumo|promo)\s+/i, '')
+        .trim(),
+    );
+    if (!targetKey) continue;
+
+    let best: ParsedStatementLine | null = null;
+    let bestScore = 0;
+    for (const exp of others) {
+      if (exp.suggestedSkip) continue;
+      const expKey = normalizeStoreKey(exp.store);
+      let score = 0;
+      if (expKey === targetKey) score = 4;
+      else if (expKey.includes(targetKey) || targetKey.includes(expKey)) score = 3;
+      if (score === 0) continue;
+
+      const already = exp.discountAmount ?? 0;
+      if (already + bonif.amount > exp.amount * 0.45) continue;
+
+      if (exp.date === bonif.date) score += 1;
+      if (exp.amount > 0) {
+        const ratio = bonif.amount / exp.amount;
+        if (ratio >= 0.05 && ratio <= 0.4) score += 2;
+      }
+      if (already === 0) score += 3;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = exp;
+      }
+    }
+    if (best) {
+      best.discountAmount = round2((best.discountAmount ?? 0) + bonif.amount);
+    }
+  }
+
+  return others;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 function parseBbvaImpuestosSection(lines: string[]): ParsedStatementLine[] {
@@ -536,26 +628,49 @@ function parseBbvaImpuestosSection(lines: string[]): ParsedStatementLine[] {
       continue;
     }
 
-    const date = parseBbvaDateToken(cur);
-    if (!date) {
+    const dateOnly = parseBbvaDateToken(cur);
+    const dateInline = !dateOnly
+      ? cur.match(/^(\d{1,2}[-\/][A-Za-zÁÉÍÓÚáéíóúñÑ.]+[-\/]\d{2,4})\s+(.+)$/)
+      : null;
+
+    let date: string | null = dateOnly;
+    let descCandidate: string | null = null;
+    let consumed = 1;
+
+    if (dateOnly) {
+      descCandidate = lines[i + 1] ?? null;
+      consumed = 2;
+    } else if (dateInline) {
+      date = parseBbvaDateToken(dateInline[1]!);
+      descCandidate = dateInline[2]!;
+      consumed = 1;
+    } else {
       i += 1;
       continue;
     }
-    const descLine = lines[i + 1];
-    const amountLine = lines[i + 2];
-    if (!descLine || !amountLine) break;
 
-    let amount = parseArgentineAmount(amountLine);
-    let desc = descLine.replace(/\$\s*$/, '').trim();
-    let consumed = 3;
-    if (amount == null) {
-      const inline = descLine.match(/^(.+?)\s+\$?\s*(-?[\d.]+,\d{2})$/);
-      if (inline) {
-        desc = inline[1]!.replace(/\$\s*$/, '').trim();
-        amount = parseArgentineAmount(inline[2]!);
-        consumed = 2;
+    if (!date || !descCandidate) {
+      i += 1;
+      continue;
+    }
+
+    let amount: number | null = null;
+    let desc = descCandidate.replace(/\$\s*$/, '').trim();
+    const trailing = extractTrailingArgentineAmount(descCandidate);
+    if (trailing) {
+      amount = trailing.amount;
+      desc = trailing.before.replace(/\$\s*$/, '').trim();
+    } else {
+      const next = lines[i + (dateOnly ? 2 : 1)];
+      if (next) {
+        const pure = parseArgentineAmount(next);
+        if (pure != null) {
+          amount = pure;
+          consumed = dateOnly ? 3 : 2;
+        }
       }
     }
+
     if (amount == null || amount <= 0) {
       i += 1;
       continue;
@@ -578,13 +693,79 @@ function parseBbvaImpuestosSection(lines: string[]): ParsedStatementLine[] {
       store,
       amount,
       currency: 'ARS',
-      raw: `${cur} ${descLine} ${amountLine}`,
+      raw: dateOnly ? `${cur} ${descCandidate}` : cur,
       fingerprint,
       suggestedSkip: false,
     });
     i += consumed;
   }
   return results;
+}
+
+/** BONIF lines outside Consumos (e.g. Sus pagos y ajustes / summary headers). */
+function parseBbvaBonificationLines(lines: string[]): ParsedStatementLine[] {
+  const results: ParsedStatementLine[] = [];
+  let lastDate: string | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const cur = lines[i]!;
+    if (shouldDropCompletely(cur)) continue;
+
+    const dateOnly = parseBbvaDateToken(cur);
+    if (dateOnly) {
+      lastDate = dateOnly;
+      const next = lines[i + 1];
+      if (next && /bonif/i.test(next)) {
+        const trailing = extractTrailingArgentineAmount(next);
+        if (trailing && trailing.amount !== 0) {
+          pushBbvaBonif(results, dateOnly, trailing.before, Math.abs(trailing.amount), `${cur} ${next}`);
+          i += 1;
+          continue;
+        }
+      }
+      continue;
+    }
+
+    const inline = cur.match(/^(\d{1,2}[-\/][A-Za-zÁÉÍÓÚáéíóúñÑ.]+[-\/]\d{2,4})\s+(.+)$/);
+    if (inline && /bonif/i.test(inline[2]!)) {
+      const date = parseBbvaDateToken(inline[1]!);
+      const trailing = extractTrailingArgentineAmount(inline[2]!);
+      if (date && trailing && trailing.amount !== 0) {
+        lastDate = date;
+        pushBbvaBonif(results, date, trailing.before, Math.abs(trailing.amount), cur);
+      }
+      continue;
+    }
+
+    if (/bonif/i.test(cur) && lastDate) {
+      const trailing = extractTrailingArgentineAmount(cur);
+      if (trailing && trailing.amount !== 0) {
+        pushBbvaBonif(results, lastDate, trailing.before, Math.abs(trailing.amount), cur);
+      }
+    }
+  }
+
+  return results;
+}
+
+function pushBbvaBonif(
+  results: ParsedStatementLine[],
+  date: string,
+  desc: string,
+  amount: number,
+  raw: string,
+): void {
+  const store = cleanBbvaStoreName(desc);
+  if (!store || normalizeStoreKey(store).length < 3) return;
+  results.push({
+    date,
+    store,
+    amount,
+    currency: 'ARS',
+    raw,
+    fingerprint: fingerprintStatementLine({ date, store, amount, currency: 'ARS' }),
+    suggestedSkip: true,
+  });
 }
 
 /** Parse BBVA date tokens like 19-Ene-26 or 29-May-26. */
@@ -612,6 +793,7 @@ export function cleanBbvaStoreName(desc: string): string {
     .replace(/\b\d{6}\b/g, '') // cupón (exactly 6 digits)
     .replace(/\b\d{12,}\b/g, '') // long ids after CUOTA SOCIAL CAR
     .replace(/\$/g, '')
+    .replace(/-?\d{1,10}(?:\.\d{3})*,\d{2}-?\s*$/g, '') // stray trailing amounts
     .replace(/\s+/g, ' ')
     .trim();
   // Trailing short cupón leftovers (1–5 digits), but keep years like 2026
@@ -655,16 +837,28 @@ export function parseStatementText(
   text: string,
   bank?: StatementBankSource,
 ): { bank: StatementBankSource; lines: ParsedStatementLine[] } {
-  const detected = bank && bank !== 'Unknown' ? bank : detectStatementBank(text);
+  const forced = bank && bank !== 'Unknown' ? bank : null;
+  const detected = forced ?? detectStatementBank(text);
 
-  if (detected === 'BBVA') {
-    return { bank: 'BBVA', lines: parseBbvaStatementText(text) };
-  }
-  if (detected === 'Santander') {
-    return { bank: 'Santander', lines: parseSantanderStatementText(text) };
+  const tryBank = (b: 'Santander' | 'BBVA') => {
+    const lines = b === 'BBVA' ? parseBbvaStatementText(text) : parseSantanderStatementText(text);
+    return { bank: b as StatementBankSource, lines };
+  };
+
+  if (detected === 'BBVA' || detected === 'Santander') {
+    const primary = tryBank(detected);
+    if (primary.lines.some(isActionableLine)) return primary;
+
+    // Forced bank found nothing — try the other before giving up.
+    if (forced) {
+      const other = forced === 'BBVA' ? 'Santander' : 'BBVA';
+      const secondary = tryBank(other);
+      if (secondary.lines.some(isActionableLine)) return secondary;
+    }
+    return primary;
   }
 
-  // Unknown: try Santander first (structured), then BBVA. Never label a failure as BBVA.
+  // Unknown: try Santander first (structured), then BBVA.
   const santander = parseSantanderStatementText(text);
   if (santander.some(isActionableLine)) {
     return { bank: 'Santander', lines: santander };

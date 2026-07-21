@@ -49,6 +49,11 @@ describe('parseArgentineAmount', () => {
     expect(parseArgentineAmount('1564.239,53-')).toBe(-1564239.53);
     expect(parseArgentineAmount('-2.794,00')).toBe(-2794);
   });
+
+  it('rejects footer noise that is not a single money token', () => {
+    expect(parseArgentineAmount('Sobre (140873) 1 de 1')).toBeNull();
+    expect(parseArgentineAmount('1408731114,00')).toBeNull();
+  });
 });
 
 describe('parseStatementDateParts', () => {
@@ -107,7 +112,7 @@ Límites DE COMPRA $ 3.000.000,00
 });
 
 describe('parseBbvaStatementText', () => {
-  it('parses Consumos triplets with cupón strip and cuotas', () => {
+  it('parses 2-line consumos with trailing amounts, cupón strip and cuotas', () => {
     const lines = parseBbvaStatementText(BBVA_FIXTURE);
     const active = lines.filter(isActionableLine);
 
@@ -122,15 +127,23 @@ describe('parseBbvaStatementText', () => {
     const social = active.find((l) => /CUOTA SOCIAL CAR/i.test(l.store) && l.amount === 33350);
     expect(social?.store).toBe('CUOTA SOCIAL CAR');
     expect(social?.date).toBe('2026-05-29');
+    expect(social?.discountAmount).toBe(6670);
 
-    expect(active.some((l) => /SHOP GALLERY/i.test(l.store))).toBe(true);
+    const social2 = active.find((l) => /CUOTA SOCIAL CAR/i.test(l.store) && l.amount === 44800);
+    expect(social2?.discountAmount).toBe(8960);
+
+    const shop = active.find((l) => /SHOP GALLERY/i.test(l.store));
+    expect(shop).toMatchObject({ amount: 27940, discountAmount: 2794 });
+    expect(shop?.store).toBe('SHOP GALLERY');
+
     expect(active.some((l) => /HOYTS/i.test(l.store))).toBe(true);
     expect(active.some((l) => /PRIMAVERA/i.test(l.store) && l.installment?.current === 1)).toBe(true);
-    expect(active.some((l) => /IMPUESTO DE SELLOS/i.test(l.store))).toBe(true);
+    expect(active.some((l) => /IMPUESTO DE SELLOS/i.test(l.store) && l.amount === 5416.03)).toBe(true);
 
-    // Bonif is present but not actionable
-    expect(lines.some((l) => /BONIF/i.test(l.raw) && l.suggestedSkip)).toBe(true);
+    // Bonifs are applied as discounts, not separate rows
+    expect(lines.some((l) => /BONIF/i.test(l.store) || /BONIF/i.test(l.raw))).toBe(false);
     expect(active.some((l) => /BONIF/i.test(l.store))).toBe(false);
+    expect(active.every((l) => l.amount < 1_000_000)).toBe(true);
   });
 
   it('drops Plan V legales and limits completely', () => {
@@ -146,6 +159,7 @@ describe('parseBbvaStatementText', () => {
     expect(parseBbvaDateToken('29-May-26')).toBe('2026-05-29');
     expect(cleanBbvaStoreName('CUOTA SOCIAL CAR 000000034964790 000001')).toBe('CUOTA SOCIAL CAR');
     expect(cleanBbvaStoreName('TLM CARP C.06/06 003174')).toBe('TLM CARP');
+    expect(cleanBbvaStoreName('SHOP GALLERY 002430 27.940,00')).toBe('SHOP GALLERY');
   });
 });
 

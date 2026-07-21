@@ -68,16 +68,14 @@ export function bankFromPaymentMethod(method: {
   return bankFromEntityName(method.definition.entity?.name);
 }
 
-/** Resolve parser bank hint from UI override + selected card. */
+/** Resolve parser bank hint from UI override + selected card.
+ * Auto: detect from PDF text (card bank is only for guessing which card).
+ */
 export function resolveBankHint(
   override: StatementBankSource | 'Auto',
-  paymentMethod: { definition: { entity: { name: string } | null } } | null | undefined,
+  _paymentMethod?: { definition: { entity: { name: string } | null } } | null | undefined,
 ): StatementBankSource | undefined {
   if (override !== 'Auto') return override;
-  if (paymentMethod) {
-    const fromCard = bankFromPaymentMethod(paymentMethod);
-    if (fromCard !== 'Unknown') return fromCard;
-  }
   return undefined;
 }
 

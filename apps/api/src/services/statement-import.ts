@@ -256,8 +256,9 @@ export async function commitStatementImport(
         throw new ExpenseValidationError(`Decisión inválida para ${line.store}`);
       }
       const installmentsCount = line.installment?.total ?? 1;
-      const grossAmount =
+      const lineGross =
         installmentsCount > 1 ? round2(line.amount * installmentsCount) : line.amount;
+      const statementDiscount = round2(line.discountAmount ?? 0);
       const purchaseDate = new Date(`${line.date}T12:00:00.000Z`);
 
       const created = await createPurchaseWithAllocations(
@@ -270,11 +271,24 @@ export async function commitStatementImport(
           store: line.store,
           description: line.installment
             ? `Importado · cuota ${line.installment.current}/${line.installment.total}`
-            : 'Importado del resumen',
+            : statementDiscount > 0
+              ? 'Importado del resumen (con bonificación)'
+              : 'Importado del resumen',
           purchaseDate,
-          grossAmount,
+          grossAmount: lineGross,
           installmentsCount,
-          promotionMode: 'off',
+          promotionMode: statementDiscount > 0 ? 'manual' : 'off',
+          manualDiscount:
+            statementDiscount > 0
+              ? {
+                  discountPercentage: Math.min(
+                    100,
+                    Math.max(0.01, round2((statementDiscount / lineGross) * 100)),
+                  ),
+                  discountCap: statementDiscount,
+                  label: 'Bonificación del resumen',
+                }
+              : undefined,
           scope: decision.scope,
           splitMode: decision.scope === 'PERSONAL' ? 'EQUAL' : (decision.splitMode ?? 'EQUAL'),
           assignToUserId: decision.assignToUserId,

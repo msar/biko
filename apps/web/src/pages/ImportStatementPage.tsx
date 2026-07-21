@@ -312,12 +312,12 @@ export default function ImportStatementPage() {
             value={bankOverride}
             onChange={(e) => setBankOverride(e.target.value as BankOverride)}
           >
-            <option value="Auto">Auto (según la tarjeta)</option>
+            <option value="Auto">Auto (detectar del PDF)</option>
             <option value="Santander">Santander</option>
             <option value="BBVA">BBVA</option>
           </select>
           <p className="hint">
-            Auto usa el banco de la tarjeta elegida. Si el PDF es de otro banco, elegilo acá.
+            Auto detecta el banco desde el PDF. Si falla, elegí Santander o BBVA acá.
           </p>
           {bankHintLabel && <p className="hint">{bankHintLabel}</p>}
 
@@ -474,7 +474,15 @@ function StatementLineCard({
             {line.installment ? ` · Cuota ${line.installment.current} de ${line.installment.total}` : ''}
           </div>
         </div>
-        <strong>{fmtARSExact.format(line.amount)}</strong>
+        <div className="statement-amount">
+          <strong>{fmtARSExact.format(line.amount)}</strong>
+          {line.discountAmount != null && line.discountAmount > 0 && (
+            <small className="hint">
+              −{fmtARSExact.format(line.discountAmount)} bonif →{' '}
+              {fmtARSExact.format(line.amount - line.discountAmount)}
+            </small>
+          )}
+        </div>
       </div>
 
       <div className="segmented">

@@ -1592,6 +1592,14 @@ code {
   gap: 10px;
 }
 
+.statement-amount {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+
 .statement-line.muted {
   opacity: 0.65;
 }
