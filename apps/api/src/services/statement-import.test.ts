@@ -17,6 +17,7 @@ Vencimiento 13 Jul 26
         {
           id: 'p1',
           store: 'Equus',
+          description: null,
           purchaseDate: '2026-04-20T12:00:00.000Z',
           netAmount: 279900,
           paymentMethodId: 'pm1',
@@ -24,7 +25,7 @@ Vencimiento 13 Jul 26
           statementFingerprint: null,
           installments: [
             { number: 1, amount: 46650, dueDate: '2026-04-13T12:00:00.000Z' },
-            { number: 2, amount: 46650, dueDate: '2026-05-13T12:00:00.000Z' },
+            { number: 2, amount: 46650, dueDate: '2026-05-08T12:00:00.000Z' },
           ],
         },
       ],

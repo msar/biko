@@ -1637,6 +1637,52 @@ code {
   border-radius: 10px;
 }
 
+.merge-candidates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.merge-candidate {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+}
+
+.merge-candidate.selected {
+  border-color: var(--ink, #1c1917);
+  background: #faf9f6;
+}
+
+.merge-candidate-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.merge-reason-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.merge-reason-chip {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #e8e4dc;
+  color: var(--muted, #57534e);
+}
+
 .sticky-actions {
   position: sticky;
   bottom: 12px;

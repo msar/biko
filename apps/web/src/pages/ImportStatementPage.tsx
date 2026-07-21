@@ -14,6 +14,7 @@ import type { Category, ExpenseScope, PaymentMethod } from '../lib/types';
 type MatchCandidate = {
   purchaseId: string;
   store: string;
+  description: string | null;
   purchaseDate: string;
   netAmount: number;
   installmentNumber: number | null;
@@ -21,6 +22,7 @@ type MatchCandidate = {
   installmentsCount: number;
   score: number;
   amountDelta: number;
+  matchReasons: Array<'amount' | 'description' | 'date' | 'fingerprint'>;
 };
 
 type MatchResult = {
@@ -53,6 +55,20 @@ function applyStoreOverrides(
     return { ...line, store };
   });
 }
+
+function shouldAutoMerge(match: MatchCandidate): boolean {
+  if (match.score < 70) return false;
+  const amountClose = match.amountDelta <= 0.009 || match.matchReasons.includes('amount');
+  const strongText = match.matchReasons.includes('description') || match.matchReasons.includes('fingerprint');
+  return amountClose || strongText;
+}
+
+const MATCH_REASON_LABEL: Record<MatchCandidate['matchReasons'][number], string> = {
+  amount: 'Monto',
+  description: 'Descripción',
+  date: 'Fecha',
+  fingerprint: 'Ya vinculado',
+};
 
 export default function ImportStatementPage() {
   const navigate = useNavigate();
@@ -141,7 +157,7 @@ export default function ImportStatementPage() {
         initialStores[r.line.fingerprint] = r.line.store;
         if (!isActionableLine(r.line) || r.line.suggestedSkip || r.alreadyImported) {
           initialDecisions[r.line.fingerprint] = { action: 'SKIP' };
-        } else if (r.topMatch && r.topMatch.score >= 60) {
+        } else if (r.topMatch && shouldAutoMerge(r.topMatch)) {
           initialDecisions[r.line.fingerprint] = {
             action: 'MERGE',
             matchedPurchaseId: r.topMatch.purchaseId,
@@ -449,12 +465,28 @@ function StatementLineCard({
 }) {
   const { line, topMatch, candidates } = result;
   const mode = decision?.action ?? 'NEW';
-  const existingAmount =
-    topMatch?.installmentAmount ?? topMatch?.netAmount ?? candidates[0]?.installmentAmount ?? candidates[0]?.netAmount;
+  const selected =
+    decision?.action === 'MERGE'
+      ? (candidates.find((c) => c.purchaseId === decision.matchedPurchaseId) ??
+        topMatch ??
+        candidates[0] ??
+        null)
+      : null;
+  const existingAmount = selected
+    ? (selected.installmentAmount ?? selected.netAmount)
+    : null;
   const amountDiffers =
     decision?.action === 'MERGE' &&
     existingAmount != null &&
     Math.abs(existingAmount - line.amount) > 0.009;
+
+  const selectCandidate = (match: MatchCandidate) => {
+    onChange({
+      action: 'MERGE',
+      matchedPurchaseId: match.purchaseId,
+      amountResolution: match.amountDelta > 0.009 ? 'USE_STATEMENT' : 'KEEP_EXISTING',
+    });
+  };
 
   return (
     <section className="card statement-line">
@@ -505,16 +537,16 @@ function StatementLineCard({
         <button
           type="button"
           className={mode === 'MERGE' ? 'active' : ''}
-          disabled={!topMatch && candidates.length === 0}
+          disabled={candidates.length === 0}
           onClick={() => {
-            const match = topMatch ?? candidates[0];
+            const match =
+              (decision?.action === 'MERGE'
+                ? candidates.find((c) => c.purchaseId === decision.matchedPurchaseId)
+                : null) ??
+              topMatch ??
+              candidates[0];
             if (!match) return;
-            onChange({
-              action: 'MERGE',
-              matchedPurchaseId: match.purchaseId,
-              amountResolution:
-                decision?.action === 'MERGE' ? decision.amountResolution : 'USE_STATEMENT',
-            });
+            selectCandidate(match);
           }}
         >
           Fusionar
@@ -558,13 +590,44 @@ function StatementLineCard({
         </>
       )}
 
-      {decision?.action === 'MERGE' && (topMatch || candidates[0]) && (
+      {decision?.action === 'MERGE' && candidates.length > 0 && (
         <div className="merge-box">
-          <p className="hint">
-            Coincide con <strong>{(topMatch ?? candidates[0])!.store}</strong> (
-            {fmtDate((topMatch ?? candidates[0])!.purchaseDate)})
-            {existingAmount != null && <> · cargado {fmtARSExact.format(existingAmount)}</>}
-          </p>
+          <p className="hint">Elegí el gasto a fusionar:</p>
+          <ul className="merge-candidates">
+            {candidates.map((c) => {
+              const amount = c.installmentAmount ?? c.netAmount;
+              const selectedRow = decision.matchedPurchaseId === c.purchaseId;
+              return (
+                <li key={c.purchaseId}>
+                  <button
+                    type="button"
+                    className={`merge-candidate ${selectedRow ? 'selected' : ''}`}
+                    onClick={() => selectCandidate(c)}
+                  >
+                    <div className="merge-candidate-main">
+                      <strong>{c.store}</strong>
+                      {c.description && <span className="hint">{c.description}</span>}
+                      <span className="hint">
+                        {fmtDate(c.purchaseDate)}
+                        {c.installmentNumber != null
+                          ? ` · Cuota ${c.installmentNumber}/${c.installmentsCount}`
+                          : ''}
+                        {' · '}
+                        {fmtARSExact.format(amount)}
+                      </span>
+                      <span className="merge-reason-chips">
+                        {c.matchReasons.map((r) => (
+                          <span key={r} className="merge-reason-chip">
+                            {MATCH_REASON_LABEL[r]}
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
           {amountDiffers && (
             <div className="segmented">
               <button

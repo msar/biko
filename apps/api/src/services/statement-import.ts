@@ -15,6 +15,7 @@ type Db = PrismaClient | Prisma.TransactionClient;
 function toMatchable(p: {
   id: string;
   store: string;
+  description: string | null;
   purchaseDate: Date;
   netAmount: { toNumber(): number };
   paymentMethodId: string;
@@ -25,6 +26,7 @@ function toMatchable(p: {
   return {
     id: p.id,
     store: p.store,
+    description: p.description,
     purchaseDate: p.purchaseDate.toISOString(),
     netAmount: p.netAmount.toNumber(),
     paymentMethodId: p.paymentMethodId,
@@ -48,6 +50,7 @@ export async function loadMatchablePurchases(
     select: {
       id: true,
       store: true,
+      description: true,
       purchaseDate: true,
       netAmount: true,
       paymentMethodId: true,

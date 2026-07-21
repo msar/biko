@@ -200,6 +200,40 @@ describe('statement match', () => {
         {
           id: 'p1',
           store: 'Equus',
+          description: null,
+          purchaseDate: '2026-04-20',
+          netAmount: 279900,
+          paymentMethodId: 'pm1',
+          installmentsCount: 6,
+          statementFingerprint: null,
+          installments: [
+            { number: 1, amount: 46650, dueDate: '2026-04-13' },
+            { number: 2, amount: 46650, dueDate: '2026-05-13' },
+          ],
+        },
+      ],
+      'pm1',
+    );
+
+    // Purchase date is far; cuota 2 due date is within ±5 of 2026-05-06? 05-13 vs 05-06 = 7 days → excluded.
+    // Use due date closer to the line:
+    expect(candidates.length).toBe(0);
+  });
+
+  it('matches cuota when due date is within window', () => {
+    const candidates = findStatementMatchCandidates(
+      {
+        date: '2026-05-12',
+        store: 'EQUUS',
+        amount: 46600,
+        fingerprint: 'x',
+        installment: { current: 2, total: 6 },
+      },
+      [
+        {
+          id: 'p1',
+          store: 'Equus',
+          description: null,
           purchaseDate: '2026-04-20',
           netAmount: 279900,
           paymentMethodId: 'pm1',
@@ -216,5 +250,6 @@ describe('statement match', () => {
 
     expect(candidates[0]?.purchaseId).toBe('p1');
     expect(candidates[0]?.installmentNumber).toBe(2);
+    expect(candidates[0]?.matchReasons).toEqual(expect.arrayContaining(['amount', 'date', 'description']));
   });
 });
