@@ -44,6 +44,7 @@ const CATEGORIES: Array<{ name: string; icon: string; color: string }> = [
   { name: 'Deportes', icon: '⚽', color: '#3d8a6b' },
   { name: 'Entretenimiento', icon: '🎬', color: '#8a5b9e' },
   { name: 'Viajes', icon: '✈️', color: '#4a7fb5' },
+  { name: 'Impuestos', icon: '🧾', color: '#6b6b6b' },
   { name: 'Otros', icon: '📦', color: '#888888' },
 ];
 
