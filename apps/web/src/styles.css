@@ -572,6 +572,11 @@ label {
   color: var(--muted);
 }
 
+.segmented button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .segmented button.active {
   background: var(--card);
   color: var(--ink);

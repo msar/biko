@@ -1,5 +1,6 @@
 import {
   findStatementMatchCandidates,
+  findStatementPickerCandidates,
   type ParsedStatementLine,
   type StatementMatchablePurchase,
 } from '@biko/shared';
@@ -73,12 +74,18 @@ export function matchLinesAgainstPurchases(
   return lines.map((line) => {
     const alreadyImported = purchases.find((p) => p.statementFingerprint === line.fingerprint);
     const candidates = findStatementMatchCandidates(line, purchases, paymentMethodId);
+    // When strict match is empty, offer nearby same-card expenses for manual Fusionar.
+    const pickerCandidates =
+      candidates.length > 0
+        ? candidates
+        : findStatementPickerCandidates(line, purchases, paymentMethodId);
     return {
       line,
       alreadyImported: Boolean(alreadyImported),
       alreadyImportedPurchaseId: alreadyImported?.id ?? null,
-      candidates,
+      candidates: pickerCandidates,
       topMatch: candidates[0] ?? null,
+      strictMatchCount: candidates.length,
     };
   });
 }

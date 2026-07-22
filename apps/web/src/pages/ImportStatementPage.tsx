@@ -31,6 +31,8 @@ type MatchResult = {
   alreadyImportedPurchaseId: string | null;
   candidates: MatchCandidate[];
   topMatch: MatchCandidate | null;
+  /** Strict (±5d + amount|description) hits; 0 means candidates are nearby fallback. */
+  strictMatchCount?: number;
 };
 
 type LineDecision =
@@ -465,6 +467,8 @@ function StatementLineCard({
 }) {
   const { line, topMatch, candidates } = result;
   const mode = decision?.action ?? 'NEW';
+  const hasMergeOptions = candidates.length > 0;
+  const isNearbyOnly = hasMergeOptions && (result.strictMatchCount ?? candidates.length) === 0;
   const selected =
     decision?.action === 'MERGE'
       ? (candidates.find((c) => c.purchaseId === decision.matchedPurchaseId) ??
@@ -537,8 +541,14 @@ function StatementLineCard({
         <button
           type="button"
           className={mode === 'MERGE' ? 'active' : ''}
-          disabled={candidates.length === 0}
+          disabled={!hasMergeOptions}
+          title={
+            hasMergeOptions
+              ? 'Elegí un gasto existente de esta tarjeta'
+              : 'No hay gastos de esta tarjeta cerca de esta fecha'
+          }
           onClick={() => {
+            if (!hasMergeOptions) return;
             const match =
               (decision?.action === 'MERGE'
                 ? candidates.find((c) => c.purchaseId === decision.matchedPurchaseId)
@@ -555,6 +565,10 @@ function StatementLineCard({
           Omitir
         </button>
       </div>
+
+      {!hasMergeOptions && mode !== 'MERGE' && (
+        <p className="hint">Sin gastos cercanos en esta tarjeta para fusionar.</p>
+      )}
 
       {decision?.action === 'NEW' && (
         <>
@@ -590,13 +604,18 @@ function StatementLineCard({
         </>
       )}
 
-      {decision?.action === 'MERGE' && candidates.length > 0 && (
+      {decision?.action === 'MERGE' && hasMergeOptions && (
         <div className="merge-box">
-          <p className="hint">Elegí el gasto a fusionar:</p>
+          <p className="hint">
+            {isNearbyOnly
+              ? 'No hubo coincidencia fuerte — elegí entre gastos cercanos de esta tarjeta:'
+              : 'Elegí el gasto a fusionar:'}
+          </p>
           <ul className="merge-candidates">
             {candidates.map((c) => {
               const amount = c.installmentAmount ?? c.netAmount;
               const selectedRow = decision.matchedPurchaseId === c.purchaseId;
+              const reasons = c.matchReasons ?? [];
               return (
                 <li key={c.purchaseId}>
                   <button
@@ -615,13 +634,15 @@ function StatementLineCard({
                         {' · '}
                         {fmtARSExact.format(amount)}
                       </span>
-                      <span className="merge-reason-chips">
-                        {c.matchReasons.map((r) => (
-                          <span key={r} className="merge-reason-chip">
-                            {MATCH_REASON_LABEL[r]}
-                          </span>
-                        ))}
-                      </span>
+                      {reasons.length > 0 && (
+                        <span className="merge-reason-chips">
+                          {reasons.map((r) => (
+                            <span key={r} className="merge-reason-chip">
+                              {MATCH_REASON_LABEL[r]}
+                            </span>
+                          ))}
+                        </span>
+                      )}
                     </div>
                   </button>
                 </li>

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   amountsClose,
   findStatementMatchCandidates,
+  findStatementPickerCandidates,
   storeSimilarity,
   type StatementMatchablePurchase,
 } from './statement-match';
@@ -153,6 +154,26 @@ describe('statement fusion matching', () => {
     expect(candidates.map((c) => c.purchaseId)).toEqual(['amount-hit', 'desc-only']);
   });
 
+  it('picker includes nearby same-card expenses outside strict ±5d amount/text rules', () => {
+    const nearby = findStatementPickerCandidates(
+      {
+        date: '2026-05-20',
+        store: 'ZZZ',
+        amount: 10,
+        fingerprint: 'x',
+      },
+      [
+        purchase({
+          id: 'near',
+          store: 'Farmacia',
+          netAmount: 5000,
+          purchaseDate: '2026-05-01T12:00:00.000Z',
+        }),
+      ],
+      'pm1',
+    );
+    expect(nearby.some((c) => c.purchaseId === 'near')).toBe(true);
+  });
   it('keeps store similarity and amount helpers', () => {
     expect(storeSimilarity('MERPAGO*FOODPATAGONIA', 'Food Patagonia')).toBeGreaterThan(0.3);
     expect(amountsClose(46650, 46600)).toBe(true);

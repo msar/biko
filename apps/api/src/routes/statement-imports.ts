@@ -91,6 +91,7 @@ export default async function statementImportRoutes(app: FastifyInstance) {
           m.alreadyImportedPurchaseId ?? importedFp.get(m.line.fingerprint) ?? null,
         candidates: m.candidates,
         topMatch: m.topMatch,
+        strictMatchCount: m.strictMatchCount,
       })),
     };
   });

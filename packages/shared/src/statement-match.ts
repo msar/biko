@@ -245,3 +245,51 @@ export function findStatementMatchCandidates(
 
   return candidates.sort((a, b) => b.score - a.score).slice(0, limit);
 }
+
+/**
+ * Broader list for the Fusionar picker when strict matches are empty:
+ * same card, purchase/due date within ±nearbyDays (default 45).
+ */
+export function findStatementPickerCandidates(
+  line: Pick<ParsedStatementLine, 'date' | 'store' | 'amount' | 'installment' | 'fingerprint'>,
+  purchases: StatementMatchablePurchase[],
+  paymentMethodId: string,
+  opts?: { nearbyDays?: number; limit?: number },
+): StatementMatchCandidate[] {
+  const nearbyDays = opts?.nearbyDays ?? 45;
+  const limit = opts?.limit ?? 15;
+  const out: StatementMatchCandidate[] = [];
+
+  for (const purchase of purchases) {
+    if (purchase.paymentMethodId !== paymentMethodId) continue;
+
+    const amount = resolveAmountMatch(line, purchase);
+    const dateDays = bestDateDays(line, purchase, amount.matchedInst);
+    if (dateDays > nearbyDays) continue;
+
+    const textScore = textSimilarity(line.store, purchase);
+    const dateScore = Math.max(0, 1 - dateDays / nearbyDays);
+    const score = textScore * 35 + amount.amountScore * 35 + dateScore * 25;
+
+    const matchReasons: StatementMatchReason[] = [];
+    if (dateDays <= 5) matchReasons.push('date');
+    if (amount.amountOk) matchReasons.push('amount');
+    if (textScore >= TEXT_THRESHOLD) matchReasons.push('description');
+
+    out.push({
+      purchaseId: purchase.id,
+      store: purchase.store,
+      description: purchase.description,
+      purchaseDate: purchase.purchaseDate.slice(0, 10),
+      netAmount: purchase.netAmount,
+      installmentNumber: amount.matchedInst?.number ?? null,
+      installmentAmount: amount.matchedInst?.amount ?? null,
+      installmentsCount: purchase.installmentsCount,
+      score: round2(score),
+      amountDelta: round2(amount.amountDelta),
+      matchReasons,
+    });
+  }
+
+  return out.sort((a, b) => b.score - a.score).slice(0, limit);
+}
