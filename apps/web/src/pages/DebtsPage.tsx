@@ -178,20 +178,24 @@ export default function DebtsPage() {
       {error && <p className="error">{error}</p>}
 
       {summary && (
-        <section className="card hero-card">
+        <section className="hero-card debt-summary-hero">
           <div className="row-between">
             <div>
-              <small className="hint">Te deben este mes</small>
-              <strong className="balance-pos">{fmtARS.format(summary.owedToMeThisMonth)}</strong>
+              <span className="hero-label">Te deben este mes</span>
+              <strong className="debt-summary-amount debt-summary-in">
+                {fmtARS.format(summary.owedToMeThisMonth)}
+              </strong>
             </div>
             <div style={{ textAlign: 'right' }}>
-              <small className="hint">Debés este mes</small>
-              <strong className="balance-neg">{fmtARS.format(summary.iOweThisMonth)}</strong>
+              <span className="hero-label">Debés este mes</span>
+              <strong className="debt-summary-amount debt-summary-out">
+                {fmtARS.format(summary.iOweThisMonth)}
+              </strong>
             </div>
           </div>
-          <div className="row-between" style={{ marginTop: '0.75rem' }}>
-            <small className="hint">Pendiente a cobrar: {fmtARS.format(summary.owedToMeRemaining)}</small>
-            <small className="hint">Pendiente a pagar: {fmtARS.format(summary.iOweRemaining)}</small>
+          <div className="row-between debt-summary-pending">
+            <span>Pendiente a cobrar: {fmtARS.format(summary.owedToMeRemaining)}</span>
+            <span>Pendiente a pagar: {fmtARS.format(summary.iOweRemaining)}</span>
           </div>
         </section>
       )}

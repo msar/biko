@@ -121,6 +121,37 @@ body {
   font-weight: 600;
 }
 
+.debt-summary-hero {
+  gap: 10px;
+}
+
+.debt-summary-hero .hero-label {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.debt-summary-amount {
+  display: block;
+  font-size: 1.35rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+.debt-summary-in {
+  color: #b8f5e8;
+}
+
+.debt-summary-out {
+  color: #ffd0d0;
+}
+
+.debt-summary-pending {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.88);
+}
+
 /* --- dashboard --- */
 .month-nav {
   display: flex;
