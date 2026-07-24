@@ -507,6 +507,9 @@ function DebtForm({
             notes: notes.trim() || null,
             direction,
             contactId,
+            ...(initial.installmentsCount === 1 && amount.trim()
+              ? { totalAmount: Number(amount) }
+              : {}),
           }),
         });
         await api(`/contacts/${contactId}`, {
@@ -665,6 +668,19 @@ function DebtForm({
         <input value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
 
+      {editing && initial?.installmentsCount === 1 && (
+        <label>
+          Monto $
+          <input
+            type="number"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            required
+          />
+        </label>
+      )}
+
       {!editing && (
         <>
           <div className="field-row">
@@ -697,8 +713,14 @@ function DebtForm({
         </>
       )}
 
-      {editing && (
+      {editing && initial && initial.installmentsCount > 1 && (
         <p className="hint">El monto y las cuotas se gestionan marcando cada pago abajo en el detalle.</p>
+      )}
+
+      {editing && initial?.installmentsCount === 1 && (
+        <p className="hint">
+          Si vino de un resumen con bonificación, el monto debe ser el neto (bruto − BONIF).
+        </p>
       )}
 
       <div className="confirm-actions">

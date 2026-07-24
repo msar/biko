@@ -52,6 +52,7 @@ const updateDebtSchema = z.object({
   notes: z.string().max(2000).nullish(),
   direction: z.enum(['OWED_TO_ME', 'I_OWE']).optional(),
   contactId: z.string().optional(),
+  totalAmount: z.number().positive().optional(),
 });
 
 function handleError(error: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {

@@ -444,12 +444,15 @@ export async function commitStatementImport(
         data: { statementFingerprint: line.fingerprint },
       });
 
+      // With BONIF, createPurchase already set net/installments after discount.
+      // Overwriting with the gross statement amount would wipe the bonificación
+      // (and any linked contact debt would inherit the wrong total).
       await applyStatementInstallmentState(
         tx,
         created.id,
         line.installment?.current,
         line.amount,
-        true,
+        statementDiscount <= 0,
       );
 
       let debtContactId: string | null = null;

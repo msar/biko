@@ -374,9 +374,14 @@ export async function updateDebt(
     notes?: string | null;
     direction?: 'OWED_TO_ME' | 'I_OWE';
     contactId?: string;
+    /** Only for single-installment debts: updates total + the sole cuota. */
+    totalAmount?: number;
   },
 ) {
-  const existing = await db.debt.findFirst({ where: { id, householdId } });
+  const existing = await db.debt.findFirst({
+    where: { id, householdId },
+    include: { installments: { orderBy: { number: 'asc' } } },
+  });
   if (!existing) throw new DebtNotFoundError();
 
   if (data.contactId) {
@@ -387,6 +392,18 @@ export async function updateDebt(
     if (!contact) throw new DebtValidationError('Contacto inválido');
   }
 
+  if (data.totalAmount != null) {
+    if (!(data.totalAmount > 0)) throw new DebtValidationError('El monto debe ser positivo');
+    if (existing.installmentsCount !== 1 || existing.installments.length !== 1) {
+      throw new DebtValidationError('Solo se puede editar el monto en deudas de 1 cuota');
+    }
+    const only = existing.installments[0]!;
+    await db.debtInstallment.update({
+      where: { id: only.id },
+      data: { amount: round2(data.totalAmount) },
+    });
+  }
+
   return db.debt.update({
     where: { id },
     data: {
@@ -394,6 +411,7 @@ export async function updateDebt(
       ...(data.notes !== undefined ? { notes: data.notes?.trim() || null } : {}),
       ...(data.direction !== undefined ? { direction: data.direction } : {}),
       ...(data.contactId !== undefined ? { contactId: data.contactId } : {}),
+      ...(data.totalAmount != null ? { totalAmount: round2(data.totalAmount) } : {}),
     },
     include: debtInclude,
   });

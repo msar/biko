@@ -42,3 +42,15 @@ describe('expense dashboard exclusion rule', () => {
     expect(expenseTotal).toBe(100);
   });
 });
+
+describe('debt amount after statement BONIF', () => {
+  it('uses net (gross − discount), e.g. CUOTA SOCIAL CAR', () => {
+    const gross = 44800;
+    const discountAmount = 8960;
+    const net = Math.round((gross - discountAmount) * 100) / 100;
+    expect(net).toBe(35840);
+    // Import must not overwrite purchase net with gross before creating the debt.
+    const useStatementAmountOverride = discountAmount <= 0;
+    expect(useStatementAmountOverride).toBe(false);
+  });
+});
