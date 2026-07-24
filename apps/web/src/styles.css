@@ -287,6 +287,69 @@ body {
   display: flex;
   gap: 12px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.debt-contact-group {
+  margin-top: 12px;
+}
+
+.debt-row-block {
+  border-top: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
+  padding-top: 8px;
+  margin-top: 8px;
+}
+
+.debt-contact-group .debt-row-block:first-of-type {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.debt-row {
+  align-items: flex-start;
+}
+
+.debt-row-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+}
+
+.debt-row-main small {
+  display: block;
+  color: var(--muted);
+}
+
+.debt-installments {
+  list-style: none;
+  margin: 8px 0 4px;
+  padding: 0 0 0 4px;
+}
+
+.debt-installments li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 0.9rem;
+  border-top: 1px dashed color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+.debt-installments li.paid {
+  color: var(--muted);
 }
 
 .payment-method-group {

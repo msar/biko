@@ -213,8 +213,9 @@ export async function createDebt(
 }
 
 /**
- * Creates a debt linked to a statement-imported purchase, mirroring bank installments
- * and marking cuotas before/at `installmentCurrent` as paid (person already "caught up").
+ * Creates a debt linked to a statement-imported purchase, mirroring bank installment
+ * amounts/due dates. Contact repayment starts unpaid — appearing on the resumen means
+ * the bank billed you, not that the contact already paid.
  */
 export async function createDebtFromPurchase(
   db: Db,
@@ -239,13 +240,12 @@ export async function createDebtFromPurchase(
   if (!purchase) throw new DebtValidationError('Compra inválida');
   if (purchase.debt) throw new DebtValidationError('Esa compra ya tiene una deuda vinculada');
 
-  const current = args.installmentCurrent ?? 1;
   const mirrored = purchase.installments.map((i) => ({
     number: i.number,
     amount: i.amount.toNumber(),
     dueDate: i.dueDate,
-    paid: i.number <= current,
-    paidDate: i.number <= current ? (i.paidDate ?? i.dueDate) : null,
+    paid: false,
+    paidDate: null as Date | null,
   }));
 
   return createDebt(db, args.householdId, args.userId, {
@@ -369,18 +369,61 @@ export async function updateDebt(
   db: Db,
   householdId: string,
   id: string,
-  data: { title?: string; notes?: string | null },
+  data: {
+    title?: string;
+    notes?: string | null;
+    direction?: 'OWED_TO_ME' | 'I_OWE';
+    contactId?: string;
+  },
 ) {
   const existing = await db.debt.findFirst({ where: { id, householdId } });
   if (!existing) throw new DebtNotFoundError();
+
+  if (data.contactId) {
+    const contact = await db.contact.findFirst({
+      where: { id: data.contactId, householdId },
+      select: { id: true },
+    });
+    if (!contact) throw new DebtValidationError('Contacto inválido');
+  }
+
   return db.debt.update({
     where: { id },
     data: {
       ...(data.title !== undefined ? { title: data.title.trim() } : {}),
       ...(data.notes !== undefined ? { notes: data.notes?.trim() || null } : {}),
+      ...(data.direction !== undefined ? { direction: data.direction } : {}),
+      ...(data.contactId !== undefined ? { contactId: data.contactId } : {}),
     },
     include: debtInclude,
   });
+}
+
+/** Reopens a debt by clearing all installment payments (fixes import false-settled). */
+export async function reopenDebt(db: Db, householdId: string, id: string) {
+  const existing = await db.debt.findFirst({
+    where: { id, householdId },
+    include: { installments: true },
+  });
+  if (!existing) throw new DebtNotFoundError();
+
+  await db.debtInstallment.updateMany({
+    where: { debtId: id },
+    data: { paid: false, paidDate: null },
+  });
+
+  return db.debt.update({
+    where: { id },
+    data: { status: 'OPEN' },
+    include: debtInclude,
+  });
+}
+
+export async function deleteDebt(db: Db, householdId: string, id: string) {
+  const existing = await db.debt.findFirst({ where: { id, householdId } });
+  if (!existing) throw new DebtNotFoundError();
+  await db.debt.delete({ where: { id } });
+  return { ok: true };
 }
 
 export async function markDebtInstallmentPaid(

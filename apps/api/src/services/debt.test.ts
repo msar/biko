@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { generateDebtInstallments } from '@biko/shared';
 
-/** Mirrors createDebtFromPurchase paid-prefix rule for statement cuota current. */
+/** Contact debt schedule from a bank purchase: amounts/dates copy, always start unpaid. */
 function mirrorPurchaseInstallmentsForDebt(
   installments: Array<{ number: number; amount: number; dueDate: Date }>,
-  installmentCurrent: number,
 ) {
   return installments.map((i) => ({
     ...i,
-    paid: i.number <= installmentCurrent,
+    paid: false,
   }));
 }
 
@@ -17,17 +16,17 @@ function debtStatusFromInstallments(installments: Array<{ paid: boolean }>): 'OP
 }
 
 describe('debt installment mirroring from statement', () => {
-  it('marks cuotas up to current as paid (C.02/06 → 1–2 paid)', () => {
+  it('keeps all contact cuotas unpaid even mid-plan (C.02/06)', () => {
     const bank = generateDebtInstallments(60000, 6, new Date(2026, 0, 10));
-    const mirrored = mirrorPurchaseInstallmentsForDebt(bank, 2);
-    expect(mirrored.filter((i) => i.paid).map((i) => i.number)).toEqual([1, 2]);
+    const mirrored = mirrorPurchaseInstallmentsForDebt(bank);
+    expect(mirrored.every((i) => !i.paid)).toBe(true);
     expect(debtStatusFromInstallments(mirrored)).toBe('OPEN');
   });
 
-  it('settles when current equals total', () => {
+  it('one-shot import stays OPEN until the contact pays', () => {
     const bank = generateDebtInstallments(10000, 1, new Date(2026, 0, 10));
-    const mirrored = mirrorPurchaseInstallmentsForDebt(bank, 1);
-    expect(debtStatusFromInstallments(mirrored)).toBe('SETTLED');
+    const mirrored = mirrorPurchaseInstallmentsForDebt(bank);
+    expect(debtStatusFromInstallments(mirrored)).toBe('OPEN');
   });
 });
 

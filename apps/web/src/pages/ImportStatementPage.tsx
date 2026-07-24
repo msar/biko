@@ -747,10 +747,11 @@ function StatementLineCard({
                 </button>
               </div>
               <p className="hint">
-                Queda en la tarjeta pero no suma al resumen de gastos.
+                Queda en la tarjeta pero no suma al resumen de gastos. La deuda del contacto
+                arranca sin pagos registrados
                 {line.installment
-                  ? ` Se crea deuda en ${line.installment.total} cuotas (ya figura cuota ${line.installment.current}).`
-                  : ''}
+                  ? ` (${line.installment.total} cuotas; en el resumen figura la ${line.installment.current}).`
+                  : '.'}
               </p>
             </>
           )}

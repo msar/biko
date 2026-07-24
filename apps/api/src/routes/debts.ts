@@ -6,11 +6,13 @@ import {
   DebtNotFoundError,
   DebtValidationError,
   deleteContact,
+  deleteDebt,
   getDebtSummary,
   listContacts,
   listDebts,
   markDebtInstallmentPaid,
   markDebtInstallmentUnpaid,
+  reopenDebt,
   updateContact,
   updateDebt,
 } from '../services/debt.js';
@@ -48,6 +50,8 @@ const createDebtSchema = z
 const updateDebtSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   notes: z.string().max(2000).nullish(),
+  direction: z.enum(['OWED_TO_ME', 'I_OWE']).optional(),
+  contactId: z.string().optional(),
 });
 
 function handleError(error: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
@@ -137,6 +141,24 @@ export default async function debtRoutes(app: FastifyInstance) {
     const body = updateDebtSchema.parse(request.body);
     try {
       return await updateDebt(app.prisma, request.user.householdId, id, body);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  });
+
+  app.delete('/debts/:id', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    try {
+      return await deleteDebt(app.prisma, request.user.householdId, id);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  });
+
+  app.post('/debts/:id/reopen', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    try {
+      return await reopenDebt(app.prisma, request.user.householdId, id);
     } catch (error) {
       return handleError(error, reply);
     }
