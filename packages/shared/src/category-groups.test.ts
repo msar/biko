@@ -16,6 +16,20 @@ describe('resolveCategoryGroupId', () => {
   it('falls unknown names into otros', () => {
     expect(resolveCategoryGroupId('Mascotas')).toBe('otros');
   });
+
+  it('maps Servicios and Servicios online to servicios', () => {
+    expect(resolveCategoryGroupId('Servicios')).toBe('servicios');
+    expect(resolveCategoryGroupId('Servicios online')).toBe('servicios');
+    expect(resolveCategoryGroupId('Hogar')).toBe('vivienda');
+  });
+
+  it('maps car-related categories to auto', () => {
+    expect(resolveCategoryGroupId('Auto')).toBe('auto');
+    expect(resolveCategoryGroupId('Impuestos automotor')).toBe('auto');
+    expect(resolveCategoryGroupId('Seguro')).toBe('auto');
+    expect(resolveCategoryGroupId('Combustible')).toBe('auto');
+    expect(resolveCategoryGroupId('Transporte')).toBe('transporte');
+  });
 });
 
 describe('groupCategories', () => {
@@ -27,7 +41,7 @@ describe('groupCategories', () => {
       { categoryId: '4', name: 'Mascotas', icon: '🐕', color: '#999', total: 2000 },
     ]);
 
-    expect(result.map((g) => g.id)).toEqual(['comida', 'transporte', 'otros']);
+    expect(result.map((g) => g.id)).toEqual(['comida', 'auto', 'otros']);
     expect(result[0]!.total).toBe(15000);
     expect(result[0]!.categories).toHaveLength(2);
     expect(result[2]!.categories[0]!.name).toBe('Mascotas');
