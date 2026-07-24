@@ -300,6 +300,8 @@ export default function DebtsPage() {
           )
         }
         confirmLabel="Registrar"
+        loadingLabel="Registrando…"
+        variant="primary"
         cancelLabel="Cancelar"
         loading={payMutation.isPending}
         onConfirm={() => {
