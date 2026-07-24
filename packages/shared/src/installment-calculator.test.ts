@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { PaymentMethodType } from './enums';
-import { calculateDiscount, generateInstallments } from './installment-calculator';
+import {
+  calculateDiscount,
+  generateDebtInstallments,
+  generateInstallments,
+} from './installment-calculator';
 
 describe('calculateDiscount', () => {
   it('applies plain percentage without cap', () => {
@@ -62,5 +66,28 @@ describe('generateInstallments', () => {
     expect(sum).toBeCloseTo(100, 2);
     expect(result[0]!.amount).toBeCloseTo(33.33, 2);
     expect(result[2]!.amount).toBeCloseTo(33.34, 2);
+  });
+});
+
+describe('generateDebtInstallments', () => {
+  it('creates monthly schedule from startDate without card cycle', () => {
+    const start = new Date(2026, 6, 15);
+    const result = generateDebtInstallments(30000, 3, start);
+    expect(result).toHaveLength(3);
+    expect(result.map((r) => r.amount)).toEqual([10000, 10000, 10000]);
+    expect(result[0]!.dueDate.getMonth()).toBe(6);
+    expect(result[1]!.dueDate.getMonth()).toBe(7);
+    expect(result[2]!.dueDate.getMonth()).toBe(8);
+  });
+
+  it('absorbs rounding in the last cuota', () => {
+    const result = generateDebtInstallments(100, 3, new Date(2026, 0, 1));
+    expect(result.reduce((s, i) => s + i.amount, 0)).toBeCloseTo(100, 2);
+  });
+
+  it('clamps count to at least 1', () => {
+    const result = generateDebtInstallments(500, 0, new Date(2026, 0, 1));
+    expect(result).toHaveLength(1);
+    expect(result[0]!.amount).toBe(500);
   });
 });

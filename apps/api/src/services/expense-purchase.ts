@@ -24,6 +24,14 @@ export const purchaseInclude = {
   promotion: { include: { entity: true } },
   installments: { orderBy: { number: 'asc' as const } },
   allocations: { include: { user: { select: { id: true, name: true } } } },
+  debt: {
+    select: {
+      id: true,
+      direction: true,
+      status: true,
+      contact: { select: { id: true, name: true } },
+    },
+  },
 };
 
 export type PromotionApplyMode = 'auto' | 'manual' | 'off';

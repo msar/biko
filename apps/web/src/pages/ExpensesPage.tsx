@@ -127,6 +127,12 @@ export default function ExpensesPage() {
               </small>
               {badge && <small className="expense-badge">{badge}</small>}
               {paidBadge && <small className="expense-badge">{paidBadge}</small>}
+              {exp.debt && (
+                <small className="expense-badge">
+                  Deuda: {exp.debt.contact.name}
+                  {exp.debt.direction === 'I_OWE' ? ' (les debés)' : ' (te deben)'}
+                </small>
+              )}
               {Number(exp.discountAmount) > 0 && (
                 <small className="savings-tag">
                   ✨ {exp.discountLabelApplied ?? exp.promotion?.entity.name ?? 'Descuento'}: −

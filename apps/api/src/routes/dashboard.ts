@@ -85,17 +85,22 @@ function purchaseScopeWhere(viewerId: string, dashboardScope: DashboardScope) {
   };
 }
 
-/** Merge dashboard scope with extra purchase predicates (dates, installment count). */
+/** Merge dashboard scope with extra purchase predicates (dates, installment count).
+ * Expense dashboards exclude purchases linked to an external debt (contact repayment tracking).
+ */
 function purchaseWhere(
   viewerId: string,
   dashboardScope: DashboardScope,
   extra: Record<string, unknown>,
+  opts?: { excludeLinkedDebts?: boolean },
 ) {
+  const excludeLinkedDebts = opts?.excludeLinkedDebts !== false;
   const scopePart = purchaseScopeWhere(viewerId, dashboardScope);
+  const withDebtFilter = excludeLinkedDebts ? { ...extra, debt: null } : extra;
   if ('OR' in scopePart) {
-    return { AND: [scopePart, extra] };
+    return { AND: [scopePart, withDebtFilter] };
   }
-  return { ...scopePart, ...extra };
+  return { ...scopePart, ...withDebtFilter };
 }
 
 export default async function dashboardRoutes(app: FastifyInstance) {
@@ -233,6 +238,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       where: {
         householdId,
         purchaseDate: { gte: range.gte, lt: range.lt },
+        debt: null,
         ...purchaseScopeWhere(viewerId, dashboardScope),
       },
       _sum: { discountAmount: true },
@@ -290,9 +296,10 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         householdId,
         dueDate: { gte: start },
         paid: false,
+        // Upcoming = card cash-flow; keep purchases linked to contact debts.
         purchase: purchaseWhere(viewerId, dashboardScope, {
           installmentsCount: { gte: 2 },
-        }),
+        }, { excludeLinkedDebts: false }),
       },
       select: { amount: true, dueDate: true },
     });
@@ -325,7 +332,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
 
     if (includeBalance) {
       const purchases = await app.prisma.purchase.findMany({
-        where: { householdId, scope: 'HOUSEHOLD' },
+        where: { householdId, scope: 'HOUSEHOLD', debt: null },
         include: {
           user: { select: { id: true, name: true } },
           paidBy: { select: { id: true, name: true } },

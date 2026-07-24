@@ -168,9 +168,18 @@ export default function SettingsPage() {
           </div>
         )}
         <p className="hint">
-          También podés gestionar <Link to="/recurrentes">pagos recurrentes</Link> (luz, gas, gym…) o{' '}
+          También podés gestionar <Link to="/recurrentes">pagos recurrentes</Link> (luz, gas, gym…),{' '}
+          <Link to="/deudas">deudas con contactos</Link> o{' '}
           <Link to="/importar-resumen">importar un resumen</Link> de tarjeta.
         </p>
+      </section>
+
+      <section className="card">
+        <h2>Deudas</h2>
+        <p className="hint">Registrá lo que te deben o debés a amigos y familiares, con cuotas si aplica.</p>
+        <Link to="/deudas" className="btn-link">
+          Ir a deudas →
+        </Link>
       </section>
 
       <section className="card">

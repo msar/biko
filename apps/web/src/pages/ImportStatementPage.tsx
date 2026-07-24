@@ -9,7 +9,13 @@ import {
   parseStatementPdf,
   resolveBankHint,
 } from '../lib/statement-pdf';
-import type { Category, ExpenseScope, PaymentMethod } from '../lib/types';
+import type {
+  Category,
+  Contact,
+  DebtDirection,
+  ExpenseScope,
+  PaymentMethod,
+} from '../lib/types';
 
 type MatchCandidate = {
   purchaseId: string;
@@ -37,7 +43,14 @@ type MatchResult = {
 
 type LineDecision =
   | { action: 'SKIP' }
-  | { action: 'NEW'; categoryId: string; scope: ExpenseScope }
+  | {
+      action: 'NEW';
+      categoryId: string;
+      scope: ExpenseScope;
+      contactId?: string;
+      newContactName?: string;
+      debtDirection?: DebtDirection;
+    }
   | {
       action: 'MERGE';
       matchedPurchaseId: string;
@@ -98,6 +111,10 @@ export default function ImportStatementPage() {
   const { data: categories } = useQuery({
     queryKey: ['categories'],
     queryFn: () => api<Category[]>('/categories'),
+  });
+  const { data: contacts } = useQuery({
+    queryKey: ['contacts'],
+    queryFn: () => api<Contact[]>('/contacts'),
   });
 
   const creditCards = useMemo(
@@ -204,12 +221,20 @@ export default function ImportStatementPage() {
         const d = decisions[line.fingerprint] ?? { action: 'SKIP' as const };
         if (d.action === 'SKIP') return { fingerprint: line.fingerprint, action: 'SKIP' as const };
         if (d.action === 'NEW') {
+          const hasNewContact = Boolean(d.newContactName?.trim());
           return {
             fingerprint: line.fingerprint,
             action: 'NEW' as const,
             categoryId: d.categoryId,
-            scope: d.scope,
+            scope: d.contactId || hasNewContact ? 'PERSONAL' : d.scope,
             splitMode: 'EQUAL' as const,
+            ...(d.contactId ? { contactId: d.contactId } : {}),
+            ...(hasNewContact
+              ? { newContact: { name: d.newContactName!.trim() } }
+              : {}),
+            ...(d.contactId || hasNewContact
+              ? { debtDirection: d.debtDirection ?? 'OWED_TO_ME' }
+              : {}),
           };
         }
         return {
@@ -239,6 +264,9 @@ export default function ImportStatementPage() {
       setStep('done');
       void queryClient.invalidateQueries({ queryKey: ['expenses'] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      void queryClient.invalidateQueries({ queryKey: ['debts'] });
+      void queryClient.invalidateQueries({ queryKey: ['debts-summary'] });
+      void queryClient.invalidateQueries({ queryKey: ['contacts'] });
     },
     onError: (err) => {
       setError(err instanceof Error ? err.message : 'No se pudo guardar la importación');
@@ -390,6 +418,7 @@ export default function ImportStatementPage() {
                 decision={d}
                 storeName={storeOverrides[r.line.fingerprint] ?? r.line.store}
                 categories={categories ?? []}
+                contacts={contacts ?? []}
                 usdArsRate={usdArsRate}
                 onChange={(next) => setDecision(r.line.fingerprint, next)}
                 onStoreChange={(name) =>
@@ -469,6 +498,7 @@ function StatementLineCard({
   decision,
   storeName,
   categories,
+  contacts,
   usdArsRate,
   onChange,
   onStoreChange,
@@ -477,6 +507,7 @@ function StatementLineCard({
   decision: LineDecision | undefined;
   storeName: string;
   categories: Category[];
+  contacts: Contact[];
   usdArsRate: number | null;
   onChange: (d: LineDecision) => void;
   onStoreChange: (name: string) => void;
@@ -555,6 +586,9 @@ function StatementLineCard({
                   ? decision.categoryId
                   : (categories.find((c) => c.name === 'Otros')?.id ?? categories[0]?.id ?? ''),
               scope: decision?.action === 'NEW' ? decision.scope : 'HOUSEHOLD',
+              contactId: decision?.action === 'NEW' ? decision.contactId : undefined,
+              newContactName: decision?.action === 'NEW' ? decision.newContactName : undefined,
+              debtDirection: decision?.action === 'NEW' ? decision.debtDirection : undefined,
             })
           }
         >
@@ -597,19 +631,130 @@ function StatementLineCard({
           <div className="segmented">
             <button
               type="button"
-              className={decision.scope === 'HOUSEHOLD' ? 'active' : ''}
-              onClick={() => onChange({ ...decision, scope: 'HOUSEHOLD' })}
+              className={decision.scope === 'HOUSEHOLD' && !decision.contactId && !decision.newContactName ? 'active' : ''}
+              onClick={() =>
+                onChange({
+                  ...decision,
+                  scope: 'HOUSEHOLD',
+                  contactId: undefined,
+                  newContactName: undefined,
+                  debtDirection: undefined,
+                })
+              }
             >
               Hogar
             </button>
             <button
               type="button"
-              className={decision.scope === 'PERSONAL' ? 'active' : ''}
-              onClick={() => onChange({ ...decision, scope: 'PERSONAL' })}
+              className={decision.scope === 'PERSONAL' && !decision.contactId && !decision.newContactName ? 'active' : ''}
+              onClick={() =>
+                onChange({
+                  ...decision,
+                  scope: 'PERSONAL',
+                  contactId: undefined,
+                  newContactName: undefined,
+                  debtDirection: undefined,
+                })
+              }
             >
               Personal
             </button>
           </div>
+
+          <label>
+            Asignar deuda a contacto
+            <select
+              value={
+                decision.newContactName != null
+                  ? '__new__'
+                  : (decision.contactId ?? '')
+              }
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) {
+                  onChange({
+                    ...decision,
+                    contactId: undefined,
+                    newContactName: undefined,
+                    debtDirection: undefined,
+                  });
+                  return;
+                }
+                if (v === '__new__') {
+                  onChange({
+                    ...decision,
+                    scope: 'PERSONAL',
+                    contactId: undefined,
+                    newContactName: decision.newContactName ?? '',
+                    debtDirection: decision.debtDirection ?? 'OWED_TO_ME',
+                  });
+                  return;
+                }
+                onChange({
+                  ...decision,
+                  scope: 'PERSONAL',
+                  contactId: v,
+                  newContactName: undefined,
+                  debtDirection: decision.debtDirection ?? 'OWED_TO_ME',
+                });
+              }}
+            >
+              <option value="">Sin contacto</option>
+              {contacts.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+              <option value="__new__">＋ Nuevo contacto…</option>
+            </select>
+          </label>
+
+          {decision.newContactName != null && (
+            <label>
+              Nombre del contacto
+              <input
+                type="text"
+                value={decision.newContactName}
+                onChange={(e) =>
+                  onChange({
+                    ...decision,
+                    newContactName: e.target.value,
+                    debtDirection: decision.debtDirection ?? 'OWED_TO_ME',
+                  })
+                }
+                placeholder="Nombre"
+                autoComplete="off"
+              />
+            </label>
+          )}
+
+          {(decision.contactId || decision.newContactName != null) && (
+            <>
+              <div className="segmented">
+                <button
+                  type="button"
+                  className={(decision.debtDirection ?? 'OWED_TO_ME') === 'OWED_TO_ME' ? 'active' : ''}
+                  onClick={() => onChange({ ...decision, debtDirection: 'OWED_TO_ME' })}
+                >
+                  Me deben
+                </button>
+                <button
+                  type="button"
+                  className={decision.debtDirection === 'I_OWE' ? 'active' : ''}
+                  onClick={() => onChange({ ...decision, debtDirection: 'I_OWE' })}
+                >
+                  Debo
+                </button>
+              </div>
+              <p className="hint">
+                Queda en la tarjeta pero no suma al resumen de gastos.
+                {line.installment
+                  ? ` Se crea deuda en ${line.installment.total} cuotas (ya figura cuota ${line.installment.current}).`
+                  : ''}
+              </p>
+            </>
+          )}
+
           <div className="category-grid">
             {categories.map((cat) => (
               <button

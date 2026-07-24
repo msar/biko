@@ -112,3 +112,20 @@ function addMonths(date: Date, months: number): Date {
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
+
+/**
+ * Genera cuotas mensuales para una deuda externa (sin ciclo de tarjeta).
+ * La primera cuota vence en `startDate`; las siguientes suman un mes.
+ */
+export function generateDebtInstallments(
+  totalAmount: number,
+  installmentsCount: number,
+  startDate: Date,
+): GeneratedInstallment[] {
+  const count = Math.max(1, Math.min(36, Math.floor(installmentsCount)));
+  return splitAmount(totalAmount, count).map((amount, i) => ({
+    number: i + 1,
+    amount,
+    dueDate: addMonths(startDate, i),
+  }));
+}

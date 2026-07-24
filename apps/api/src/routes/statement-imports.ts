@@ -42,6 +42,15 @@ const decisionSchema = z.discriminatedUnion('action', [
     scope: z.enum(['HOUSEHOLD', 'PERSONAL']),
     splitMode: z.enum(['EQUAL', 'ASSIGN', 'AMOUNT', 'SHARES', 'PERCENTAGE']).optional(),
     assignToUserId: z.string().optional(),
+    contactId: z.string().optional(),
+    newContact: z
+      .object({
+        name: z.string().min(1).max(120),
+        phone: z.string().max(40).nullish(),
+        email: z.string().email().max(160).nullish(),
+      })
+      .optional(),
+    debtDirection: z.enum(['OWED_TO_ME', 'I_OWE']).optional(),
   }),
   z.object({
     fingerprint: z.string().min(8),

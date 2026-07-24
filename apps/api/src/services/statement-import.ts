@@ -14,6 +14,7 @@ import {
 } from './expense-purchase.js';
 import { ExchangeRateError, getUsdToArsRate } from './exchange-rate.js';
 import { createRecurringPayment } from './recurring.js';
+import { createDebtFromPurchase } from './debt.js';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -199,6 +200,9 @@ export type CommitLineDecision =
       scope: 'HOUSEHOLD' | 'PERSONAL';
       splitMode?: 'EQUAL' | 'ASSIGN' | 'AMOUNT' | 'SHARES' | 'PERCENTAGE';
       assignToUserId?: string;
+      contactId?: string;
+      newContact?: { name: string; phone?: string | null; email?: string | null };
+      debtDirection?: 'OWED_TO_ME' | 'I_OWE';
     }
   | {
       fingerprint: string;
@@ -388,6 +392,11 @@ export async function commitStatementImport(
       }
 
       const storeName = line.store;
+      const hasContact = Boolean(decision.contactId || decision.newContact);
+      // Contact-assigned imports stay PERSONAL so they never enter household settle-up;
+      // debt link also excludes them from expense dashboards.
+      const purchaseScope = hasContact ? 'PERSONAL' : decision.scope;
+
       const created = await createPurchaseWithAllocations(
         tx,
         args.householdId,
@@ -420,8 +429,8 @@ export async function commitStatementImport(
                   label: 'Bonificación del resumen',
                 }
               : undefined,
-          scope: decision.scope,
-          splitMode: decision.scope === 'PERSONAL' ? 'EQUAL' : (decision.splitMode ?? 'EQUAL'),
+          scope: purchaseScope,
+          splitMode: purchaseScope === 'PERSONAL' ? 'EQUAL' : (decision.splitMode ?? 'EQUAL'),
           assignToUserId: decision.assignToUserId,
           currency,
           exchangeRateToArs,
@@ -443,13 +452,30 @@ export async function commitStatementImport(
         true,
       );
 
-      if (currency === 'USD') {
+      let debtContactId: string | null = null;
+      let debtDirection: 'OWED_TO_ME' | 'I_OWE' | null = null;
+      if (hasContact) {
+        const debt = await createDebtFromPurchase(tx, {
+          householdId: args.householdId,
+          userId: args.userId,
+          contactId: decision.contactId,
+          newContact: decision.newContact,
+          direction: decision.debtDirection ?? 'OWED_TO_ME',
+          purchaseId: created.id,
+          title: storeName,
+          installmentCurrent: line.installment?.current,
+        });
+        debtContactId = debt.contactId;
+        debtDirection = debt.direction;
+      }
+
+      if (currency === 'USD' && !hasContact) {
         await linkUsdSubscriptionRecurring(tx, {
           householdId: args.householdId,
           userId: args.userId,
           paymentMethodId: args.paymentMethodId,
           categoryId: decision.categoryId,
-          scope: decision.scope,
+          scope: purchaseScope,
           store: storeName,
           amount: line.amount,
           purchaseDate,
@@ -473,10 +499,12 @@ export async function commitStatementImport(
           suggestedSkip: false,
           status: 'NEW',
           categoryId: decision.categoryId,
-          scope: decision.scope,
-          splitMode: decision.scope === 'PERSONAL' ? 'EQUAL' : (decision.splitMode ?? 'EQUAL'),
+          scope: purchaseScope,
+          splitMode: purchaseScope === 'PERSONAL' ? 'EQUAL' : (decision.splitMode ?? 'EQUAL'),
           createdPurchaseId: created.id,
           matchedPurchaseId: created.id,
+          contactId: debtContactId,
+          debtDirection,
         },
       });
 

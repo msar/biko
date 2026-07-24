@@ -39,6 +39,18 @@ export const EntityKind = {
 } as const;
 export type EntityKind = (typeof EntityKind)[keyof typeof EntityKind];
 
+export const DebtDirection = {
+  OWED_TO_ME: 'OWED_TO_ME',
+  I_OWE: 'I_OWE',
+} as const;
+export type DebtDirection = (typeof DebtDirection)[keyof typeof DebtDirection];
+
+export const DebtStatus = {
+  OPEN: 'OPEN',
+  SETTLED: 'SETTLED',
+} as const;
+export type DebtStatus = (typeof DebtStatus)[keyof typeof DebtStatus];
+
 /** JS Date.getDay() (0=Sunday) to domain DayOfWeek. */
 export function dayOfWeekFromDate(date: Date): DayOfWeek {
   const map: DayOfWeek[] = [

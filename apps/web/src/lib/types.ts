@@ -17,6 +17,9 @@ export type ExpenseScope = 'HOUSEHOLD' | 'PERSONAL';
 
 export type SplitMode = 'EQUAL' | 'ASSIGN' | 'AMOUNT' | 'SHARES' | 'PERCENTAGE';
 
+export type DebtDirection = 'OWED_TO_ME' | 'I_OWE';
+export type DebtStatus = 'OPEN' | 'SETTLED';
+
 export type PromotionApplyMode = 'auto' | 'manual' | 'off';
 
 export interface ManualDiscount {
@@ -174,8 +177,68 @@ export interface Purchase {
   promotion: (Promotion & { entity: Entity }) | null;
   installments: Installment[];
   allocations: PurchaseAllocation[];
+  debt?: {
+    id: string;
+    direction: DebtDirection;
+    status: DebtStatus;
+    contact: { id: string; name: string };
+  } | null;
   /** Solo local: pendiente de sincronizar. */
   _pending?: boolean;
+}
+
+export interface Contact {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  createdAt: string;
+}
+
+export interface DebtInstallment {
+  id: string;
+  number: number;
+  amount: string;
+  dueDate: string;
+  paid: boolean;
+  paidDate: string | null;
+}
+
+export interface Debt {
+  id: string;
+  direction: DebtDirection;
+  title: string;
+  notes: string | null;
+  totalAmount: string;
+  currency: string;
+  installmentsCount: number;
+  startDate: string;
+  status: DebtStatus;
+  purchaseId: string | null;
+  contact: Contact;
+  installments: DebtInstallment[];
+  purchase: {
+    id: string;
+    store: string;
+    purchaseDate: string;
+    paymentMethodId: string;
+  } | null;
+}
+
+export interface DebtSummary {
+  month: string;
+  owedToMeThisMonth: number;
+  iOweThisMonth: number;
+  owedToMeRemaining: number;
+  iOweRemaining: number;
+  byContact: Array<{
+    contactId: string;
+    contactName: string;
+    owedToMeThisMonth: number;
+    iOweThisMonth: number;
+    owedToMeRemaining: number;
+    iOweRemaining: number;
+  }>;
 }
 
 export interface Suggestion {
