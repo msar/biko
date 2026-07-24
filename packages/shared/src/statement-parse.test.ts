@@ -14,6 +14,9 @@ import {
   parseArgentineAmount,
   parseBbvaDateToken,
   parseBbvaStatementText,
+  parseGaliciaStatementText,
+  parseNaranjaStatementText,
+  parseNumericStatementDate,
   parseSantanderStatementText,
   parseStatementDateParts,
   parseStatementText,
@@ -28,6 +31,8 @@ import {
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const SANTANDER_FIXTURE = readFileSync(join(fixturesDir, 'santander-pdfjs-sample.txt'), 'utf8');
 const BBVA_FIXTURE = readFileSync(join(fixturesDir, 'bbva-consumos.txt'), 'utf8');
+const NARANJA_FIXTURE = readFileSync(join(fixturesDir, 'naranja-sample.txt'), 'utf8');
+const GALICIA_FIXTURE = readFileSync(join(fixturesDir, 'galicia-sample.txt'), 'utf8');
 
 describe('assemblePdfTextLines', () => {
   it('sorts items by x within the same y-bin', () => {
@@ -164,6 +169,8 @@ describe('bank hint and unknown fallback', () => {
   it('maps entity names to banks', () => {
     expect(bankFromEntityName('Santander')).toBe('Santander');
     expect(bankFromEntityName('BBVA')).toBe('BBVA');
+    expect(bankFromEntityName('Galicia')).toBe('Galicia');
+    expect(bankFromEntityName('Naranja X')).toBe('Naranja');
   });
 
   it('never labels junk-only legales as BBVA', () => {
@@ -228,6 +235,84 @@ describe('parseBbvaStatementText', () => {
     expect(cleanBbvaStoreName('CUOTA SOCIAL CAR 000000034964790 000001')).toBe('CUOTA SOCIAL CAR');
     expect(cleanBbvaStoreName('TLM CARP C.06/06 003174')).toBe('TLM CARP');
     expect(cleanBbvaStoreName('SHOP GALLERY 002430 27.940,00')).toBe('SHOP GALLERY');
+  });
+});
+
+describe('parseNaranjaStatementText', () => {
+  it('detects Naranja and parses consumos, cuotas, Plan Z and sellos', () => {
+    expect(detectStatementBank(NARANJA_FIXTURE)).toBe('Naranja');
+    const { bank, lines } = parseStatementText(NARANJA_FIXTURE);
+    expect(bank).toBe('Naranja');
+    const active = lines.filter(isActionableLine);
+
+    expect(active.find((l) => /NAKAMA/i.test(l.store))).toMatchObject({
+      amount: 87000,
+      date: '2026-06-03',
+    });
+
+    const libertad = active.find(
+      (l) => /HIPERMERCADO LIBERTAD/i.test(l.store) && l.installment?.current === 8,
+    );
+    expect(libertad).toMatchObject({
+      amount: 53689.93,
+      installment: { current: 8, total: 12 },
+      date: '2025-11-05',
+    });
+
+    expect(active.find((l) => /ZETA MAY/i.test(l.store))).toMatchObject({
+      amount: 100800,
+      installment: { current: 3, total: 3 },
+    });
+
+    expect(active.find((l) => /PERRONELUISA/i.test(l.store))?.amount).toBe(42940);
+    expect(active.find((l) => /NETFLIX/i.test(l.store))?.amount).toBe(13768.47);
+
+    const impuestos = active.find((l) => l.store === 'Impuestos tarjeta');
+    expect(impuestos?.amount).toBe(4022.32);
+    expect(impuestos?.description).toMatch(/Impuesto de Sellos/i);
+
+    expect(active.some((l) => /PAGO EN PESOS/i.test(l.store))).toBe(false);
+    expect(parseNaranjaStatementText(NARANJA_FIXTURE).some((l) => l.suggestedSkip && /PAGO/i.test(l.raw))).toBe(
+      true,
+    );
+  });
+});
+
+describe('parseGaliciaStatementText', () => {
+  it('detects Galicia via CUIT and parses Visa consumos + taxes', () => {
+    expect(detectStatementBank(GALICIA_FIXTURE)).toBe('Galicia');
+    expect(parseNumericStatementDate('20-05-26')).toBe('2026-05-20');
+
+    const { bank, lines } = parseStatementText(GALICIA_FIXTURE);
+    expect(bank).toBe('Galicia');
+    const active = lines.filter(isActionableLine);
+
+    expect(active.find((l) => /CUESTABLANCA/i.test(l.store))).toMatchObject({
+      amount: 14666.68,
+      installment: { current: 1, total: 3 },
+      date: '2026-05-20',
+    });
+
+    expect(active.find((l) => /KOKO/i.test(l.store))?.amount).toBe(112300);
+    expect(active.find((l) => /Preply/i.test(l.store))).toMatchObject({
+      currency: 'USD',
+      amount: 2.7,
+    });
+
+    const calm = active.find(
+      (l) => /calmessimple/i.test(l.store) && l.installment?.current === 8 && l.amount === 47158.33,
+    );
+    expect(calm).toBeTruthy();
+
+    const impuestos = active.find((l) => l.store === 'Impuestos tarjeta');
+    expect(impuestos?.amount).toBeCloseTo(8234.18 + 932.25 + 338.15, 2);
+    expect(impuestos?.description).toMatch(/IIBB/i);
+
+    expect(active.some((l) => /SU PAGO/i.test(l.store))).toBe(false);
+    expect(active.some((l) => /IVA RG/i.test(l.store))).toBe(false);
+    expect(active.find((l) => /DB\.?\s*RG/i.test(l.store))?.amount).toBe(18763.65);
+
+    expect(parseGaliciaStatementText(GALICIA_FIXTURE).filter(isActionableLine).length).toBeGreaterThan(10);
   });
 });
 

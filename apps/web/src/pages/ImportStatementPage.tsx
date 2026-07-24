@@ -58,7 +58,7 @@ type LineDecision =
     };
 
 type Step = 'upload' | 'review' | 'done';
-type BankOverride = 'Auto' | 'Santander' | 'BBVA';
+type BankOverride = 'Auto' | 'Santander' | 'BBVA' | 'Galicia' | 'Naranja';
 
 function applyStoreOverrides(
   lines: ParsedStatementLine[],
@@ -374,9 +374,11 @@ export default function ImportStatementPage() {
             <option value="Auto">Auto (detectar del PDF)</option>
             <option value="Santander">Santander</option>
             <option value="BBVA">BBVA</option>
+            <option value="Galicia">Galicia</option>
+            <option value="Naranja">Naranja</option>
           </select>
           <p className="hint">
-            Auto detecta el banco desde el PDF. Si falla, elegí Santander o BBVA acá.
+            Auto detecta el banco desde el PDF. Si falla, elegí el banco acá.
           </p>
           {bankHintLabel && <p className="hint">{bankHintLabel}</p>}
 

@@ -17,7 +17,14 @@ export type ParsedStatementLine = {
   suggestedSkip: boolean;
 };
 
-export type StatementBankSource = 'Santander' | 'BBVA' | 'Unknown';
+export type StatementBankSource = 'Santander' | 'BBVA' | 'Galicia' | 'Naranja' | 'Unknown';
+
+const KNOWN_STATEMENT_BANKS: Array<Exclude<StatementBankSource, 'Unknown'>> = [
+  'Naranja',
+  'Galicia',
+  'BBVA',
+  'Santander',
+];
 
 const MONTH_MAP: Record<string, number> = {
   ene: 1,
@@ -52,6 +59,8 @@ const MONTH_MAP: Record<string, number> = {
 
 const SKIP_PATTERNS = [
   /su\s+pago\s+en/i,
+  /pago\s+en\s+pesos/i,
+  /pago\s+en\s+usd/i,
   /total\s+consumos/i,
   /total\s+de\s+cuotas/i,
   /pago\s+m[ií]nimo/i,
@@ -96,12 +105,32 @@ const JUNK_STORE_EXACT =
 
 export function detectStatementBank(text: string): StatementBankSource {
   const lower = text.toLowerCase();
+  if (
+    lower.includes('naranjax') ||
+    lower.includes('tarjeta naranja') ||
+    /\bnaranja\s*x\b/i.test(text) ||
+    /detalle\s+de\s+consumos\s+tarjeta/i.test(text)
+  ) {
+    return 'Naranja';
+  }
+  // Galicia Visa (CUIT) — before Santander heuristic: both use "TARJETA nnnn Total Consumos".
+  if (lower.includes('galicia') || /cuit\s+banco:\s*30-50000173/i.test(text)) {
+    return 'Galicia';
+  }
   if (lower.includes('bbva') || lower.includes('banco francés') || lower.includes('banco frances')) {
     return 'BBVA';
   }
   if (lower.includes('santander')) return 'Santander';
-  // Heuristic: card total pattern used by Santander Visa resumenes.
-  if (/tarjeta\s+\d{4}\s+total\s+consumos/i.test(text)) return 'Santander';
+  // Santander: Spanish month names on consumo rows (Galicia uses DD-MM-YY).
+  if (
+    /tarjeta\s+\d{4}\s+total\s+consumos/i.test(text) &&
+    /\d{2}\s+(ene|feb|mar|abr|may|jun|jul|ago|set|sep|oct|nov|dic)/i.test(text)
+  ) {
+    return 'Santander';
+  }
+  if (/detalle\s+del\s+consumo/i.test(text) && /\d{2}-\d{2}-\d{2}/.test(text)) {
+    return 'Galicia';
+  }
   if (/total\s+consumos\s+de\s+/i.test(text) && /visa\s+platinum/i.test(text)) {
     return 'BBVA';
   }
@@ -112,6 +141,8 @@ export function detectStatementBank(text: string): StatementBankSource {
 export function bankFromEntityName(name: string | null | undefined): StatementBankSource {
   if (!name) return 'Unknown';
   const lower = name.toLowerCase();
+  if (lower.includes('naranja')) return 'Naranja';
+  if (lower.includes('galicia')) return 'Galicia';
   if (lower.includes('bbva') || lower.includes('franc')) return 'BBVA';
   if (lower.includes('santander')) return 'Santander';
   return 'Unknown';
@@ -205,12 +236,26 @@ function shouldSkipLine(raw: string, amount: number | null): boolean {
 }
 
 function parseInstallment(text: string): { current: number; total: number } | undefined {
-  const m = text.match(/C\.?\s*(\d{1,2})\s*\/\s*(\d{1,2})/i);
+  const m =
+    text.match(/C\.?\s*(\d{1,2})\s*\/\s*(\d{1,2})/i) ??
+    text.match(/(?:^|[\s])(\d{1,2})\s*\/\s*(\d{1,2})(?:\s|$)/);
   if (!m) return undefined;
   const current = Number(m[1]);
   const total = Number(m[2]);
   if (!current || !total || current > total) return undefined;
   return { current, total };
+}
+
+/** DD-MM-YY or DD/MM/YY → YYYY-MM-DD */
+export function parseNumericStatementDate(token: string): string | null {
+  const m = token.trim().match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  let year = Number(m[3]);
+  if (year < 100) year += 2000;
+  if (!day || !month || month > 12 || day > 31) return null;
+  return `${year}-${pad2(month)}-${pad2(day)}`;
 }
 
 /**
@@ -806,6 +851,217 @@ export function cleanBbvaStoreName(desc: string): string {
   return store;
 }
 
+/**
+ * Galicia Visa: numeric dates + optional auth + store + optional cuota nn/nn + cupón + amount.
+ *   20-05-26 * MERPAGO*CUESTABLANCA 01/03 000900 14.666,68
+ *   18-05-26 F Preply USD 2,70 000014 2,70
+ *   28-05-26 IMPUESTO DE SELLOS $ 8.234,18
+ */
+export function parseGaliciaStatementText(text: string): ParsedStatementLine[] {
+  const lines = text
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((l) => l.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  const results: ParsedStatementLine[] = [];
+  for (const line of lines) {
+    if (shouldDropCompletely(line)) continue;
+    const m = line.match(/^(\d{1,2}-\d{1,2}-\d{2,4})\s+([*FK]\s+)?(.+)$/i);
+    if (!m) continue;
+
+    const date = parseNumericStatementDate(m[1]!);
+    if (!date) continue;
+
+    const rest = m[3]!;
+    const trailing = extractTrailingArgentineAmount(rest);
+    if (!trailing) continue;
+
+    const amount = Math.abs(trailing.amount);
+    let before = trailing.before
+      .replace(/\$$/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const installment = parseInstallment(before);
+    before = before
+      .replace(/C\.?\s*\d{1,2}\s*\/\s*\d{1,2}/i, '')
+      .replace(/(?:^|[\s])\d{1,2}\s*\/\s*\d{1,2}(?=\s|$)/g, ' ')
+      .replace(/\b\d{6}\b/g, ' ')
+      .replace(/\bUSD\b\s*[\d.,]*/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!before || shouldSkipStoreName(before)) continue;
+
+    const currency: 'ARS' | 'USD' = /\bUSD\b/i.test(rest) ? 'USD' : 'ARS';
+    const suggestedSkip = shouldSkipLine(line, trailing.amount);
+    const fingerprint = fingerprintStatementLine({
+      date,
+      store: before,
+      amount,
+      currency,
+      installment,
+    });
+
+    results.push({
+      date,
+      store: before,
+      amount,
+      currency,
+      installment,
+      raw: line,
+      fingerprint,
+      suggestedSkip,
+    });
+  }
+
+  return dedupeByFingerprint(results);
+}
+
+/**
+ * Tarjeta Naranja / Naranja X:
+ *   03/06/26 NX Virtual 1 NAKAMA RAMEN 01 87.000,00
+ *   05/11/25 Naranja X 6500 HIPERMERCADO LIBERTAD 08/12 53.689,93
+ *   Impuesto de Sellos 4.022,32
+ */
+export function parseNaranjaStatementText(text: string): ParsedStatementLine[] {
+  const lines = text
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((l) => l.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  const results: ParsedStatementLine[] = [];
+
+  for (const line of lines) {
+    if (shouldDropCompletely(line)) continue;
+
+    // Standalone tax line outside the table
+    const taxOnly = line.match(/^(impuesto\s+de\s+sellos)\s+([\d.]+,\d{2})$/i);
+    if (taxOnly) {
+      const amount = parseArgentineAmount(taxOnly[2]!);
+      if (amount == null || amount <= 0) continue;
+      const date = extractNaranjaClosingDate(text) ?? `${extractStatementYear(text)}-01-01`;
+      const store = taxOnly[1]!.replace(/\s+/g, ' ').trim();
+      const fingerprint = fingerprintStatementLine({
+        date,
+        store,
+        amount,
+        currency: 'ARS',
+      });
+      results.push({
+        date,
+        store,
+        amount,
+        currency: 'ARS',
+        raw: line,
+        fingerprint,
+        suggestedSkip: false,
+      });
+      continue;
+    }
+
+    const m = line.match(
+      /^(\d{1,2}\/\d{1,2}\/\d{2,4})\s+(NX\s+Virtual|Naranja\s+X)\s+(\d+)\s+(.+)$/i,
+    );
+    if (!m) {
+      // Payment rows like "04/06/26 PAGO EN PESOS 414.800,40"
+      const soft = line.match(/^(\d{1,2}\/\d{1,2}\/\d{2,4})\s+(pago\s+en\s+.+)$/i);
+      if (!soft) continue;
+      const date = parseNumericStatementDate(soft[1]!);
+      if (!date) continue;
+      const trailing = extractTrailingArgentineAmount(soft[2]!);
+      if (!trailing) continue;
+      const store = trailing.before.replace(/\s+/g, ' ').trim() || 'PAGO';
+      const abs = Math.abs(trailing.amount);
+      results.push({
+        date,
+        store,
+        amount: abs,
+        currency: 'ARS',
+        raw: line,
+        fingerprint: fingerprintStatementLine({
+          date,
+          store,
+          amount: abs,
+          currency: 'ARS',
+        }),
+        suggestedSkip: true,
+      });
+      continue;
+    }
+
+    const date = parseNumericStatementDate(m[1]!);
+    if (!date) continue;
+
+    const trailing = extractTrailingArgentineAmount(m[4]!);
+    if (!trailing) continue;
+
+    let before = trailing.before.replace(/\s+/g, ' ').trim();
+    const installment = parseInstallment(before);
+    if (installment) {
+      before = before.replace(/(?:^|[\s])\d{1,2}\s*\/\s*\d{1,2}\s*$/i, '').trim();
+    } else {
+      // One-shot plan code "01" or Plan Z marker
+      before = before.replace(/\s+Zeta$/i, '').replace(/\s+\d{2}$/, '').trim();
+    }
+
+    if (!before || shouldSkipStoreName(before)) continue;
+
+    const amount = Math.abs(trailing.amount);
+    const currency: 'ARS' | 'USD' = /\bUSD\b/i.test(m[4]!) ? 'USD' : 'ARS';
+    const suggestedSkip = shouldSkipLine(line, trailing.amount);
+    const fingerprint = fingerprintStatementLine({
+      date,
+      store: before,
+      amount,
+      currency,
+      installment,
+    });
+
+    results.push({
+      date,
+      store: before,
+      amount,
+      currency,
+      installment,
+      raw: line,
+      fingerprint,
+      suggestedSkip,
+    });
+  }
+
+  return dedupeByFingerprint(results);
+}
+
+function extractNaranjaClosingDate(text: string): string | null {
+  // "El resumen actual cerró el 27/06." or "EMITIDO EL 27/06."
+  const m =
+    text.match(/resumen\s+actual\s+cerr[oó]\s+el\s+(\d{1,2})\/(\d{1,2})/i) ??
+    text.match(/emitido\s+el\s+(\d{1,2})\/(\d{1,2})/i);
+  if (!m) return null;
+  const year = extractStatementYear(text);
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  if (!day || !month || month > 12) return null;
+  // Closing month often lacks year; prefer year from "EMITIDO EL 27/06." context + nearby 26
+  const y2 = text.match(/emitido\s+el\s+\d{1,2}\/\d{1,2}(?:\/(\d{2,4}))?/i);
+  let y = year;
+  if (y2?.[1]) {
+    y = Number(y2[1]);
+    if (y < 100) y += 2000;
+  } else {
+    // "RESUMEN Nº … EMITIDO EL 27/06." then later "26" from dates
+    const yy = text.match(/\b(\d{2})\/(\d{2})\/(\d{2})\b/);
+    if (yy) {
+      y = Number(yy[3]);
+      if (y < 100) y += 2000;
+    }
+  }
+  return `${y}-${pad2(month)}-${pad2(day)}`;
+}
+
 function shouldDropCompletely(text: string): boolean {
   const t = text.trim();
   if (DROP_COMPLETELY.some((re) => re.test(t))) return true;
@@ -907,35 +1163,43 @@ export function parseStatementText(
   const forced = bank && bank !== 'Unknown' ? bank : null;
   const detected = forced ?? detectStatementBank(text);
 
-  const tryBank = (b: 'Santander' | 'BBVA') => {
-    const lines = groupCardTaxLines(
-      b === 'BBVA' ? parseBbvaStatementText(text) : parseSantanderStatementText(text),
-    );
-    return { bank: b as StatementBankSource, lines };
+  const parseForBank = (b: Exclude<StatementBankSource, 'Unknown'>): ParsedStatementLine[] => {
+    switch (b) {
+      case 'BBVA':
+        return groupCardTaxLines(parseBbvaStatementText(text));
+      case 'Galicia':
+        return groupCardTaxLines(parseGaliciaStatementText(text));
+      case 'Naranja':
+        return groupCardTaxLines(parseNaranjaStatementText(text));
+      case 'Santander':
+        return groupCardTaxLines(parseSantanderStatementText(text));
+    }
   };
 
-  if (detected === 'BBVA' || detected === 'Santander') {
-    const primary = tryBank(detected);
-    if (primary.lines.some(isActionableLine)) return primary;
+  const primaryBank: Exclude<StatementBankSource, 'Unknown'> | null =
+    detected !== 'Unknown' ? detected : null;
 
-    // Forced bank found nothing — try the other before giving up.
-    if (forced) {
-      const other = forced === 'BBVA' ? 'Santander' : 'BBVA';
-      const secondary = tryBank(other);
-      if (secondary.lines.some(isActionableLine)) return secondary;
+  if (primaryBank) {
+    const primary = parseForBank(primaryBank);
+    if (primary.some(isActionableLine)) {
+      return { bank: primaryBank, lines: primary };
     }
-    return primary;
+    // Forced/detected bank empty — try the others before giving up.
+    for (const b of KNOWN_STATEMENT_BANKS) {
+      if (b === primaryBank) continue;
+      const lines = parseForBank(b);
+      if (lines.some(isActionableLine)) return { bank: b, lines };
+    }
+    return { bank: primaryBank, lines: primary };
   }
 
-  // Unknown: try Santander first (structured), then BBVA.
-  const santander = groupCardTaxLines(parseSantanderStatementText(text));
-  if (santander.some(isActionableLine)) {
-    return { bank: 'Santander', lines: santander };
+  // Unknown: try each bank until one yields actionable lines.
+  const collected: ParsedStatementLine[] = [];
+  for (const b of KNOWN_STATEMENT_BANKS) {
+    const lines = parseForBank(b);
+    if (lines.some(isActionableLine)) return { bank: b, lines };
+    collected.push(...lines);
   }
-  const bbva = groupCardTaxLines(parseBbvaStatementText(text));
-  if (bbva.some(isActionableLine)) {
-    return { bank: 'BBVA', lines: bbva };
-  }
-  return { bank: 'Unknown', lines: groupCardTaxLines([...santander, ...bbva]) };
+  return { bank: 'Unknown', lines: groupCardTaxLines(collected) };
 }
 
