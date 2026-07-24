@@ -396,13 +396,15 @@ export async function commitStatementImport(
           paymentMethodId: args.paymentMethodId,
           categoryId: decision.categoryId,
           store: storeName,
-          description: line.installment
-            ? `Importado · cuota ${line.installment.current}/${line.installment.total}`
-            : statementDiscount > 0
-              ? 'Importado del resumen (con bonificación)'
-              : currency === 'USD'
-                ? 'Importado del resumen (USD)'
-                : 'Importado del resumen',
+          description: line.description?.trim()
+            ? line.description.trim()
+            : line.installment
+              ? `Importado · cuota ${line.installment.current}/${line.installment.total}`
+              : statementDiscount > 0
+                ? 'Importado del resumen (con bonificación)'
+                : currency === 'USD'
+                  ? 'Importado del resumen (USD)'
+                  : 'Importado del resumen',
           purchaseDate,
           grossAmount: lineGross,
           installmentsCount,

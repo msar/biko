@@ -525,6 +525,9 @@ function StatementLineCard({
             {fmtDate(line.date)}
             {line.installment ? ` · Cuota ${line.installment.current} de ${line.installment.total}` : ''}
           </div>
+          {line.description?.trim() ? (
+            <pre className="statement-line-description hint">{line.description.trim()}</pre>
+          ) : null}
         </div>
         <div className="statement-amount">
           <strong>{fmtMoneyExact(line.amount, line.currency === 'USD' ? 'USD' : 'ARS')}</strong>

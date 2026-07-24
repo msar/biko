@@ -1,3 +1,5 @@
+import { formatMoneyExact } from './money';
+
 /** Normalized line from a credit-card statement PDF (client-parsed). */
 export type ParsedStatementLine = {
   date: string; // YYYY-MM-DD
@@ -7,6 +9,8 @@ export type ParsedStatementLine = {
   installment?: { current: number; total: number };
   /** Bank bonificación / reintegro applied to this consumo (positive number). */
   discountAmount?: number;
+  /** Optional detail (e.g. multi-line tax breakdown for Impuestos tarjeta). */
+  description?: string;
   raw: string;
   fingerprint: string;
   /** True for payments, totals, Plan V, bonifications, etc. */
@@ -834,6 +838,68 @@ function dedupeByFingerprint(lines: ParsedStatementLine[]): ParsedStatementLine[
   return out;
 }
 
+/** Impuesto de sellos / IIBB — grouped into one "Impuestos tarjeta" expense. */
+export function isCardTaxLine(line: Pick<ParsedStatementLine, 'store' | 'raw'>): boolean {
+  const text = `${line.store} ${line.raw}`;
+  return /impuesto\s+de\s+sellos/i.test(text) || /\biibb\b/i.test(text);
+}
+
+/**
+ * Collapse sellos + IIBB lines into a single "Impuestos tarjeta" row.
+ * Amount = sum; description lists each original line. Leaves IVA / DB.RG alone.
+ */
+export function groupCardTaxLines(lines: ParsedStatementLine[]): ParsedStatementLine[] {
+  const taxIndices: number[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    if (line.suggestedSkip) continue;
+    if (line.currency !== 'ARS') continue;
+    if (line.amount <= 0) continue;
+    if (!isCardTaxLine(line)) continue;
+    taxIndices.push(i);
+  }
+  if (taxIndices.length === 0) return lines;
+
+  const taxLines = taxIndices.map((i) => lines[i]!);
+  const amount = round2(taxLines.reduce((sum, l) => sum + l.amount, 0));
+  const date = taxLines.map((l) => l.date).sort()[0]!;
+  const description = taxLines
+    .map((l) => `${l.store}: ${formatMoneyExact(l.amount, 'ARS')}`)
+    .join('\n');
+  const store = 'Impuestos tarjeta';
+  const fingerprint = fingerprintStatementLine({
+    date,
+    store,
+    amount,
+    currency: 'ARS',
+  });
+  const grouped: ParsedStatementLine = {
+    date,
+    store,
+    amount,
+    currency: 'ARS',
+    description,
+    raw: taxLines.map((l) => l.raw).join('\n'),
+    fingerprint,
+    suggestedSkip: false,
+  };
+
+  const taxSet = new Set(taxIndices);
+  const out: ParsedStatementLine[] = [];
+  let inserted = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (taxSet.has(i)) {
+      if (!inserted) {
+        out.push(grouped);
+        inserted = true;
+      }
+      continue;
+    }
+    out.push(lines[i]!);
+  }
+  return out;
+}
+
 export function parseStatementText(
   text: string,
   bank?: StatementBankSource,
@@ -842,7 +908,9 @@ export function parseStatementText(
   const detected = forced ?? detectStatementBank(text);
 
   const tryBank = (b: 'Santander' | 'BBVA') => {
-    const lines = b === 'BBVA' ? parseBbvaStatementText(text) : parseSantanderStatementText(text);
+    const lines = groupCardTaxLines(
+      b === 'BBVA' ? parseBbvaStatementText(text) : parseSantanderStatementText(text),
+    );
     return { bank: b as StatementBankSource, lines };
   };
 
@@ -860,14 +928,14 @@ export function parseStatementText(
   }
 
   // Unknown: try Santander first (structured), then BBVA.
-  const santander = parseSantanderStatementText(text);
+  const santander = groupCardTaxLines(parseSantanderStatementText(text));
   if (santander.some(isActionableLine)) {
     return { bank: 'Santander', lines: santander };
   }
-  const bbva = parseBbvaStatementText(text);
+  const bbva = groupCardTaxLines(parseBbvaStatementText(text));
   if (bbva.some(isActionableLine)) {
     return { bank: 'BBVA', lines: bbva };
   }
-  return { bank: 'Unknown', lines: [...santander, ...bbva] };
+  return { bank: 'Unknown', lines: groupCardTaxLines([...santander, ...bbva]) };
 }
 

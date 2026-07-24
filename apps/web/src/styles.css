@@ -1618,6 +1618,14 @@ code {
   margin-right: 12px;
 }
 
+.statement-line-description {
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.8rem;
+  white-space: pre-line;
+  line-height: 1.35;
+}
+
 .statement-store-edit label {
   display: flex;
   flex-direction: column;

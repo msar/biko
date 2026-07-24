@@ -13,6 +13,7 @@ const parsedLineSchema = z.object({
   amount: z.number().positive(),
   currency: z.enum(['ARS', 'USD']),
   discountAmount: z.number().nonnegative().optional(),
+  description: z.string().max(4000).optional(),
   installment: z
     .object({
       current: z.number().int().min(1).max(36),

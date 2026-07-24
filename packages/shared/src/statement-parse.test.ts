@@ -8,7 +8,9 @@ import {
   cleanBbvaStoreName,
   detectStatementBank,
   fingerprintStatementLine,
+  groupCardTaxLines,
   isActionableLine,
+  isCardTaxLine,
   parseArgentineAmount,
   parseBbvaDateToken,
   parseBbvaStatementText,
@@ -16,6 +18,7 @@ import {
   parseStatementDateParts,
   parseStatementText,
 } from './statement-parse';
+import { formatMoneyExact } from './money';
 import {
   amountsClose,
   findStatementMatchCandidates,
@@ -104,6 +107,56 @@ describe('parseSantanderStatementText', () => {
     expect(parseStatementText(SANTANDER_FIXTURE, 'Santander').lines.filter(isActionableLine).length).toBeGreaterThan(
       5,
     );
+  });
+});
+
+describe('groupCardTaxLines', () => {
+  const TAX_SNIPPET = `
+Santander Río
+VISA
+Cierre Ant.: 28 May 26 Vto. Ant.: 05 Jun 26
+26 Mayo 06 000762 * EQUUS C.02/06 46.650,00
+26 Julio 02 IMPUESTO DE SELLOS $ 19.084,39
+02 IMPUESTO DE SELLOS P $ 297,80
+02 IIBB PERCEP-CORD 3,00%( 6596,27) 197,88
+02 IIBB PERCEP-CORD 3,00%( 7013,19) 210,39
+26 Julio 02 IIBB PERCEP-CORD 3,00%( 6343,14) 190,29
+02 IVA RG 4240 21%( 6596,27) 1.385,21
+02 IVA RG 4240 21%( 7013,19) 1.472,76
+02 DB.RG 5617 30% ( 19952,60 ) 5.985,78
+`;
+
+  it('groups sellos and IIBB into Impuestos tarjeta via parseStatementText', () => {
+    const { lines } = parseStatementText(TAX_SNIPPET, 'Santander');
+    const active = lines.filter(isActionableLine);
+
+    const impuestos = active.find((l) => l.store === 'Impuestos tarjeta');
+    expect(impuestos).toBeTruthy();
+    expect(impuestos?.amount).toBe(19980.75);
+    expect(impuestos?.description).toContain(`IMPUESTO DE SELLOS $: ${formatMoneyExact(19084.39, 'ARS')}`);
+    expect(impuestos?.description).toContain(`IMPUESTO DE SELLOS P $: ${formatMoneyExact(297.8, 'ARS')}`);
+    expect(impuestos?.description).toContain(
+      `IIBB PERCEP-CORD 3,00%( 6596,27): ${formatMoneyExact(197.88, 'ARS')}`,
+    );
+    expect(impuestos?.description).toContain(
+      `IIBB PERCEP-CORD 3,00%( 7013,19): ${formatMoneyExact(210.39, 'ARS')}`,
+    );
+    expect(impuestos?.description).toContain(
+      `IIBB PERCEP-CORD 3,00%( 6343,14): ${formatMoneyExact(190.29, 'ARS')}`,
+    );
+
+    expect(active.some((l) => isCardTaxLine(l) && l.store !== 'Impuestos tarjeta')).toBe(false);
+    expect(active.some((l) => /IVA RG/i.test(l.store))).toBe(false);
+    const dbRg = active.find((l) => /DB\.?\s*RG/i.test(l.store));
+    expect(dbRg?.amount).toBe(5985.78);
+  });
+
+  it('leaves non-tax lines untouched when grouping', () => {
+    const ungrouped = parseSantanderStatementText(TAX_SNIPPET);
+    const grouped = groupCardTaxLines(ungrouped);
+    expect(grouped.filter((l) => /EQUUS/i.test(l.store))).toHaveLength(1);
+    expect(grouped.filter((l) => l.store === 'Impuestos tarjeta')).toHaveLength(1);
+    expect(ungrouped.filter(isCardTaxLine).length).toBeGreaterThanOrEqual(5);
   });
 });
 
