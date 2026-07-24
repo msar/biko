@@ -57,6 +57,22 @@ export const fmtARS = new Intl.NumberFormat('es-AR', {
 
 export const fmtARSExact = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
 
+export const fmtUSD = new Intl.NumberFormat('es-AR', {
+  style: 'currency',
+  currency: 'USD',
+});
+
+export function fmtMoney(amount: number, currency: 'ARS' | 'USD' = 'ARS'): string {
+  return currency === 'USD' ? fmtUSD.format(amount) : fmtARS.format(amount);
+}
+
+export function fmtMoneyExact(amount: number, currency: 'ARS' | 'USD' = 'ARS'): string {
+  return currency === 'USD' ? fmtUSD.format(amount) : fmtARSExact.format(amount);
+}
+
+export function toArsDisplay(amount: number, exchangeRateToArs = 1): number {
+  return Math.round(amount * exchangeRateToArs * 100) / 100;
+}
 export function fmtDate(date: string | Date): string {
   return new Date(date).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
 }

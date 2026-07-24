@@ -1,6 +1,8 @@
 import {
+  detectSubscriptionMerchant,
   findStatementMatchCandidates,
   findStatementPickerCandidates,
+  startOfUtcDay,
   type ParsedStatementLine,
   type StatementMatchablePurchase,
 } from '@biko/shared';
@@ -10,8 +12,103 @@ import {
   ExpenseValidationError,
   purchaseInclude,
 } from './expense-purchase.js';
+import { ExchangeRateError, getUsdToArsRate } from './exchange-rate.js';
+import { createRecurringPayment } from './recurring.js';
 
 type Db = PrismaClient | Prisma.TransactionClient;
+
+async function linkUsdSubscriptionRecurring(
+  tx: Prisma.TransactionClient,
+  args: {
+    householdId: string;
+    userId: string;
+    paymentMethodId: string;
+    categoryId: string;
+    scope: 'HOUSEHOLD' | 'PERSONAL';
+    store: string;
+    amount: number;
+    purchaseDate: Date;
+    purchaseId: string;
+    exchangeRateToArs: number;
+  },
+) {
+  const sub = detectSubscriptionMerchant(args.store);
+  if (!sub) return;
+
+  const dueDay = Math.min(28, Math.max(1, args.purchaseDate.getUTCDate()));
+  let recurring = await tx.recurringPayment.findFirst({
+    where: {
+      householdId: args.householdId,
+      paymentMethodId: args.paymentMethodId,
+      active: true,
+      currency: 'USD',
+      name: sub.name,
+    },
+  });
+
+  if (!recurring) {
+    const suscripciones = await tx.category.findFirst({
+      where: {
+        name: { equals: 'Suscripciones', mode: 'insensitive' },
+        OR: [{ householdId: null }, { householdId: args.householdId }],
+      },
+    });
+    recurring = await createRecurringPayment(tx, args.householdId, args.userId, {
+      name: sub.name,
+      categoryId: suscripciones?.id ?? args.categoryId,
+      paymentMethodId: args.paymentMethodId,
+      scope: args.scope,
+      dueDay,
+      amountType: 'FIXED',
+      amount: args.amount,
+      currency: 'USD',
+      exchangeRateToArs: args.exchangeRateToArs,
+    });
+  } else {
+    await tx.recurringPayment.update({
+      where: { id: recurring.id },
+      data: {
+        amount: args.amount,
+        exchangeRateToArs: args.exchangeRateToArs,
+      },
+    });
+  }
+
+  const dueDate = startOfUtcDay(
+    new Date(Date.UTC(args.purchaseDate.getUTCFullYear(), args.purchaseDate.getUTCMonth(), dueDay)),
+  );
+
+  const existingOcc = await tx.recurringOccurrence.findUnique({
+    where: {
+      recurringPaymentId_dueDate: {
+        recurringPaymentId: recurring.id,
+        dueDate,
+      },
+    },
+  });
+
+  if (existingOcc) {
+    if (existingOcc.purchaseId && existingOcc.purchaseId !== args.purchaseId) return;
+    await tx.recurringOccurrence.update({
+      where: { id: existingOcc.id },
+      data: {
+        status: 'COMPLETED',
+        amount: args.amount,
+        purchaseId: args.purchaseId,
+      },
+    });
+  } else {
+    await tx.recurringOccurrence.create({
+      data: {
+        recurringPaymentId: recurring.id,
+        dueDate,
+        status: 'COMPLETED',
+        amount: args.amount,
+        purchaseId: args.purchaseId,
+      },
+    });
+  }
+}
 
 function toMatchable(p: {
   id: string;
@@ -271,6 +368,26 @@ export async function commitStatementImport(
       const statementDiscount = round2(line.discountAmount ?? 0);
       const purchaseDate = new Date(`${line.date}T12:00:00.000Z`);
 
+      let currency: 'ARS' | 'USD' = line.currency === 'USD' ? 'USD' : 'ARS';
+      let exchangeRateToArs = 1;
+      let exchangeRateSource: string | null = null;
+      let exchangeRateDate: Date | null = null;
+      if (currency === 'USD') {
+        try {
+          const fx = await getUsdToArsRate(tx, line.date);
+          exchangeRateToArs = fx.rate;
+          exchangeRateSource = fx.source;
+          exchangeRateDate = fx.date;
+        } catch (err) {
+          const msg =
+            err instanceof ExchangeRateError
+              ? err.message
+              : 'No se pudo obtener el tipo de cambio USD→ARS';
+          throw new ExpenseValidationError(msg);
+        }
+      }
+
+      const storeName = line.store;
       const created = await createPurchaseWithAllocations(
         tx,
         args.householdId,
@@ -278,12 +395,14 @@ export async function commitStatementImport(
         {
           paymentMethodId: args.paymentMethodId,
           categoryId: decision.categoryId,
-          store: line.store,
+          store: storeName,
           description: line.installment
             ? `Importado · cuota ${line.installment.current}/${line.installment.total}`
             : statementDiscount > 0
               ? 'Importado del resumen (con bonificación)'
-              : 'Importado del resumen',
+              : currency === 'USD'
+                ? 'Importado del resumen (USD)'
+                : 'Importado del resumen',
           purchaseDate,
           grossAmount: lineGross,
           installmentsCount,
@@ -302,6 +421,10 @@ export async function commitStatementImport(
           scope: decision.scope,
           splitMode: decision.scope === 'PERSONAL' ? 'EQUAL' : (decision.splitMode ?? 'EQUAL'),
           assignToUserId: decision.assignToUserId,
+          currency,
+          exchangeRateToArs,
+          exchangeRateSource,
+          exchangeRateDate,
         },
       );
 
@@ -317,6 +440,21 @@ export async function commitStatementImport(
         line.amount,
         true,
       );
+
+      if (currency === 'USD') {
+        await linkUsdSubscriptionRecurring(tx, {
+          householdId: args.householdId,
+          userId: args.userId,
+          paymentMethodId: args.paymentMethodId,
+          categoryId: decision.categoryId,
+          scope: decision.scope,
+          store: storeName,
+          amount: line.amount,
+          purchaseDate,
+          purchaseId: created.id,
+          exchangeRateToArs,
+        });
+      }
 
       await tx.statementImportLine.create({
         data: {

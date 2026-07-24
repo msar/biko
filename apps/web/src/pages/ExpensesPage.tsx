@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { api, fmtARS, fmtDate } from '../lib/api';
+import { api, fmtARS, fmtDate, fmtMoneyExact, toArsDisplay } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { getOutbox, onOutboxChange, OutboxExpense } from '../lib/outbox';
 import type { Purchase } from '../lib/types';
@@ -136,9 +136,16 @@ export default function ExpensesPage() {
             </div>
             <div className="expense-amounts">
               {Number(exp.discountAmount) > 0 && (
-                <small className="strike">{fmtARS.format(Number(exp.grossAmount))}</small>
+                <small className="strike">
+                  {fmtMoneyExact(Number(exp.grossAmount), exp.currency === 'USD' ? 'USD' : 'ARS')}
+                </small>
               )}
-              <span>{fmtARS.format(Number(exp.netAmount))}</span>
+              <span>{fmtMoneyExact(Number(exp.netAmount), exp.currency === 'USD' ? 'USD' : 'ARS')}</span>
+              {exp.currency === 'USD' && (
+                <small className="hint">
+                  equiv. {fmtARS.format(toArsDisplay(Number(exp.netAmount), Number(exp.exchangeRateToArs ?? 1)))}
+                </small>
+              )}
             </div>
             <button
               type="button"

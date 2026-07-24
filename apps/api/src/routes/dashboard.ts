@@ -27,6 +27,16 @@ const upcomingQuerySchema = z.object({
   scope: scopeSchema,
 });
 
+function rateToArs(value: unknown): number {
+  if (value == null) return 1;
+  if (typeof value === 'object' && value !== null && 'toNumber' in value) {
+    const n = (value as { toNumber(): number }).toNumber();
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  }
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
 /** Devuelve los últimos `count` meses en formato `YYYY-MM`, del más viejo al más reciente. */
 function recentMonths(count: number): string[] {
   const now = new Date();
@@ -129,8 +139,6 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       orderBy: { dueDate: 'asc' },
     });
 
-    const total = installments.reduce((sum, inst) => sum + inst.amount.toNumber(), 0);
-
     const byCategory = new Map<
       string,
       { categoryId: string; name: string; icon: string | null; color: string | null; total: number }
@@ -145,8 +153,9 @@ export default async function dashboardRoutes(app: FastifyInstance) {
     const includeSettle = dashboardScope === 'household';
 
     for (const inst of installments) {
-      const amount = inst.amount.toNumber();
       const purchase = inst.purchase;
+      const rate = rateToArs(purchase.exchangeRateToArs);
+      const amount = inst.amount.toNumber() * rate;
       const netAmount = purchase.netAmount.toNumber();
       const isHousehold = purchase.scope === 'HOUSEHOLD';
 
@@ -174,7 +183,12 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       }
 
       for (const allocation of purchase.allocations) {
-        const share = allocationShareForInstallment(amount, allocation.amount.toNumber(), netAmount);
+        const shareNative = allocationShareForInstallment(
+          inst.amount.toNumber(),
+          allocation.amount.toNumber(),
+          netAmount,
+        );
+        const share = shareNative * rate;
         if (share <= 0) continue;
         const userEntry = byUser.get(allocation.userId) ?? {
           userId: allocation.userId,
@@ -190,6 +204,11 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         }
       }
     }
+
+    const total = installments.reduce((sum, inst) => {
+      const rate = rateToArs(inst.purchase.exchangeRateToArs);
+      return sum + inst.amount.toNumber() * rate;
+    }, 0);
 
     const round2 = (v: number) => Math.round(v * 100) / 100;
     const perUser = [...memberNames.entries()].map(([userId, name]) => {
@@ -320,12 +339,19 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       const shareByUser = new Map<string, number>();
 
       for (const purchase of purchases) {
+        const rate = rateToArs(purchase.exchangeRateToArs);
         const payer = resolvePurchasePayer(purchase);
         memberNames.set(payer.id, payer.name);
-        paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + purchase.netAmount.toNumber());
+        paidByUser.set(
+          payer.id,
+          (paidByUser.get(payer.id) ?? 0) + purchase.netAmount.toNumber() * rate,
+        );
         for (const allocation of purchase.allocations) {
           memberNames.set(allocation.userId, allocation.user.name);
-          shareByUser.set(allocation.userId, (shareByUser.get(allocation.userId) ?? 0) + allocation.amount.toNumber());
+          shareByUser.set(
+            allocation.userId,
+            (shareByUser.get(allocation.userId) ?? 0) + allocation.amount.toNumber() * rate,
+          );
         }
       }
 

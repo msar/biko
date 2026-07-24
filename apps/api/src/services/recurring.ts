@@ -47,6 +47,8 @@ export interface CreateRecurringInput {
   amountType: RecurringAmountType;
   amount?: number | null;
   reminderDaysBefore?: number;
+  currency?: 'ARS' | 'USD';
+  exchangeRateToArs?: number | null;
 }
 
 function assertDueDay(dueDay: number) {
@@ -110,6 +112,8 @@ export async function createRecurringPayment(
       dueDay: input.dueDay,
       amountType: input.amountType,
       amount,
+      currency: input.currency ?? 'ARS',
+      exchangeRateToArs: input.exchangeRateToArs ?? null,
       reminderDaysBefore: input.reminderDaysBefore ?? 3,
       nextDueDate,
       amountHistory:
@@ -285,6 +289,10 @@ async function autoCreateFixedPurchase(
     scope: rp.scope,
     splitMode: rp.scope === 'PERSONAL' ? 'ASSIGN' : 'EQUAL',
     assignToUserId: rp.scope === 'PERSONAL' ? rp.createdByUserId : undefined,
+    currency: (rp.currency === 'USD' ? 'USD' : 'ARS') as 'ARS' | 'USD',
+    exchangeRateToArs: rp.exchangeRateToArs?.toNumber() ?? 1,
+    exchangeRateSource: rp.currency === 'USD' ? 'recurring-snapshot' : null,
+    exchangeRateDate: rp.currency === 'USD' ? occurrence.dueDate : null,
   });
 
   return db.recurringOccurrence.update({

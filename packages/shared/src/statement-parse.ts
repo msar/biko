@@ -115,7 +115,7 @@ export function bankFromEntityName(name: string | null | undefined): StatementBa
 
 export function isActionableLine(line: ParsedStatementLine): boolean {
   if (line.suggestedSkip) return false;
-  if (line.currency !== 'ARS') return false;
+  if (line.currency !== 'ARS' && line.currency !== 'USD') return false;
   if (line.amount <= 0) return false;
   if (shouldDropCompletely(line.store) || shouldDropCompletely(line.raw)) return false;
   const key = normalizeStoreKey(line.store);
@@ -388,7 +388,8 @@ function pushSantanderLine(args: {
   if (!store) return;
 
   const currency: 'ARS' | 'USD' = /\bUSD\b/i.test(combined) ? 'USD' : 'ARS';
-  const suggestedSkip = shouldSkipLine(args.raw, amount) || currency === 'USD';
+  // USD consumos (Spotify, YouTube, …) are importable; payments/totals still skip via shouldSkipLine.
+  const suggestedSkip = shouldSkipLine(args.raw, amount);
   if (amount == null) return;
 
   const absAmount = Math.abs(amount);

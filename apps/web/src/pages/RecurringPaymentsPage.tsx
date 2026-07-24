@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, fmtARS, fmtDate } from '../lib/api';
+import { api, fmtARS, fmtDate, fmtMoneyExact, toArsDisplay } from '../lib/api';
 import type {
   Category,
   ExpenseScope,
@@ -105,7 +105,11 @@ export default function RecurringPaymentsPage() {
                 <small>
                   {fmtDate(occ.dueDate)}
                   {occ.recurringPayment.amountType === 'FIXED' && occ.amount
-                    ? ` · ${fmtARS.format(Number(occ.amount))}`
+                    ? ` · ${fmtMoneyExact(Number(occ.amount), occ.recurringPayment.currency === 'USD' ? 'USD' : 'ARS')}${
+                        occ.recurringPayment.currency === 'USD'
+                          ? ` (equiv. ${fmtARS.format(toArsDisplay(Number(occ.amount), Number(occ.recurringPayment.exchangeRateToArs ?? 1)))})`
+                          : ''
+                      }`
                     : ' · monto variable'}
                 </small>
               </div>
@@ -196,7 +200,11 @@ export default function RecurringPaymentsPage() {
               <small>
                 Día {item.dueDay}
                 {item.amountType === 'FIXED' && item.amount
-                  ? ` · ${fmtARS.format(Number(item.amount))} fijo`
+                  ? ` · ${fmtMoneyExact(Number(item.amount), item.currency === 'USD' ? 'USD' : 'ARS')} fijo${
+                      item.currency === 'USD'
+                        ? ` · equiv. ${fmtARS.format(toArsDisplay(Number(item.amount), Number(item.exchangeRateToArs ?? 1)))}`
+                        : ''
+                    }`
                   : ' · variable'}
                 {item.scope === 'PERSONAL' ? ' · Personal' : ' · Hogar'}
                 {' · próximo '}

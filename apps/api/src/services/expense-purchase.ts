@@ -55,6 +55,10 @@ export interface ExpenseInput {
   splitMode?: SplitModeInput;
   assignToUserId?: string;
   splitValues?: { userId: string; value: number }[];
+  currency?: 'ARS' | 'USD';
+  exchangeRateToArs?: number;
+  exchangeRateSource?: string | null;
+  exchangeRateDate?: Date | null;
 }
 
 interface ResolvedDiscount {
@@ -353,6 +357,10 @@ export async function createPurchaseWithAllocations(
       discountLabelApplied: discount.discountLabelApplied,
       discountAmount: discount.discountAmount,
       netAmount: discount.netAmount,
+      currency: body.currency ?? 'ARS',
+      exchangeRateToArs: body.exchangeRateToArs ?? 1,
+      exchangeRateSource: body.exchangeRateSource ?? null,
+      exchangeRateDate: body.exchangeRateDate ?? null,
       installmentsCount: isImmediate ? 1 : body.installmentsCount,
       scope: body.scope,
       splitMode,

@@ -83,6 +83,21 @@ describe('parseSantanderStatementText', () => {
     expect(lines.some((l) => l.suggestedSkip && /SU PAGO/i.test(l.raw))).toBe(true);
   });
 
+  it('parses USD subscriptions as actionable and skips SU PAGO EN USD', () => {
+    const lines = parseSantanderStatementText(SANTANDER_FIXTURE);
+    const active = lines.filter(isActionableLine);
+
+    const spotify = active.find((l) => /spotify/i.test(l.store));
+    expect(spotify).toMatchObject({ currency: 'USD', amount: 3.94 });
+    expect(spotify?.suggestedSkip).toBe(false);
+
+    const youtube = active.find((l) => /youtube/i.test(l.store));
+    expect(youtube).toMatchObject({ currency: 'USD', amount: 4.71 });
+
+    expect(lines.some((l) => /SU PAGO EN USD/i.test(l.raw) && l.suggestedSkip)).toBe(true);
+    expect(active.some((l) => /SU PAGO EN USD/i.test(l.raw))).toBe(false);
+  });
+
   it('detects Santander and respects hint', () => {
     expect(detectStatementBank(SANTANDER_FIXTURE)).toBe('Santander');
     expect(parseStatementText(SANTANDER_FIXTURE, 'Santander').bank).toBe('Santander');

@@ -2,7 +2,7 @@ import { isActionableLine, type ParsedStatementLine, type StatementBankSource } 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api, fmtARSExact, fmtDate } from '../lib/api';
+import { api, fmtARSExact, fmtDate, fmtMoneyExact, toArsDisplay } from '../lib/api';
 import { groupMethodsByEntity, paymentMethodDisplayName } from '../lib/payment-method-catalog';
 import {
   guessPaymentMethodId,
@@ -89,6 +89,7 @@ export default function ImportStatementPage() {
   const [parsing, setParsing] = useState(false);
   const [showSkipped, setShowSkipped] = useState(false);
   const [doneSummary, setDoneSummary] = useState<{ processed: number; skipped: number } | null>(null);
+  const [usdArsRate, setUsdArsRate] = useState<number | null>(null);
 
   const { data: methods } = useQuery({
     queryKey: ['payment-methods'],
@@ -152,6 +153,18 @@ export default function ImportStatementPage() {
         body: JSON.stringify({ paymentMethodId, lines: parsed.lines }),
       });
       setMatchResults(match.results);
+
+      const hasUsd = parsed.lines.some((l) => l.currency === 'USD' && isActionableLine(l));
+      if (hasUsd) {
+        try {
+          const fx = await api<{ rate: number }>('/exchange-rates/usd-ars');
+          setUsdArsRate(fx.rate);
+        } catch {
+          setUsdArsRate(null);
+        }
+      } else {
+        setUsdArsRate(null);
+      }
 
       const initialDecisions: Record<string, LineDecision> = {};
       const initialStores: Record<string, string> = {};
@@ -377,6 +390,7 @@ export default function ImportStatementPage() {
                 decision={d}
                 storeName={storeOverrides[r.line.fingerprint] ?? r.line.store}
                 categories={categories ?? []}
+                usdArsRate={usdArsRate}
                 onChange={(next) => setDecision(r.line.fingerprint, next)}
                 onStoreChange={(name) =>
                   setStoreOverrides((prev) => ({ ...prev, [r.line.fingerprint]: name }))
@@ -455,6 +469,7 @@ function StatementLineCard({
   decision,
   storeName,
   categories,
+  usdArsRate,
   onChange,
   onStoreChange,
 }: {
@@ -462,6 +477,7 @@ function StatementLineCard({
   decision: LineDecision | undefined;
   storeName: string;
   categories: Category[];
+  usdArsRate: number | null;
   onChange: (d: LineDecision) => void;
   onStoreChange: (name: string) => void;
 }) {
@@ -511,11 +527,14 @@ function StatementLineCard({
           </div>
         </div>
         <div className="statement-amount">
-          <strong>{fmtARSExact.format(line.amount)}</strong>
+          <strong>{fmtMoneyExact(line.amount, line.currency === 'USD' ? 'USD' : 'ARS')}</strong>
+          {line.currency === 'USD' && usdArsRate != null && (
+            <small className="hint">equiv. {fmtARSExact.format(toArsDisplay(line.amount, usdArsRate))}</small>
+          )}
           {line.discountAmount != null && line.discountAmount > 0 && (
             <small className="hint">
-              −{fmtARSExact.format(line.discountAmount)} bonif →{' '}
-              {fmtARSExact.format(line.amount - line.discountAmount)}
+              −{fmtMoneyExact(line.discountAmount, line.currency === 'USD' ? 'USD' : 'ARS')} bonif →{' '}
+              {fmtMoneyExact(line.amount - line.discountAmount, line.currency === 'USD' ? 'USD' : 'ARS')}
             </small>
           )}
         </div>

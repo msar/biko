@@ -160,6 +160,10 @@ export interface Purchase {
   discountCapApplied: string | null;
   discountLabelApplied: string | null;
   netAmount: string;
+  currency?: 'ARS' | 'USD';
+  exchangeRateToArs?: string;
+  exchangeRateSource?: string | null;
+  exchangeRateDate?: string | null;
   installmentsCount: number;
   scope: ExpenseScope;
   splitMode: SplitMode;
@@ -315,6 +319,8 @@ export interface RecurringPayment {
   dueDay: number;
   amountType: RecurringAmountType;
   amount: string | null;
+  currency?: 'ARS' | 'USD';
+  exchangeRateToArs?: string | null;
   reminderDaysBefore: number;
   active: boolean;
   nextDueDate: string;

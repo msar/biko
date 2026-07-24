@@ -14,6 +14,7 @@ import recurringRoutes from './routes/recurring.js';
 import notificationRoutes from './routes/notifications.js';
 import internalJobRoutes from './routes/internal-jobs.js';
 import statementImportRoutes from './routes/statement-imports.js';
+import exchangeRateRoutes from './routes/exchange-rates.js';
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -48,6 +49,7 @@ export async function buildApp() {
   await app.register(notificationRoutes);
   await app.register(internalJobRoutes);
   await app.register(statementImportRoutes);
+  await app.register(exchangeRateRoutes);
 
   return app;
 }
