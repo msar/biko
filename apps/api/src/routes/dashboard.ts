@@ -268,18 +268,23 @@ export default async function dashboardRoutes(app: FastifyInstance) {
             transfers,
           }
         : { perUser: [], transfers: [] },
-      installments: installments.map((i) => ({
-        id: i.id,
-        amount: i.amount.toNumber(),
-        dueDate: i.dueDate,
-        number: i.number,
-        totalInstallments: i.purchase.installmentsCount,
-        paid: i.paid,
-        store: i.purchase.store,
-        category: i.purchase.category.name,
-        userName: i.purchase.user.name,
-        scope: i.purchase.scope,
-      })),
+      installments: installments.map((i) => {
+        const rate = rateToArs(i.purchase.exchangeRateToArs);
+        return {
+          id: i.id,
+          purchaseId: i.purchaseId,
+          amount: round2(i.amount.toNumber() * rate),
+          dueDate: i.dueDate,
+          number: i.number,
+          totalInstallments: i.purchase.installmentsCount,
+          paid: i.paid,
+          store: i.purchase.store,
+          categoryId: i.purchase.categoryId,
+          category: i.purchase.category.name,
+          userName: i.purchase.user.name,
+          scope: i.purchase.scope,
+        };
+      }),
     };
   });
 

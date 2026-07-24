@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmtARS, fmtDate } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -38,6 +38,7 @@ export default function DashboardPage() {
   const [month, setMonth] = useState(currentMonth());
   const [scope, setScope] = useState<DashboardScope>('household');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard', 'monthly', month, scope],
@@ -57,6 +58,11 @@ export default function DashboardPage() {
   const maxGroup = Math.max(1, ...(data?.byGroup.map((g) => g.total) ?? []));
   const showSettle = scope === 'household';
 
+  useEffect(() => {
+    setExpandedGroups(new Set());
+    setExpandedCategories(new Set());
+  }, [month, scope]);
+
   const toggleGroup = (groupId: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
@@ -65,6 +71,18 @@ export default function DashboardPage() {
       return next;
     });
   };
+
+  const toggleCategory = (categoryId: string) => {
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(categoryId)) next.delete(categoryId);
+      else next.add(categoryId);
+      return next;
+    });
+  };
+
+  const expensesForCategory = (categoryId: string) =>
+    (data?.installments ?? []).filter((inst) => inst.categoryId === categoryId);
 
   return (
     <div className="page">
@@ -153,23 +171,62 @@ export default function DashboardPage() {
                 </button>
                 {open && (
                   <div className="group-categories">
-                    {group.categories.map((cat) => (
-                      <div key={cat.categoryId} className="bar-row bar-row-nested">
-                        <span className="bar-label">
-                          {cat.icon} {cat.name}
-                        </span>
-                        <div className="bar-track">
-                          <div
-                            className="bar-fill"
-                            style={{
-                              width: `${(cat.total / maxGroup) * 100}%`,
-                              background: cat.color ?? group.color,
-                            }}
-                          />
+                    {group.categories.map((cat) => {
+                      const catOpen = expandedCategories.has(cat.categoryId);
+                      const expenses = expensesForCategory(cat.categoryId);
+                      return (
+                        <div key={cat.categoryId} className="category-block">
+                          <button
+                            type="button"
+                            className="group-row bar-row-nested"
+                            onClick={() => toggleCategory(cat.categoryId)}
+                          >
+                            <span className="bar-label">
+                              <span className="group-chevron">{catOpen ? '▾' : '▸'}</span>
+                              {cat.icon} {cat.name}
+                            </span>
+                            <div className="bar-track">
+                              <div
+                                className="bar-fill"
+                                style={{
+                                  width: `${(cat.total / maxGroup) * 100}%`,
+                                  background: cat.color ?? group.color,
+                                }}
+                              />
+                            </div>
+                            <span className="bar-amount">{fmtARS.format(cat.total)}</span>
+                          </button>
+                          {catOpen && (
+                            <div className="category-expenses">
+                              {expenses.length === 0 ? (
+                                <p className="category-expenses-empty">Sin detalle disponible</p>
+                              ) : (
+                                expenses.map((inst) => (
+                                  <Link
+                                    key={inst.id}
+                                    to={`/gastos/${inst.purchaseId}/edit`}
+                                    className="category-expense-row"
+                                  >
+                                    <span>
+                                      <strong>{inst.store}</strong>
+                                      <small>
+                                        {' '}
+                                        {fmtDate(inst.dueDate)}
+                                        {inst.totalInstallments > 1
+                                          ? ` · cuota ${inst.number}/${inst.totalInstallments}`
+                                          : ''}
+                                        {` · ${inst.userName}`}
+                                      </small>
+                                    </span>
+                                    <strong>{fmtARS.format(inst.amount)}</strong>
+                                  </Link>
+                                ))
+                              )}
+                            </div>
+                          )}
                         </div>
-                        <span className="bar-amount">{fmtARS.format(cat.total)}</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

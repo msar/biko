@@ -210,6 +210,14 @@ body {
   padding: 0 0 8px 12px;
 }
 
+.category-block {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.category-block:last-child {
+  border-bottom: none;
+}
+
 .bar-row-nested {
   opacity: 0.9;
   font-size: 0.8rem;
@@ -217,6 +225,45 @@ body {
 
 .bar-row-nested .bar-label {
   padding-left: 4px;
+}
+
+.category-expenses {
+  padding: 0 0 8px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.category-expense-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  color: inherit;
+  text-decoration: none;
+  font-size: 0.8rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.category-expense-row:last-child {
+  border-bottom: none;
+}
+
+.category-expense-row small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.category-expense-row strong:last-child {
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.category-expenses-empty {
+  margin: 4px 0 8px;
+  font-size: 0.8rem;
+  color: var(--muted);
 }
 
 .pill-row {

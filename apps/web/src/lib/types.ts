@@ -321,12 +321,14 @@ export interface MonthlyDashboard {
   };
   installments: Array<{
     id: string;
+    purchaseId: string;
     amount: number;
     dueDate: string;
     number: number;
     totalInstallments: number;
     paid: boolean;
     store: string;
+    categoryId: string;
     category: string;
     userName: string;
     scope?: 'HOUSEHOLD' | 'PERSONAL';
