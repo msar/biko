@@ -370,7 +370,13 @@ export interface LongTermDashboard {
 
 export type RecurringAmountType = 'FIXED' | 'VARIABLE';
 export type RecurringOccurrenceStatus = 'PENDING' | 'COMPLETED' | 'SKIPPED';
-export type NotificationType = 'RECURRING_REMINDER' | 'RECURRING_DUE' | 'RECURRING_AUTO_CREATED';
+export type NotificationType =
+  | 'RECURRING_REMINDER'
+  | 'RECURRING_DUE'
+  | 'RECURRING_AUTO_CREATED'
+  | 'EXPENSE_CREATED'
+  | 'EXPENSE_UPDATED'
+  | 'EXPENSE_DELETED';
 
 export interface RecurringPayment {
   id: string;

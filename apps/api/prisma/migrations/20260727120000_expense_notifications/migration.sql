@@ -1,0 +1,4 @@
+-- AlterEnum
+ALTER TYPE "NotificationType" ADD VALUE 'EXPENSE_CREATED';
+ALTER TYPE "NotificationType" ADD VALUE 'EXPENSE_UPDATED';
+ALTER TYPE "NotificationType" ADD VALUE 'EXPENSE_DELETED';

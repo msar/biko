@@ -352,13 +352,7 @@ export async function generateDueOccurrences(
           const completed = await autoCreateFixedPurchase(tx, occurrence.id);
           if (completed.status === 'COMPLETED') {
             autoCompleted++;
-            const recipients = await audienceUserIds(
-              tx,
-              template.householdId,
-              template.scope,
-              template.createdByUserId,
-            );
-            await notifyUsers(tx, recipients, {
+            await notifyUsers(tx, [template.createdByUserId], {
               householdId: template.householdId,
               type: 'RECURRING_AUTO_CREATED',
               title: `${template.name} registrado`,

@@ -8,6 +8,7 @@ import {
   rollbackPurchaseCapUsage,
   updatePurchaseWithAllocations,
 } from '../services/expense-purchase.js';
+import { notifyExpensePartners } from '../services/expense-notifications.js';
 
 const manualDiscountSchema = z.object({
   label: z.string().max(120).nullish(),
@@ -227,6 +228,15 @@ export default async function expenseRoutes(app: FastifyInstance) {
         entityId: purchase.paymentMethod.definition.entityId,
       });
       await tx.purchase.delete({ where: { id } });
+      await notifyExpensePartners(tx, {
+        householdId,
+        actorUserId: userId,
+        kind: 'DELETED',
+        scopes: [purchase.scope],
+        purchaseId: purchase.id,
+        store: purchase.store,
+        description: purchase.description,
+      });
     });
     return reply.code(204).send();
   });

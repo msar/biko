@@ -8,6 +8,7 @@ import {
   yearMonthOf,
 } from './promotion-suggestion.js';
 import { ensureFavoriteForPromotionId } from './promo-favorites.js';
+import { notifyExpensePartners } from './expense-notifications.js';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -398,6 +399,16 @@ export async function createPurchaseWithAllocations(
     await ensureFavoriteForPromotionId(tx, householdId, discount.promotionId);
   }
 
+  await notifyExpensePartners(tx, {
+    householdId,
+    actorUserId: userId,
+    kind: 'CREATED',
+    scopes: [created.scope],
+    purchaseId: created.id,
+    store: created.store,
+    description: created.description,
+  });
+
   return created;
 }
 
@@ -509,6 +520,16 @@ export async function updatePurchaseWithAllocations(
   if (discount.promotionId) {
     await ensureFavoriteForPromotionId(tx, householdId, discount.promotionId);
   }
+
+  await notifyExpensePartners(tx, {
+    householdId,
+    actorUserId: userId,
+    kind: 'UPDATED',
+    scopes: [existing.scope, updated.scope],
+    purchaseId: updated.id,
+    store: updated.store,
+    description: updated.description,
+  });
 
   return updated;
 }
