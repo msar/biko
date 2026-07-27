@@ -17,6 +17,8 @@ import ImportStatementPage from './pages/ImportStatementPage';
 import DebtsPage from './pages/DebtsPage';
 import AppHeader from './components/AppHeader';
 import BrandMark from './components/BrandLogo';
+import InstallAppBanner from './components/InstallAppBanner';
+import PushEnableBanner from './components/PushEnableBanner';
 
 function OnlineBanner() {
   const [online, setOnline] = useState(navigator.onLine);
@@ -71,6 +73,8 @@ export default function App() {
   return (
     <div className="app">
       <OnlineBanner />
+      <InstallAppBanner />
+      <PushEnableBanner />
       {!hideNav && <AppHeader />}
       <main className="content">
         <Routes>

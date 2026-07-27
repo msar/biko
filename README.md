@@ -23,7 +23,9 @@ docs/             Brief del proyecto
 - **Medios de pago estandarizados**: catálogo global seedeado (Santander Visa, Santander Amex, MODO, …). Nada de texto libre tipo "Visa Sant".
 - **Offline**: la PWA se instala desde el navegador, abre sin conexión con los datos cacheados (IndexedDB) y los gastos cargados offline se encolan y sincronizan al volver la red (idempotente vía `clientId`).
 - **Recurrentes**: luz, gas, gym y similares (monto fijo o variable). Los fijos generan el gasto al vencer; los variables quedan pendientes hasta que ingresás el monto. Cambiar un monto fijo aplica *desde ahora* (historial aparte).
-- **Notificaciones**: bandeja in-app + Web Push (PWA). Tipos extensibles (`RECURRING_*` hoy; mismo pipeline para futuros avisos).
+- **Notificaciones**: bandeja in-app + Web Push (PWA). Tipos extensibles (`RECURRING_*`, `EXPENSE_*`; mismo pipeline para futuros avisos).
+  - **iPhone**: Web Push requiere **iOS 16.4+** y que Biko esté **instalada en la pantalla de inicio** (Safari → Compartir → Agregar a pantalla de inicio). Después abrí la app desde el ícono y en Ajustes → **Activar alertas**. En la pestaña de Safari las push no están disponibles.
+  - **Android / desktop**: el banner o Ajustes → **Instalar Biko** (Chrome/Edge) o el menú del navegador.
 - **Auth**: email/password + JWT. El modelo `User` ya tiene `authProvider`/`externalId` para migrar a Clerk sin migración de datos.
 
 ## Desarrollo local

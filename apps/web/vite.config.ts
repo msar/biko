@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['logo.png', 'favicon.png', 'pwa-192.png', 'pwa-512.png'],
+      includeAssets: ['logo.png', 'favicon.png', 'apple-touch-icon.png', 'pwa-192.png', 'pwa-512.png'],
       manifest: {
         name: 'Biko — Gastos del hogar',
         short_name: 'Biko',

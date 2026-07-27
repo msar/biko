@@ -80,6 +80,76 @@ body {
   z-index: 20;
 }
 
+.install-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--brand-navy);
+  color: #fff;
+  padding: 10px 12px;
+  position: sticky;
+  top: 0;
+  z-index: 19;
+}
+
+.install-banner-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  min-width: 0;
+}
+
+.install-banner-copy strong {
+  font-size: 0.9rem;
+}
+
+.install-banner-copy span {
+  opacity: 0.9;
+}
+
+.install-banner-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.install-banner-action {
+  white-space: nowrap;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+}
+
+.install-banner .btn-link {
+  color: #fff;
+  opacity: 0.85;
+}
+
+.install-banner .install-steps {
+  margin: 8px 0 0;
+  padding-left: 1.1rem;
+  color: #fff;
+}
+
+.install-steps {
+  margin: 8px 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.install-steps li + li {
+  margin-top: 6px;
+}
+
+.push-help {
+  margin: 8px 0 12px;
+}
+
 /* --- cards --- */
 .card {
   background: var(--card);

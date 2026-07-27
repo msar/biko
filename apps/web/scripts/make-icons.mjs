@@ -1,4 +1,4 @@
-// Regenera favicon.png, pwa-192.png y pwa-512.png desde public/logo.png (macOS sips).
+// Regenera favicon.png, apple-touch-icon.png, pwa-192.png y pwa-512.png desde public/logo.png (macOS sips).
 import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -13,6 +13,7 @@ if (!existsSync(logo)) {
 
 for (const [out, size] of [
   ['favicon.png', 32],
+  ['apple-touch-icon.png', 180],
   ['pwa-192.png', 192],
   ['pwa-512.png', 512],
 ]) {

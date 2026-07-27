@@ -1,5 +1,7 @@
 /** Web Push helpers for the Biko PWA. */
 
+import { pushApisAvailable, pushBlockedReason, type PushBlockedReason } from './pwa';
+
 function urlBase64ToUint8Array(base64String: string): BufferSource {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -12,12 +14,11 @@ function urlBase64ToUint8Array(base64String: string): BufferSource {
 }
 
 export function pushSupported(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    'serviceWorker' in navigator &&
-    'PushManager' in window &&
-    'Notification' in window
-  );
+  return pushApisAvailable();
+}
+
+export function getPushBlockedReason(): PushBlockedReason | null {
+  return pushBlockedReason();
 }
 
 export async function getPushPermission(): Promise<NotificationPermission | 'unsupported'> {

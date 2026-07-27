@@ -3,9 +3,18 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { AddPaymentMethodsWizard, EditPaymentMethodForm } from '../components/PaymentMethodForm';
+import InstallAppSection from '../components/InstallAppSection';
+import { IosInstallSteps } from '../components/IosInstallSteps';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { getPushPermission, pushSupported, subscribeToPush, unsubscribeFromPush } from '../lib/push';
+import {
+  getPushPermission,
+  getPushBlockedReason,
+  pushSupported,
+  subscribeToPush,
+  unsubscribeFromPush,
+} from '../lib/push';
+import { isStandaloneDisplay, pushBlockedMessage } from '../lib/pwa';
 import {
   groupMethodsByEntity,
   methodSubtitle,
@@ -20,15 +29,19 @@ export default function SettingsPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [pushStatus, setPushStatus] = useState<string>('…');
   const [pushError, setPushError] = useState<string | null>(null);
+  const pushBlockReason = getPushBlockedReason();
+  const pushBlockHint = pushBlockedMessage(pushBlockReason);
+  const standalone = isStandaloneDisplay();
 
   useEffect(() => {
     void getPushPermission().then((p) => {
-      if (p === 'unsupported') setPushStatus('No disponible en este dispositivo');
-      else if (p === 'granted') setPushStatus('Activadas');
+      if (p === 'unsupported') {
+        setPushStatus(pushBlockHint ?? 'No disponible en este dispositivo');
+      } else if (p === 'granted') setPushStatus('Activadas');
       else if (p === 'denied') setPushStatus('Bloqueadas por el navegador');
       else setPushStatus('Desactivadas');
     });
-  }, []);
+  }, [pushBlockHint]);
 
   const { data: methods } = useQuery({
     queryKey: ['payment-methods'],
@@ -118,6 +131,8 @@ export default function SettingsPage() {
         </button>
       </section>
 
+      <InstallAppSection />
+
       {user?.isSuperUser && (
         <section className="card">
           <h2>Administración</h2>
@@ -132,6 +147,17 @@ export default function SettingsPage() {
         <h2>Notificaciones push</h2>
         <p className="hint">Estado: {pushStatus}</p>
         {pushError && <p className="error">{pushError}</p>}
+        {!pushSupported() && pushBlockHint && (
+          <div className="push-help">
+            <p className="hint">{pushBlockHint}</p>
+            {pushBlockReason === 'ios-browser' && <IosInstallSteps />}
+            {standalone && pushBlockReason === 'ios-version' && (
+              <p className="hint">
+                Mientras tanto, los avisos siguen apareciendo en la campanita de la barra superior.
+              </p>
+            )}
+          </div>
+        )}
         {pushSupported() && (
           <div className="confirm-actions">
             <button
@@ -144,12 +170,18 @@ export default function SettingsPage() {
                     const res = await api<{ publicKey: string }>('/notifications/vapid-public-key');
                     return res.publicKey;
                   },
-                  (body) => api('/notifications/push-subscriptions', { method: 'POST', body: JSON.stringify(body) }),
+                  (body) =>
+                    api('/notifications/push-subscriptions', {
+                      method: 'POST',
+                      body: JSON.stringify(body),
+                    }),
                 )
                   .then((r) => {
                     setPushStatus(r === 'granted' ? 'Activadas' : 'No concedidas');
                   })
-                  .catch((err) => setPushError(err instanceof Error ? err.message : 'No se pudo activar'));
+                  .catch((err) =>
+                    setPushError(err instanceof Error ? err.message : 'No se pudo activar'),
+                  );
               }}
             >
               Activar alertas
@@ -159,7 +191,10 @@ export default function SettingsPage() {
               className="btn-secondary"
               onClick={() => {
                 void unsubscribeFromPush((body) =>
-                  api('/notifications/push-subscriptions', { method: 'DELETE', body: JSON.stringify(body) }),
+                  api('/notifications/push-subscriptions', {
+                    method: 'DELETE',
+                    body: JSON.stringify(body),
+                  }),
                 ).then(() => setPushStatus('Desactivadas'));
               }}
             >
@@ -168,8 +203,8 @@ export default function SettingsPage() {
           </div>
         )}
         <p className="hint">
-          También podés gestionar <Link to="/recurrentes">pagos recurrentes</Link> (luz, gas, gym…),{' '}
-          <Link to="/deudas">deudas con contactos</Link> o{' '}
+          También podés gestionar <Link to="/recurrentes">pagos recurrentes</Link> (luz, gas,
+          gym…), <Link to="/deudas">deudas con contactos</Link> o{' '}
           <Link to="/importar-resumen">importar un resumen</Link> de tarjeta.
         </p>
       </section>
