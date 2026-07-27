@@ -26,6 +26,15 @@ export async function getPushPermission(): Promise<NotificationPermission | 'uns
   return Notification.permission;
 }
 
+/** True when the browser has an active PushManager subscription for this app. */
+export async function hasPushSubscription(): Promise<boolean> {
+  if (!pushSupported()) return false;
+  if (Notification.permission !== 'granted') return false;
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  return sub != null;
+}
+
 export async function subscribeToPush(
   getPublicKey: () => Promise<string>,
   saveSubscription: (body: {

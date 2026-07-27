@@ -10,6 +10,7 @@ import { useAuth } from '../lib/auth';
 import {
   getPushPermission,
   getPushBlockedReason,
+  hasPushSubscription,
   pushSupported,
   subscribeToPush,
   unsubscribeFromPush,
@@ -28,19 +29,30 @@ export default function SettingsPage() {
   const [panel, setPanel] = useState<'none' | 'add' | 'edit'>('none');
   const [editId, setEditId] = useState<string | null>(null);
   const [pushStatus, setPushStatus] = useState<string>('…');
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
   const [pushError, setPushError] = useState<string | null>(null);
   const pushBlockReason = getPushBlockedReason();
   const pushBlockHint = pushBlockedMessage(pushBlockReason);
   const standalone = isStandaloneDisplay();
 
   useEffect(() => {
-    void getPushPermission().then((p) => {
-      if (p === 'unsupported') {
+    void (async () => {
+      const permission = await getPushPermission();
+      if (permission === 'unsupported') {
+        setPushEnabled(false);
         setPushStatus(pushBlockHint ?? 'No disponible en este dispositivo');
-      } else if (p === 'granted') setPushStatus('Activadas');
-      else if (p === 'denied') setPushStatus('Bloqueadas por el navegador');
-      else setPushStatus('Desactivadas');
-    });
+        return;
+      }
+      if (permission === 'denied') {
+        setPushEnabled(false);
+        setPushStatus('Bloqueadas por el navegador');
+        return;
+      }
+      const subscribed = await hasPushSubscription();
+      setPushEnabled(subscribed);
+      setPushStatus(subscribed ? 'Activadas' : 'Desactivadas');
+    })();
   }, [pushBlockHint]);
 
   const { data: methods } = useQuery({
@@ -159,48 +171,54 @@ export default function SettingsPage() {
           </div>
         )}
         {pushSupported() && (
-          <div className="confirm-actions">
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => {
-                setPushError(null);
-                void subscribeToPush(
-                  async () => {
-                    const res = await api<{ publicKey: string }>('/notifications/vapid-public-key');
-                    return res.publicKey;
-                  },
-                  (body) =>
-                    api('/notifications/push-subscriptions', {
-                      method: 'POST',
-                      body: JSON.stringify(body),
-                    }),
-                )
-                  .then((r) => {
-                    setPushStatus(r === 'granted' ? 'Activadas' : 'No concedidas');
-                  })
-                  .catch((err) =>
-                    setPushError(err instanceof Error ? err.message : 'No se pudo activar'),
-                  );
-              }}
-            >
-              Activar alertas
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => {
+          <button
+            type="button"
+            className={pushEnabled ? 'btn-secondary' : 'btn-primary'}
+            disabled={pushBusy || pushStatus === 'Bloqueadas por el navegador'}
+            onClick={() => {
+              setPushError(null);
+              setPushBusy(true);
+              if (pushEnabled) {
                 void unsubscribeFromPush((body) =>
                   api('/notifications/push-subscriptions', {
                     method: 'DELETE',
                     body: JSON.stringify(body),
                   }),
-                ).then(() => setPushStatus('Desactivadas'));
-              }}
-            >
-              Desactivar
-            </button>
-          </div>
+                )
+                  .then(() => {
+                    setPushEnabled(false);
+                    setPushStatus('Desactivadas');
+                  })
+                  .catch((err) =>
+                    setPushError(err instanceof Error ? err.message : 'No se pudo desactivar'),
+                  )
+                  .finally(() => setPushBusy(false));
+                return;
+              }
+              void subscribeToPush(
+                async () => {
+                  const res = await api<{ publicKey: string }>('/notifications/vapid-public-key');
+                  return res.publicKey;
+                },
+                (body) =>
+                  api('/notifications/push-subscriptions', {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                  }),
+              )
+                .then((r) => {
+                  const enabled = r === 'granted';
+                  setPushEnabled(enabled);
+                  setPushStatus(enabled ? 'Activadas' : 'No concedidas');
+                })
+                .catch((err) =>
+                  setPushError(err instanceof Error ? err.message : 'No se pudo activar'),
+                )
+                .finally(() => setPushBusy(false));
+            }}
+          >
+            {pushBusy ? '…' : pushEnabled ? 'Desactivar alertas' : 'Activar alertas'}
+          </button>
         )}
         <p className="hint">
           También podés gestionar <Link to="/recurrentes">pagos recurrentes</Link> (luz, gas,
