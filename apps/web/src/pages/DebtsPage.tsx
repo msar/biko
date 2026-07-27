@@ -72,6 +72,64 @@ function whatsappReminderUrl(debt: Debt): string | null {
   return `https://wa.me/${normalized}?text=${encodeURIComponent(text)}`;
 }
 
+function debtItemLine(debt: Debt): string {
+  const { paidCount, remainingAmount } = debtProgress(debt);
+  const amount = debtMoney(debt, remainingAmount);
+  const cuota =
+    debt.installmentsCount > 1 ? ` (cuota ${paidCount}/${debt.installmentsCount})` : '';
+  return `• ${debt.title} — ${amount}${cuota}`;
+}
+
+function formatCurrencyTotals(debts: Debt[]): string {
+  const byCurrency = new Map<'ARS' | 'USD', number>();
+  for (const debt of debts) {
+    const currency = debt.currency === 'USD' ? 'USD' : 'ARS';
+    const { remainingAmount } = debtProgress(debt);
+    byCurrency.set(currency, (byCurrency.get(currency) ?? 0) + remainingAmount);
+  }
+  return [...byCurrency.entries()]
+    .map(([currency, total]) => fmtMoneyExact(total, currency))
+    .join(' + ');
+}
+
+function sectionBlock(label: string, debts: Debt[]): string {
+  if (debts.length === 0) return '';
+  const lines = debts.map(debtItemLine);
+  const subtotal = formatCurrencyTotals(debts);
+  return `${label}\n${lines.join('\n')}\nSubtotal: ${subtotal}`;
+}
+
+/** One WhatsApp message with all open debts for a contact (itemized + total). */
+function whatsappContactDebtsUrl(
+  contact: Pick<Contact, 'name' | 'phone'>,
+  debts: Debt[],
+): string | null {
+  if (debts.length < 2) return null;
+  const phone = contact.phone;
+  if (!phone) return null;
+  const normalized = normalizeWhatsAppPhone(phone);
+  if (!normalized) return null;
+
+  const owedToMe = debts.filter((d) => d.direction === 'OWED_TO_ME');
+  const iOwe = debts.filter((d) => d.direction === 'I_OWE');
+  const greeting = `Hola ${contact.name}!`;
+
+  let body: string;
+  if (iOwe.length === 0) {
+    body = `${greeting} Resumen de lo pendiente:\n\n${owedToMe.map(debtItemLine).join('\n')}\n\nTotal: ${formatCurrencyTotals(owedToMe)}`;
+  } else if (owedToMe.length === 0) {
+    body = `${greeting} Resumen de lo que te debo:\n\n${iOwe.map(debtItemLine).join('\n')}\n\nTotal: ${formatCurrencyTotals(iOwe)}`;
+  } else {
+    const parts = [
+      sectionBlock('Me debés:', owedToMe),
+      sectionBlock('Te debo:', iOwe),
+    ].filter(Boolean);
+    body = `${greeting}\n\n${parts.join('\n\n')}\n\nTotal: ${formatCurrencyTotals(debts)}`;
+  }
+
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(body)}`;
+}
+
 export default function DebtsPage() {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
@@ -145,13 +203,15 @@ export default function DebtsPage() {
   });
 
   const groupedOpen = useMemo(() => {
-    const map = new Map<string, { contactName: string; debts: Debt[] }>();
+    const map = new Map<string, { contact: Contact; debts: Debt[] }>();
     for (const debt of openDebts) {
-      const entry = map.get(debt.contact.id) ?? { contactName: debt.contact.name, debts: [] };
+      const entry = map.get(debt.contact.id) ?? { contact: debt.contact, debts: [] };
       entry.debts.push(debt);
       map.set(debt.contact.id, entry);
     }
-    return [...map.entries()].sort((a, b) => a[1].contactName.localeCompare(b[1].contactName, 'es'));
+    return [...map.entries()].sort((a, b) =>
+      a[1].contact.name.localeCompare(b[1].contact.name, 'es'),
+    );
   }, [openDebts]);
 
   return (
@@ -220,26 +280,36 @@ export default function DebtsPage() {
       <section className="card">
         <h2>Abiertas</h2>
         {groupedOpen.length === 0 && <p className="hint">No hay deudas abiertas.</p>}
-        {groupedOpen.map(([contactId, group]) => (
-          <div key={contactId} className="debt-contact-group">
-            <h3 className="payment-method-group-title">{group.contactName}</h3>
-            {group.debts.map((debt) => (
-              <DebtRow
-                key={debt.id}
-                debt={debt}
-                expanded={expandedId === debt.id}
-                onToggle={() => setExpandedId((id) => (id === debt.id ? null : debt.id))}
-                onPay={(number) => setPayTarget({ debt, number })}
-                onUnpay={(number) => unpayMutation.mutate({ debtId: debt.id, number })}
-                onEdit={() => {
-                  setShowForm(false);
-                  setEditDebt(debt);
-                }}
-                onDelete={() => setDeleteTarget(debt)}
-              />
-            ))}
-          </div>
-        ))}
+        {groupedOpen.map(([contactId, group]) => {
+          const waAllUrl = whatsappContactDebtsUrl(group.contact, group.debts);
+          return (
+            <div key={contactId} className="debt-contact-group">
+              <div className="row-between">
+                <h3 className="payment-method-group-title">{group.contact.name}</h3>
+                {waAllUrl && (
+                  <a className="btn-link" href={waAllUrl} target="_blank" rel="noreferrer">
+                    WhatsApp todo
+                  </a>
+                )}
+              </div>
+              {group.debts.map((debt) => (
+                <DebtRow
+                  key={debt.id}
+                  debt={debt}
+                  expanded={expandedId === debt.id}
+                  onToggle={() => setExpandedId((id) => (id === debt.id ? null : debt.id))}
+                  onPay={(number) => setPayTarget({ debt, number })}
+                  onUnpay={(number) => unpayMutation.mutate({ debtId: debt.id, number })}
+                  onEdit={() => {
+                    setShowForm(false);
+                    setEditDebt(debt);
+                  }}
+                  onDelete={() => setDeleteTarget(debt)}
+                />
+              ))}
+            </div>
+          );
+        })}
       </section>
 
       {settledDebts.length > 0 && (
