@@ -37,7 +37,14 @@ export const CATEGORY_GROUPS: CategoryGroupDef[] = [
     name: 'Comida',
     icon: '🥗',
     color: '#4f8a5b',
-    categoryNames: ['Supermercado', 'Verdulería', 'Carnicería', 'Pollería', 'Panadería', 'Restaurante'],
+    categoryNames: ['Supermercado', 'Verdulería', 'Carnicería', 'Pollería', 'Panadería'],
+  },
+  {
+    id: 'restaurante',
+    name: 'Restaurante',
+    icon: '🍽️',
+    color: '#b5567a',
+    categoryNames: ['Restaurante', 'Delivery'],
   },
   {
     id: 'salud',

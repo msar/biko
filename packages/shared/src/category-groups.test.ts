@@ -30,6 +30,12 @@ describe('resolveCategoryGroupId', () => {
     expect(resolveCategoryGroupId('Combustible')).toBe('auto');
     expect(resolveCategoryGroupId('Transporte')).toBe('transporte');
   });
+
+  it('maps Restaurante and Delivery to restaurante, not comida', () => {
+    expect(resolveCategoryGroupId('Restaurante')).toBe('restaurante');
+    expect(resolveCategoryGroupId('Delivery')).toBe('restaurante');
+    expect(resolveCategoryGroupId('Supermercado')).toBe('comida');
+  });
 });
 
 describe('groupCategories', () => {

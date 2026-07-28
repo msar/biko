@@ -42,6 +42,7 @@ const CATEGORIES: Array<{ name: string; icon: string; color: string }> = [
   { name: 'Impuestos automotor', icon: '🅿️', color: '#6b6b7a' },
   { name: 'Seguro', icon: '🛡️', color: '#4a6b8a' },
   { name: 'Restaurante', icon: '🍽️', color: '#b5567a' },
+  { name: 'Delivery', icon: '🛵', color: '#c45b7a' },
   { name: 'Compras', icon: '🛍️', color: '#6b8ab5' },
   { name: 'Hogar', icon: '🏠', color: '#8a7f5b' },
   { name: 'Salud', icon: '🏥', color: '#5ba38a' },
