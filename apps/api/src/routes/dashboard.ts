@@ -7,6 +7,7 @@ import {
 } from '@biko/shared';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { computeHouseholdBalance } from '../services/household-balance.js';
 import { resolvePurchasePayer } from '../services/purchase-payer.js';
 
 export type DashboardScope = 'household' | 'personal' | 'all';
@@ -334,51 +335,24 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       toName: string;
       amount: number;
     }> = [];
+    let settlements: Array<{
+      id: string;
+      fromUserId: string;
+      fromName: string;
+      toUserId: string;
+      toName: string;
+      amount: number;
+      note: string | null;
+      settledAt: Date;
+      createdByUserId: string;
+      createdByName: string;
+    }> = [];
 
     if (includeBalance) {
-      const purchases = await app.prisma.purchase.findMany({
-        where: { householdId, scope: 'HOUSEHOLD', debt: null },
-        include: {
-          user: { select: { id: true, name: true } },
-          paidBy: { select: { id: true, name: true } },
-          paymentMethod: { select: { owner: { select: { id: true, name: true } } } },
-          allocations: { include: { user: { select: { id: true, name: true } } } },
-        },
-      });
-
-      const memberNames = new Map<string, string>();
-      const paidByUser = new Map<string, number>();
-      const shareByUser = new Map<string, number>();
-
-      for (const purchase of purchases) {
-        const rate = rateToArs(purchase.exchangeRateToArs);
-        const payer = resolvePurchasePayer(purchase);
-        memberNames.set(payer.id, payer.name);
-        paidByUser.set(
-          payer.id,
-          (paidByUser.get(payer.id) ?? 0) + purchase.netAmount.toNumber() * rate,
-        );
-        for (const allocation of purchase.allocations) {
-          memberNames.set(allocation.userId, allocation.user.name);
-          shareByUser.set(
-            allocation.userId,
-            (shareByUser.get(allocation.userId) ?? 0) + allocation.amount.toNumber() * rate,
-          );
-        }
-      }
-
-      perUser = [...memberNames.entries()].map(([userId, name]) => {
-        const paid = round2(paidByUser.get(userId) ?? 0);
-        const share = round2(shareByUser.get(userId) ?? 0);
-        return { userId, name, paid, share, balance: round2(paid - share) };
-      });
-      transfers = computeSettleTransfers(perUser.map((u) => ({ userId: u.userId, balance: u.balance }))).map((t) => ({
-        fromUserId: t.fromUserId,
-        fromName: memberNames.get(t.fromUserId) ?? '',
-        toUserId: t.toUserId,
-        toName: memberNames.get(t.toUserId) ?? '',
-        amount: t.amount,
-      }));
+      const balance = await computeHouseholdBalance(app.prisma, householdId);
+      perUser = balance.perUser;
+      transfers = balance.transfers;
+      settlements = balance.settlements;
     }
 
     const windowMonths = recentMonths(monthsCount);
@@ -474,6 +448,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         perUser: perUser.sort((a, b) => b.balance - a.balance),
         transfers,
       },
+      settlements,
       months: windowMonths.map((month) => ({ month, total: round2(monthTotals.get(month) ?? 0) })),
       categories: categoryRows,
       groups,

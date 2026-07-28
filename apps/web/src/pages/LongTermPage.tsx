@@ -1,10 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import PieChart from '../components/charts/PieChart';
 import StackedBars, { shortMonth } from '../components/charts/StackedBars';
-import { api, fmtARS } from '../lib/api';
-import type { DashboardScope, LongTermDashboard } from '../lib/types';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { api, fmtARS, fmtDate } from '../lib/api';
+import type { DashboardScope, HouseholdSettlement, LongTermDashboard } from '../lib/types';
 
 const FALLBACK_COLORS = ['#1e305e', '#00a8b5', '#e8b93c', '#b3423f', '#10683f', '#7b5ea7', '#d97742', '#4a90d9'];
 
@@ -32,14 +33,28 @@ function monthTotal(byMonth: Array<{ month: string; total: number }>, month: str
 }
 
 export default function LongTermPage() {
+  const queryClient = useQueryClient();
   const [scope, setScope] = useState<DashboardScope>('household');
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const [chartMode, setChartMode] = useState<ChartMode>('bars');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [confirmSettle, setConfirmSettle] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard', 'long-term', 12, scope],
     queryFn: () => api<LongTermDashboard>(`/dashboard/long-term?months=12&scope=${scope}`),
+  });
+
+  const settleMutation = useMutation({
+    mutationFn: () =>
+      api<{
+        settlements: HouseholdSettlement[];
+        balance: LongTermDashboard['balance'];
+      }>('/settlements', { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: () => {
+      setConfirmSettle(false);
+      void queryClient.invalidateQueries({ queryKey: ['dashboard', 'long-term'] });
+    },
   });
 
   useEffect(() => {
@@ -154,18 +169,74 @@ export default function LongTermPage() {
             </div>
           ))}
           {data.balance.transfers.length > 0 ? (
-            <div className="settle-transfers">
-              {data.balance.transfers.map((t) => (
-                <p key={`${t.fromUserId}-${t.toUserId}`} className="settle-transfer">
-                  <strong>{t.fromName}</strong> le debe a <strong>{t.toName}</strong> {fmtARS.format(t.amount)}
-                </p>
-              ))}
-            </div>
+            <>
+              <div className="settle-transfers">
+                {data.balance.transfers.map((t) => (
+                  <p key={`${t.fromUserId}-${t.toUserId}`} className="settle-transfer">
+                    <strong>{t.fromName}</strong> le debe a <strong>{t.toName}</strong> {fmtARS.format(t.amount)}
+                  </p>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="btn-primary settle-cta"
+                onClick={() => setConfirmSettle(true)}
+                disabled={settleMutation.isPending}
+              >
+                Liquidar balance
+              </button>
+            </>
           ) : (
             <p className="settle-even">Están a mano 🤝</p>
           )}
+          {data.settlements && data.settlements.length > 0 && (
+            <div className="settlement-history">
+              <h3>Historial de liquidaciones</h3>
+              {data.settlements.slice(0, 10).map((s) => (
+                <div key={s.id} className="list-row">
+                  <span>
+                    <strong>
+                      {s.fromName} → {s.toName}
+                    </strong>
+                    <small>
+                      {' '}
+                      {fmtDate(s.settledAt)}
+                      {s.note ? ` · ${s.note}` : ''}
+                    </small>
+                  </span>
+                  <strong>{fmtARS.format(s.amount)}</strong>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
+
+      <ConfirmDialog
+        open={confirmSettle}
+        title="Liquidar balance"
+        variant="primary"
+        confirmLabel="Confirmar liquidación"
+        loadingLabel="Liquidando…"
+        loading={settleMutation.isPending}
+        onCancel={() => !settleMutation.isPending && setConfirmSettle(false)}
+        onConfirm={() => settleMutation.mutate()}
+        message={
+          <>
+            <p>Registrá que ya se pagaron entre ustedes. El balance acumulado vuelve a cero.</p>
+            <ul className="settle-confirm-list">
+              {(data?.balance.transfers ?? []).map((t) => (
+                <li key={`${t.fromUserId}-${t.toUserId}`}>
+                  <strong>{t.fromName}</strong> le paga a <strong>{t.toName}</strong> {fmtARS.format(t.amount)}
+                </li>
+              ))}
+            </ul>
+            {settleMutation.isError && (
+              <p className="error">{(settleMutation.error as Error)?.message ?? 'No se pudo liquidar'}</p>
+            )}
+          </>
+        }
+      />
 
       {data && hasSpend && (
         <section className="card">

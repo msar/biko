@@ -16,6 +16,7 @@ import internalJobRoutes from './routes/internal-jobs.js';
 import statementImportRoutes from './routes/statement-imports.js';
 import exchangeRateRoutes from './routes/exchange-rates.js';
 import debtRoutes from './routes/debts.js';
+import settlementRoutes from './routes/settlements.js';
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -52,6 +53,7 @@ export async function buildApp() {
   await app.register(statementImportRoutes);
   await app.register(exchangeRateRoutes);
   await app.register(debtRoutes);
+  await app.register(settlementRoutes);
 
   return app;
 }

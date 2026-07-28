@@ -9,8 +9,45 @@ export interface SettleTransfer {
   amount: number;
 }
 
+export interface SettlementOffset {
+  fromUserId: string;
+  toUserId: string;
+  amount: number;
+}
+
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/**
+ * Apply recorded settlements to expense balances.
+ * When fromUser pays toUser, fromUser's debt shrinks (balance += amount)
+ * and toUser's credit shrinks (balance -= amount).
+ */
+export function applySettlementOffsets(
+  balances: UserBalance[],
+  settlements: SettlementOffset[],
+): UserBalance[] {
+  const byUser = new Map(balances.map((b) => [b.userId, round2(b.balance)]));
+
+  for (const s of settlements) {
+    if (s.amount <= 0) continue;
+    byUser.set(s.fromUserId, round2((byUser.get(s.fromUserId) ?? 0) + s.amount));
+    byUser.set(s.toUserId, round2((byUser.get(s.toUserId) ?? 0) - s.amount));
+  }
+
+  // Preserve original order, then append any users only present in settlements.
+  const seen = new Set<string>();
+  const result: UserBalance[] = [];
+  for (const b of balances) {
+    seen.add(b.userId);
+    result.push({ userId: b.userId, balance: byUser.get(b.userId) ?? 0 });
+  }
+  for (const [userId, balance] of byUser) {
+    if (seen.has(userId)) continue;
+    result.push({ userId, balance });
+  }
+  return result;
 }
 
 /**

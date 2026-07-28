@@ -335,12 +335,26 @@ export interface MonthlyDashboard {
   }>;
 }
 
+export interface HouseholdSettlement {
+  id: string;
+  fromUserId: string;
+  fromName: string;
+  toUserId: string;
+  toName: string;
+  amount: number;
+  note: string | null;
+  settledAt: string;
+  createdByUserId: string;
+  createdByName: string;
+}
+
 export interface LongTermDashboard {
   scope: DashboardScope;
   balance: {
     perUser: Array<{ userId: string; name: string; paid: number; share: number; balance: number }>;
     transfers: Array<{ fromUserId: string; fromName: string; toUserId: string; toName: string; amount: number }>;
   };
+  settlements: HouseholdSettlement[];
   months: Array<{ month: string; total: number }>;
   categories: Array<{
     categoryId: string;
