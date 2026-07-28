@@ -73,20 +73,27 @@ function whatsappReminderUrl(debt: Debt): string | null {
 }
 
 function debtItemLine(debt: Debt): string {
-  const { paidCount, remainingAmount } = debtProgress(debt);
-  const amount = debtMoney(debt, remainingAmount);
-  const cuota =
-    debt.installmentsCount > 1 ? ` (cuota ${paidCount}/${debt.installmentsCount})` : '';
-  return `• ${debt.title} — ${amount}${cuota}`;
+  const { next } = debtProgress(debt);
+  if (!next) {
+    return `• ${debt.title} — ${debtMoney(debt, 0)}`;
+  }
+  const amount = debtMoney(debt, Number(next.amount));
+  if (debt.installmentsCount > 1) {
+    return `• ${debt.title} — ${amount} (cuota ${next.number}/${debt.installmentsCount}, vence ${fmtDate(next.dueDate)})`;
+  }
+  return `• ${debt.title} — ${amount} (vence ${fmtDate(next.dueDate)})`;
 }
 
-function formatCurrencyTotals(debts: Debt[]): string {
+/** Sum of next monthly cuota amounts (reminder total for this cycle). */
+function formatMonthlyTotals(debts: Debt[]): string {
   const byCurrency = new Map<'ARS' | 'USD', number>();
   for (const debt of debts) {
+    const { next } = debtProgress(debt);
+    if (!next) continue;
     const currency = debt.currency === 'USD' ? 'USD' : 'ARS';
-    const { remainingAmount } = debtProgress(debt);
-    byCurrency.set(currency, (byCurrency.get(currency) ?? 0) + remainingAmount);
+    byCurrency.set(currency, (byCurrency.get(currency) ?? 0) + Number(next.amount));
   }
+  if (byCurrency.size === 0) return fmtMoneyExact(0, 'ARS');
   return [...byCurrency.entries()]
     .map(([currency, total]) => fmtMoneyExact(total, currency))
     .join(' + ');
@@ -95,11 +102,11 @@ function formatCurrencyTotals(debts: Debt[]): string {
 function sectionBlock(label: string, debts: Debt[]): string {
   if (debts.length === 0) return '';
   const lines = debts.map(debtItemLine);
-  const subtotal = formatCurrencyTotals(debts);
-  return `${label}\n${lines.join('\n')}\nSubtotal: ${subtotal}`;
+  const subtotal = formatMonthlyTotals(debts);
+  return `${label}\n${lines.join('\n')}\nSubtotal este mes: ${subtotal}`;
 }
 
-/** One WhatsApp message with all open debts for a contact (itemized + total). */
+/** One WhatsApp message with all open debts for a contact (monthly cuotas + total del mes). */
 function whatsappContactDebtsUrl(
   contact: Pick<Contact, 'name' | 'phone'>,
   debts: Debt[],
@@ -116,15 +123,15 @@ function whatsappContactDebtsUrl(
 
   let body: string;
   if (iOwe.length === 0) {
-    body = `${greeting} Resumen de lo pendiente:\n\n${owedToMe.map(debtItemLine).join('\n')}\n\nTotal: ${formatCurrencyTotals(owedToMe)}`;
+    body = `${greeting} Resumen de lo pendiente este mes:\n\n${owedToMe.map(debtItemLine).join('\n')}\n\nTotal este mes: ${formatMonthlyTotals(owedToMe)}`;
   } else if (owedToMe.length === 0) {
-    body = `${greeting} Resumen de lo que te debo:\n\n${iOwe.map(debtItemLine).join('\n')}\n\nTotal: ${formatCurrencyTotals(iOwe)}`;
+    body = `${greeting} Resumen de lo que te debo este mes:\n\n${iOwe.map(debtItemLine).join('\n')}\n\nTotal este mes: ${formatMonthlyTotals(iOwe)}`;
   } else {
     const parts = [
-      sectionBlock('Me debés:', owedToMe),
-      sectionBlock('Te debo:', iOwe),
+      sectionBlock('Me debés este mes:', owedToMe),
+      sectionBlock('Te debo este mes:', iOwe),
     ].filter(Boolean);
-    body = `${greeting}\n\n${parts.join('\n\n')}\n\nTotal: ${formatCurrencyTotals(debts)}`;
+    body = `${greeting}\n\n${parts.join('\n\n')}\n\nTotal este mes: ${formatMonthlyTotals(debts)}`;
   }
 
   return `https://wa.me/${normalized}?text=${encodeURIComponent(body)}`;
