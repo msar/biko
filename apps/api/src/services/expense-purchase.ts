@@ -9,6 +9,7 @@ import {
 } from './promotion-suggestion.js';
 import { ensureFavoriteForPromotionId } from './promo-favorites.js';
 import { notifyExpensePartners } from './expense-notifications.js';
+import { resolvePaidByUserId } from './purchase-payer.js';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -339,7 +340,10 @@ export async function createPurchaseWithAllocations(
   const memberIds = await getHouseholdMemberIds(tx, householdId);
   const allocationEntries = buildAllocationsForExpense(body, userId, memberIds, discount.netAmount);
   const splitMode = resolveSplitMode(body, body.scope);
-  const paidByUserId = paymentMethod.ownerUserId ?? userId;
+  const paidByUserId = resolvePaidByUserId({
+    paymentMethodOwnerUserId: paymentMethod.ownerUserId,
+    loggerUserId: userId,
+  });
 
   const installments = generateInstallments(discount.netAmount, body.installmentsCount, body.purchaseDate, {
     type: paymentMethod.definition.type,
@@ -467,7 +471,11 @@ export async function updatePurchaseWithAllocations(
   const memberIds = await getHouseholdMemberIds(tx, householdId);
   const allocationEntries = buildAllocationsForExpense(body, userId, memberIds, discount.netAmount);
   const splitMode = resolveSplitMode(body, body.scope);
-  const paidByUserId = paymentMethod.ownerUserId ?? userId;
+  // Use original logger (existing.userId), not the editor — unowned methods must not flip payer on edit.
+  const paidByUserId = resolvePaidByUserId({
+    paymentMethodOwnerUserId: paymentMethod.ownerUserId,
+    loggerUserId: existing.userId,
+  });
 
   const installments = generateInstallments(discount.netAmount, body.installmentsCount, body.purchaseDate, {
     type: paymentMethod.definition.type,

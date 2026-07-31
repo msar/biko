@@ -142,6 +142,9 @@ export interface ExpenseFormInitial {
   partnerShares: string;
   myPct: string;
   partnerPct: string;
+  /** Who logged the expense (edit mode) — used when payment method has no owner. */
+  loggedByUserId?: string;
+  loggedByName?: string;
 }
 
 function initialFromPurchase(purchase: Purchase, userId: string): ExpenseFormInitial {
@@ -192,6 +195,8 @@ function initialFromPurchase(purchase: Purchase, userId: string): ExpenseFormIni
     partnerShares: '1',
     myPct: String(myPct),
     partnerPct: String(partnerPct),
+    loggedByUserId: purchase.user.id,
+    loggedByName: purchase.user.name,
   };
 }
 
@@ -885,13 +890,21 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
           <p className="hint">
             Pagado por:{' '}
             <strong>
-              {selectedMethod.owner
-                ? selectedMethod.owner.id === user?.id
-                  ? 'Vos'
-                  : selectedMethod.owner.name
-                : 'Vos'}
+              {(() => {
+                if (selectedMethod.owner) {
+                  return selectedMethod.owner.id === user?.id ? 'Vos' : selectedMethod.owner.name;
+                }
+                // Unowned method → who logged (create: current user; edit: original logger).
+                const loggerId = mode === 'edit' ? initial?.loggedByUserId : user?.id;
+                const loggerName = mode === 'edit' ? initial?.loggedByName : null;
+                if (loggerId && loggerId === user?.id) return 'Vos';
+                return loggerName ?? 'quien cargó el gasto';
+              })()}
             </strong>
-            {!selectedMethod.owner && ' (sin dueño en el medio — se asume quien carga)'}
+            {!selectedMethod.owner &&
+              (mode === 'edit'
+                ? ' (sin dueño en el medio — se asume quien cargó el gasto)'
+                : ' (sin dueño en el medio — se asume quien carga)')}
           </p>
         )}
       </section>

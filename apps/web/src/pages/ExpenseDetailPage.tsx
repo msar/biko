@@ -4,7 +4,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { api, fmtARS, fmtDate, fmtMoneyExact, toArsDisplay } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { expensePayerLabel, expenseSplitLabel } from '../lib/expense-labels';
+import { expensePayerDisplayName, expenseSplitLabel } from '../lib/expense-labels';
 import { paymentMethodDisplayName } from '../lib/payment-method-catalog';
 import type { Purchase } from '../lib/types';
 
@@ -66,8 +66,7 @@ export default function ExpenseDetailPage() {
   const net = Number(purchase.netAmount);
   const discount = Number(purchase.discountAmount);
   const split = expenseSplitLabel(purchase, user.id);
-  const paid = expensePayerLabel(purchase, user.id);
-  const payer = purchase.paidBy ?? purchase.paymentMethod.owner ?? purchase.user;
+  const payerName = expensePayerDisplayName(purchase, user.id);
 
   return (
     <div className="page">
@@ -111,8 +110,7 @@ export default function ExpenseDetailPage() {
         <DetailRow label="Medio de pago">{paymentMethodDisplayName(purchase.paymentMethod)}</DetailRow>
         <DetailRow label="Tipo">{purchase.scope === 'PERSONAL' ? 'Personal' : 'Hogar'}</DetailRow>
         {split && <DetailRow label="Reparto">{split}</DetailRow>}
-        <DetailRow label="Pagó">{payer.name}</DetailRow>
-        {paid && <DetailRow label="Nota">{paid}</DetailRow>}
+        <DetailRow label="Pagó">{payerName}</DetailRow>
         <DetailRow label="Cargó">{purchase.user.name}</DetailRow>
         {discount > 0 && (
           <DetailRow label="Descuento">
