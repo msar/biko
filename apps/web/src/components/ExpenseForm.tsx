@@ -203,7 +203,7 @@ function initialFromPurchase(purchase: Purchase, userId: string): ExpenseFormIni
 interface ExpenseFormProps {
   mode: 'create' | 'edit';
   purchaseId?: string;
-  initial?: ExpenseFormInitial;
+  initial?: Partial<ExpenseFormInitial>;
   title: string;
 }
 

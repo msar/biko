@@ -236,6 +236,17 @@ export default function SettingsPage() {
       </section>
 
       <section className="card">
+        <h2>Liquidar juntada</h2>
+        <p className="hint">
+          Cuando varios pagaron en una juntada, calculá quién le paga a quién y registrá tu parte como
+          gasto.
+        </p>
+        <Link to="/juntada" className="btn-link">
+          Ir a liquidar →
+        </Link>
+      </section>
+
+      <section className="card">
         <h2>Importar resumen</h2>
         <p className="hint">Cargá el PDF de Santander o BBVA y categorizá los consumos nuevos.</p>
         <Link to="/importar-resumen" className="btn-link">

@@ -15,6 +15,7 @@ import RecurringPaymentsPage from './pages/RecurringPaymentsPage';
 import SettingsPage from './pages/SettingsPage';
 import ImportStatementPage from './pages/ImportStatementPage';
 import DebtsPage from './pages/DebtsPage';
+import PartySettlePage from './pages/PartySettlePage';
 import AppHeader from './components/AppHeader';
 import BrandMark from './components/BrandLogo';
 import InstallAppBanner from './components/InstallAppBanner';
@@ -91,6 +92,7 @@ export default function App() {
           <Route path="/importar-resumen" element={<ImportStatementPage />} />
           <Route path="/recurrentes" element={<RecurringPaymentsPage />} />
           <Route path="/deudas" element={<DebtsPage />} />
+          <Route path="/juntada" element={<PartySettlePage />} />
           <Route path="/admin" element={<AdminRoute />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -50,6 +50,41 @@ export function applySettlementOffsets(
   return result;
 }
 
+export interface PartyParticipantPaid {
+  id: string;
+  paid: number;
+}
+
+export interface PartyEqualSplitResult {
+  total: number;
+  share: number;
+  balances: UserBalance[];
+}
+
+/**
+ * Equal-split balances for an ad-hoc gathering: each person's balance is
+ * `paid - share`, where share is total / n. Positive = creditor.
+ * Returns zeros when there are fewer than two participants.
+ */
+export function computePartyEqualSplit(participants: PartyParticipantPaid[]): PartyEqualSplitResult {
+  if (participants.length < 2) {
+    return {
+      total: 0,
+      share: 0,
+      balances: participants.map((p) => ({ userId: p.id, balance: 0 })),
+    };
+  }
+
+  const total = round2(participants.reduce((sum, p) => sum + Math.max(0, p.paid), 0));
+  const share = round2(total / participants.length);
+  const balances = participants.map((p) => ({
+    userId: p.id,
+    balance: round2(Math.max(0, p.paid) - share),
+  }));
+
+  return { total, share, balances };
+}
+
 /**
  * Minimal cash-flow netting: greedily match the largest debtor against the
  * largest creditor until everyone is settled. `balance` is paid - share,
