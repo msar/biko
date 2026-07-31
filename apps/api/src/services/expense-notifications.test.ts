@@ -72,7 +72,7 @@ describe('notifyExpensePartners', () => {
       type: 'EXPENSE_CREATED',
       title: 'Nuevo gasto',
       body: 'Mariano cargó "Disco".',
-      data: { purchaseId: 'p1', url: '/gastos/p1/edit' },
+      data: { purchaseId: 'p1', url: '/gastos/p1' },
     });
   });
 
@@ -106,7 +106,7 @@ describe('notifyExpensePartners', () => {
       type: 'EXPENSE_UPDATED',
       title: 'Gasto actualizado',
       body: 'Mariano modificó "Alquiler".',
-      data: { purchaseId: 'p2', url: '/gastos/p2/edit' },
+      data: { purchaseId: 'p2', url: '/gastos/p2' },
     });
   });
 

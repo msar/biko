@@ -361,7 +361,7 @@ export async function generateDueOccurrences(
                 recurringPaymentId: template.id,
                 occurrenceId: occurrence.id,
                 purchaseId: completed.purchaseId,
-                url: `/gastos/${completed.purchaseId}/edit`,
+                url: `/gastos/${completed.purchaseId}`,
               },
             });
           }

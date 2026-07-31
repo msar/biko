@@ -204,7 +204,7 @@ export default function DashboardPage() {
                                 expenses.map((inst) => (
                                   <Link
                                     key={inst.id}
-                                    to={`/gastos/${inst.purchaseId}/edit`}
+                                    to={`/gastos/${inst.purchaseId}`}
                                     className="category-expense-row"
                                   >
                                     <span>

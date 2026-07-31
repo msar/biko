@@ -4,30 +4,9 @@ import { useNavigate } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { api, fmtARS, fmtDate, fmtMoneyExact, toArsDisplay } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { expensePayerLabel, expenseSplitLabel } from '../lib/expense-labels';
 import { getOutbox, onOutboxChange, OutboxExpense } from '../lib/outbox';
 import type { Purchase } from '../lib/types';
-
-function splitLabel(exp: Purchase, userId: string): string | null {
-  if (exp.scope === 'PERSONAL') return 'Personal';
-  const myAlloc = exp.allocations?.find((a) => a.userId === userId);
-  if (!myAlloc || !exp.allocations?.length) return null;
-  const net = Number(exp.netAmount);
-  const myAmount = Number(myAlloc.amount);
-  if (exp.splitMode === 'ASSIGN') {
-    if (myAmount >= net - 0.02) return 'Cargo: vos';
-    if (myAmount <= 0.02) return 'Cargo: pareja';
-  }
-  const equalShare = net / exp.allocations.length;
-  if (Math.abs(myAmount - equalShare) < 0.02) return null;
-  return `Tu parte: ${fmtARS.format(myAmount)} / ${fmtARS.format(net)}`;
-}
-
-function payerLabel(exp: Purchase, userId: string): string | null {
-  const payer = exp.paidBy ?? exp.paymentMethod.owner ?? null;
-  if (!payer) return null;
-  if (payer.id === exp.user.id) return null;
-  return payer.id === userId ? 'Pagó: vos' : `Pagó: ${payer.name}`;
-}
 
 export default function ExpensesPage() {
   const navigate = useNavigate();
@@ -100,13 +79,13 @@ export default function ExpensesPage() {
       )}
 
       {expenses?.map((exp) => {
-        const badge = user ? splitLabel(exp, user.id) : null;
-        const paidBadge = user ? payerLabel(exp, user.id) : null;
+        const badge = user ? expenseSplitLabel(exp, user.id) : null;
+        const paidBadge = user ? expensePayerLabel(exp, user.id) : null;
         return (
           <div
             key={exp.id}
             className="expense-row card expense-row-interactive"
-            onClick={() => navigate(`/gastos/${exp.id}/edit`)}
+            onClick={() => navigate(`/gastos/${exp.id}`)}
             onTouchStart={() => startLongPress(exp)}
             onTouchEnd={cancelLongPress}
             onTouchMove={cancelLongPress}
@@ -171,7 +150,7 @@ export default function ExpensesPage() {
       {expenses && expenses.length === 0 && pending.length === 0 && (
         <p className="empty-state">Sin gastos todavía.</p>
       )}
-      <p className="hint center">Tocá un gasto para editarlo. Mantené presionado o usá 🗑 para eliminar.</p>
+      <p className="hint center">Tocá un gasto para verlo. Mantené presionado o usá 🗑 para eliminar.</p>
 
       <ConfirmDialog
         open={deleteTarget != null}

@@ -67,7 +67,7 @@ export async function notifyExpensePartners(
   const name = actor?.name?.trim() || 'Alguien';
   const label = expenseNotificationLabel(input.store, input.description);
   const url =
-    input.kind === 'DELETED' ? '/gastos' : `/gastos/${input.purchaseId}/edit`;
+    input.kind === 'DELETED' ? '/gastos' : `/gastos/${input.purchaseId}`;
 
   await notifyUsers(
     db,

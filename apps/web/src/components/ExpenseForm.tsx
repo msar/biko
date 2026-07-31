@@ -556,6 +556,9 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
       if (mode === 'create' && result && 'offline' in result && result.offline) {
         setSavedOffline(true);
         setTimeout(() => navigate('/gastos'), 1200);
+      } else if (mode === 'edit' && purchaseId) {
+        void queryClient.invalidateQueries({ queryKey: ['expenses', purchaseId] });
+        navigate(`/gastos/${purchaseId}`);
       } else {
         navigate('/gastos');
       }
@@ -620,7 +623,14 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
   return (
     <div className="page new-expense">
       <header className="page-header">
-        <button className="icon-btn" onClick={() => navigate(-1)} aria-label="Volver">
+        <button
+          className="icon-btn"
+          onClick={() => {
+            if (mode === 'edit' && purchaseId) navigate(`/gastos/${purchaseId}`);
+            else navigate(-1);
+          }}
+          aria-label="Volver"
+        >
           ✕
         </button>
         <h1>{title}</h1>

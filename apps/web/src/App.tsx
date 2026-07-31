@@ -19,6 +19,7 @@ import AppHeader from './components/AppHeader';
 import BrandMark from './components/BrandLogo';
 import InstallAppBanner from './components/InstallAppBanner';
 import PushEnableBanner from './components/PushEnableBanner';
+import ExpenseDetailPage from './pages/ExpenseDetailPage';
 
 function OnlineBanner() {
   const [online, setOnline] = useState(navigator.onLine);
@@ -82,6 +83,7 @@ export default function App() {
           <Route path="/historico" element={<LongTermPage />} />
           <Route path="/nuevo" element={<NewExpensePage />} />
           <Route path="/gastos/:id/edit" element={<EditExpensePage />} />
+          <Route path="/gastos/:id" element={<ExpenseDetailPage />} />
           <Route path="/gastos" element={<ExpensesPage />} />
           <Route path="/promos" element={<PromotionsPage />} />
           <Route path="/hoy" element={<Navigate to="/promos" replace />} />
