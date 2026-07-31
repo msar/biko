@@ -66,10 +66,11 @@ export default function PartySettlePage() {
     if (id === meId) setMeId(next[0]!.id);
   };
 
-  const registerExpense = (toName: string, amount: number) => {
+  const registerMyShare = () => {
+    if (!split || split.share <= 0) return;
     const prefill: PartyExpensePrefill = {
-      amount: String(amount),
-      store: `Pago a ${toName} — juntada`,
+      amount: String(split.share),
+      store: 'Juntada',
       scope: 'PERSONAL',
       chargeTo: 'me',
     };
@@ -77,6 +78,7 @@ export default function PartySettlePage() {
   };
 
   const canCompute = named.length >= 2 && (split?.total ?? 0) > 0;
+  const meIsNamed = named.some((p) => p.id === meId);
 
   return (
     <div className="page">
@@ -89,7 +91,7 @@ export default function PartySettlePage() {
 
       <section className="card">
         <h2>Participantes</h2>
-        <p className="hint">Marcá quién sos vos para poder registrar tus pagos como gasto.</p>
+        <p className="hint">Marcá quién sos vos para registrar tu parte como gasto.</p>
         <div className="party-participants">
           {participants.map((p) => (
             <div key={p.id} className="party-participant-row">
@@ -166,6 +168,16 @@ export default function PartySettlePage() {
                 </div>
               );
             })}
+            {meIsNamed && split.share > 0 && (
+              <div className="settle-cta">
+                <p className="hint">
+                  Tu parte es {fmtARS.format(split.share)}. Podés cargarla como gasto personal.
+                </p>
+                <button type="button" className="btn-primary" onClick={registerMyShare}>
+                  Registrar mi parte como gasto
+                </button>
+              </div>
+            )}
           </section>
 
           <section className="card">
@@ -175,23 +187,11 @@ export default function PartySettlePage() {
                 {transfers.map((t) => {
                   const fromName = nameById.get(t.fromUserId) ?? t.fromUserId;
                   const toName = nameById.get(t.toUserId) ?? t.toUserId;
-                  const isMe = t.fromUserId === meId;
                   return (
-                    <div key={`${t.fromUserId}-${t.toUserId}`} className="party-transfer">
-                      <p className="settle-transfer">
-                        <strong>{fromName}</strong> le paga a <strong>{toName}</strong>{' '}
-                        {fmtARS.format(t.amount)}
-                      </p>
-                      {isMe && (
-                        <button
-                          type="button"
-                          className="btn-secondary"
-                          onClick={() => registerExpense(toName, t.amount)}
-                        >
-                          Registrar como gasto
-                        </button>
-                      )}
-                    </div>
+                    <p key={`${t.fromUserId}-${t.toUserId}`} className="settle-transfer">
+                      <strong>{fromName}</strong> le paga a <strong>{toName}</strong>{' '}
+                      {fmtARS.format(t.amount)}
+                    </p>
                   );
                 })}
               </div>
