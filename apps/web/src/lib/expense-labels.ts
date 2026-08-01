@@ -17,13 +17,13 @@ export function expenseSplitLabel(exp: Purchase, userId: string): string | null 
 }
 
 /**
- * Who paid: payment-method owner if set, else who logged the expense.
- * Matches API resolvePurchasePayer (unowned methods ignore a stale paidBy snapshot).
+ * Who paid: payment-method owner if set, else explicit paidBy, else who logged.
+ * Matches API resolvePurchasePayer.
  */
 export function resolveExpensePayer(exp: Purchase): { id: string; name: string } {
   const owner = exp.paymentMethod.owner ?? null;
   if (owner) return exp.paidBy ?? owner;
-  return exp.user;
+  return exp.paidBy ?? exp.user;
 }
 
 export function expensePayerLabel(exp: Purchase, userId: string): string | null {

@@ -26,6 +26,8 @@ export interface OutboxExpense {
   splitMode?: SplitMode;
   assignToUserId?: string;
   splitValues?: { userId: string; value: number }[];
+  /** Who paid — only when the payment method has no owner. */
+  paidByUserId?: string;
   createdAt: string;
 }
 

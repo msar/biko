@@ -6,6 +6,7 @@ import StoreAutocomplete from './StoreAutocomplete';
 import ExpenseSuggestionPromo, { suggestionBenefitText } from './ExpenseSuggestionPromo';
 import { api, fmtARS } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { resolveExpensePayer } from '../lib/expense-labels';
 import { enqueueExpense, type OutboxExpense } from '../lib/outbox';
 import { ensureStoreSuggestionsCache, rememberStoreFromExpense } from '../lib/store-suggestions';
 import { groupMethodsByEntity, paymentMethodDisplayName } from '../lib/payment-method-catalog';
@@ -145,6 +146,8 @@ export interface ExpenseFormInitial {
   /** Who logged the expense (edit mode) — used when payment method has no owner. */
   loggedByUserId?: string;
   loggedByName?: string;
+  /** Who paid — for unowned payment methods. */
+  paidByUserId?: string;
 }
 
 function initialFromPurchase(purchase: Purchase, userId: string): ExpenseFormInitial {
@@ -197,6 +200,7 @@ function initialFromPurchase(purchase: Purchase, userId: string): ExpenseFormIni
     partnerPct: String(partnerPct),
     loggedByUserId: purchase.user.id,
     loggedByName: purchase.user.name,
+    paidByUserId: resolveExpensePayer(purchase).id,
   };
 }
 
@@ -233,6 +237,7 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
   const [partnerShares, setPartnerShares] = useState(initial?.partnerShares ?? '1');
   const [myPct, setMyPct] = useState(initial?.myPct ?? '50');
   const [partnerPct, setPartnerPct] = useState(initial?.partnerPct ?? '50');
+  const [paidByUserId, setPaidByUserId] = useState<string | null>(initial?.paidByUserId ?? null);
   const [error, setError] = useState<string | null>(null);
   const [savedOffline, setSavedOffline] = useState(false);
 
@@ -278,7 +283,21 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
 
   const selectedMethod = methods?.find((m) => m.id === paymentMethodId) ?? null;
   const isCredit = selectedMethod?.definition.type === 'CREDIT_CARD';
+  const methodHasOwner = Boolean(selectedMethod?.owner);
   const grossAmount = Number(amount) || 0;
+
+  // Default payer for unowned methods: create → current user; edit → initial / logger.
+  useEffect(() => {
+    if (!selectedMethod || selectedMethod.owner) return;
+    setPaidByUserId((prev) => {
+      if (prev && members.some((m) => m.id === prev)) return prev;
+      if (initial?.paidByUserId && members.some((m) => m.id === initial.paidByUserId)) {
+        return initial.paidByUserId;
+      }
+      if (mode === 'edit' && initial?.loggedByUserId) return initial.loggedByUserId;
+      return user?.id ?? null;
+    });
+  }, [selectedMethod, members, initial?.paidByUserId, initial?.loggedByUserId, mode, user?.id]);
 
   const debouncedStore = useDebounced(store, 400);
   const debouncedAmount = useDebounced(grossAmount, 400);
@@ -516,6 +535,9 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
           ];
         }
       }
+    }
+    if (!methodHasOwner && paidByUserId) {
+      payload.paidByUserId = paidByUserId;
     }
     return payload;
   };
@@ -886,26 +908,35 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
             </div>
           </div>
         ))}
-        {selectedMethod && (
+        {selectedMethod?.owner && (
           <p className="hint">
             Pagado por:{' '}
             <strong>
-              {(() => {
-                if (selectedMethod.owner) {
-                  return selectedMethod.owner.id === user?.id ? 'Vos' : selectedMethod.owner.name;
-                }
-                // Unowned method → who logged (create: current user; edit: original logger).
-                const loggerId = mode === 'edit' ? initial?.loggedByUserId : user?.id;
-                const loggerName = mode === 'edit' ? initial?.loggedByName : null;
-                if (loggerId && loggerId === user?.id) return 'Vos';
-                return loggerName ?? 'quien cargó el gasto';
-              })()}
+              {selectedMethod.owner.id === user?.id ? 'Vos' : selectedMethod.owner.name}
             </strong>
-            {!selectedMethod.owner &&
-              (mode === 'edit'
-                ? ' (sin dueño en el medio — se asume quien cargó el gasto)'
-                : ' (sin dueño en el medio — se asume quien carga)')}
+            <span> (dueño del medio)</span>
           </p>
+        )}
+        {selectedMethod && !selectedMethod.owner && members.length > 1 && (
+          <div className="payer-picker">
+            <h2 className="field-label">Quién pagó</h2>
+            <div className="segmented">
+              {members.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={paidByUserId === m.id ? 'active' : ''}
+                  onClick={() => setPaidByUserId(m.id)}
+                >
+                  {m.id === user?.id ? 'Yo' : m.name}
+                </button>
+              ))}
+            </div>
+            <p className="hint">Este medio no tiene dueño (efectivo, transferencia, etc.).</p>
+          </div>
+        )}
+        {selectedMethod && !selectedMethod.owner && members.length <= 1 && (
+          <p className="hint">Pagado por: <strong>Vos</strong></p>
         )}
       </section>
 

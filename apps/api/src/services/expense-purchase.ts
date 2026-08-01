@@ -69,6 +69,8 @@ export interface ExpenseInput {
   exchangeRateToArs?: number;
   exchangeRateSource?: string | null;
   exchangeRateDate?: Date | null;
+  /** Who paid — only used when the payment method has no owner. */
+  paidByUserId?: string | null;
 }
 
 interface ResolvedDiscount {
@@ -340,9 +342,13 @@ export async function createPurchaseWithAllocations(
   const memberIds = await getHouseholdMemberIds(tx, householdId);
   const allocationEntries = buildAllocationsForExpense(body, userId, memberIds, discount.netAmount);
   const splitMode = resolveSplitMode(body, body.scope);
+  if (body.paidByUserId && !memberIds.includes(body.paidByUserId)) {
+    throw new ExpenseValidationError('Quién pagó debe pertenecer al hogar');
+  }
   const paidByUserId = resolvePaidByUserId({
     paymentMethodOwnerUserId: paymentMethod.ownerUserId,
     loggerUserId: userId,
+    paidByUserId: body.paidByUserId,
   });
 
   const installments = generateInstallments(discount.netAmount, body.installmentsCount, body.purchaseDate, {
@@ -471,10 +477,14 @@ export async function updatePurchaseWithAllocations(
   const memberIds = await getHouseholdMemberIds(tx, householdId);
   const allocationEntries = buildAllocationsForExpense(body, userId, memberIds, discount.netAmount);
   const splitMode = resolveSplitMode(body, body.scope);
-  // Use original logger (existing.userId), not the editor — unowned methods must not flip payer on edit.
+  if (body.paidByUserId && !memberIds.includes(body.paidByUserId)) {
+    throw new ExpenseValidationError('Quién pagó debe pertenecer al hogar');
+  }
+  // Logger stays the original creator; payer can be overridden for unowned methods via paidByUserId.
   const paidByUserId = resolvePaidByUserId({
     paymentMethodOwnerUserId: paymentMethod.ownerUserId,
     loggerUserId: existing.userId,
+    paidByUserId: body.paidByUserId ?? existing.paidByUserId,
   });
 
   const installments = generateInstallments(discount.netAmount, body.installmentsCount, body.purchaseDate, {

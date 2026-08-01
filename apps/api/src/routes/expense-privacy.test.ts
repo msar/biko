@@ -35,14 +35,14 @@ describe('resolvePurchasePayer', () => {
     ).toEqual(partner);
   });
 
-  it('unowned method uses who logged, ignoring stale paidBy from a later editor', () => {
+  it('unowned method uses explicit paidBy when set', () => {
     expect(
       resolvePurchasePayer({
         paidBy: partner,
         paymentMethod: { owner: null },
         user: logger,
       }),
-    ).toEqual(logger);
+    ).toEqual(partner);
   });
 
   it('unowned method with no snapshot uses logger', () => {
@@ -66,13 +66,27 @@ describe('resolvePurchasePayer', () => {
 });
 
 describe('resolvePaidByUserId', () => {
-  it('prefers payment method owner', () => {
+  it('prefers payment method owner over explicit paidBy', () => {
     expect(
-      resolvePaidByUserId({ paymentMethodOwnerUserId: 'owner-1', loggerUserId: 'logger-1' }),
+      resolvePaidByUserId({
+        paymentMethodOwnerUserId: 'owner-1',
+        loggerUserId: 'logger-1',
+        paidByUserId: 'other-1',
+      }),
     ).toBe('owner-1');
   });
 
-  it('falls back to logger when method has no owner', () => {
+  it('uses explicit paidBy when method has no owner', () => {
+    expect(
+      resolvePaidByUserId({
+        paymentMethodOwnerUserId: null,
+        loggerUserId: 'logger-1',
+        paidByUserId: 'partner-1',
+      }),
+    ).toBe('partner-1');
+  });
+
+  it('falls back to logger when method has no owner and no explicit paidBy', () => {
     expect(
       resolvePaidByUserId({ paymentMethodOwnerUserId: null, loggerUserId: 'logger-1' }),
     ).toBe('logger-1');

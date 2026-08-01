@@ -84,7 +84,7 @@ export default async function paymentMethodRoutes(app: FastifyInstance) {
     if (existing.definition.type === 'CREDIT_CARD' && (closingDay == null || dueDay == null)) {
       return reply.code(400).send({ error: 'Las tarjetas de crédito requieren día de cierre y de vencimiento' });
     }
-    if (body.ownerUserId) {
+    if (body.ownerUserId !== undefined && body.ownerUserId !== null) {
       const owner = await app.prisma.user.findFirst({
         where: { id: body.ownerUserId, householdId: request.user.householdId },
       });

@@ -92,6 +92,18 @@ export default function SettingsPage() {
     setEditId(null);
   };
 
+  const assignOwner = async (methodId: string, ownerUserId: string | null) => {
+    try {
+      await api(`/payment-methods/${methodId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ownerUserId }),
+      });
+      void queryClient.invalidateQueries({ queryKey: ['payment-methods'] });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'No se pudo asignar el dueño');
+    }
+  };
+
   const removeMethod = async (id: string) => {
     if (!confirm('¿Eliminar este medio de pago?')) return;
     try {
@@ -270,6 +282,10 @@ export default function SettingsPage() {
             {panel === 'add' ? '✕' : '＋'}
           </button>
         </div>
+        <p className="hint">
+          Asigná un dueño a cada tarjeta o cuenta. Efectivo y transferencia pueden quedar sin dueño y
+          elegir quién pagó al cargar el gasto.
+        </p>
 
         {panel === 'add' && definitions && methods && (
           <AddPaymentMethodsWizard
@@ -294,11 +310,36 @@ export default function SettingsPage() {
           <div key={group.entityId} className="payment-method-group">
             <h3 className="payment-method-group-title">{group.entityName}</h3>
             {group.items.map((m) => (
-              <div key={m.id} className="list-row">
+              <div key={m.id} className="list-row payment-method-row">
                 <div>
                   <strong>{paymentMethodDisplayName(m)}</strong>
                   {methodSubtitle(m) && <small> {methodSubtitle(m)}</small>}
-                  {m.owner && <small> · Dueño: {m.owner.name}</small>}
+                  <div className="payment-method-owner">
+                    <label className="owner-assign">
+                      <span className="visually-hidden">Dueño</span>
+                      <select
+                        value={m.owner?.id ?? ''}
+                        onChange={(e) => assignOwner(m.id, e.target.value || null)}
+                        aria-label={`Dueño de ${paymentMethodDisplayName(m)}`}
+                      >
+                        <option value="">Sin dueño</option>
+                        {members.map((member) => (
+                          <option key={member.id} value={member.id}>
+                            {member.id === user?.id ? 'Vos' : member.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {!m.owner && user?.id && (
+                      <button
+                        type="button"
+                        className="btn-link"
+                        onClick={() => void assignOwner(m.id, user.id)}
+                      >
+                        Reclamar
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="list-row-actions">
                   <button
