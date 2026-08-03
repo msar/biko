@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isActionableWeeklyPromo, parseMinPurchaseAmount, weeklyPromoGroupKey, weeklyPromoGroupLabel, filterHiddenWeeklyGroups, sortWeeklyGroupsByFavorites } from './weekly-promo-quality';
+import { isActionableWeeklyPromo, parseMinPurchaseAmount, weeklyPromoGroupKey, weeklyPromoGroupLabel, filterHiddenWeeklyGroups, filterWeeklyByFavorites, sortWeeklyGroupsByFavorites } from './weekly-promo-quality';
 
 describe('isActionableWeeklyPromo', () => {
   it('excludes auto insurance miscategorized as combustible', () => {
@@ -91,6 +91,39 @@ describe('filterHiddenWeeklyGroups', () => {
     expect(filtered[0]!.promotions).toHaveLength(1);
     expect(filtered[0]!.promotions[0]!.store).toBe('YPF');
     expect(filtered[1]!.promotions).toHaveLength(0);
+  });
+});
+
+describe('filterWeeklyByFavorites', () => {
+  it('keeps only favorited groups and drops empty days', () => {
+    const days = [
+      {
+        dayOfWeek: 'MONDAY',
+        promotions: [
+          { store: 'ChangoMás', notes: '20%', entityName: 'Santander' },
+          { store: 'YPF', notes: '10%', entityName: 'BBVA' },
+        ],
+      },
+      {
+        dayOfWeek: 'THURSDAY',
+        promotions: [{ store: 'Farmacity', notes: '15%', entityName: 'ICBC' }],
+      },
+    ];
+    const filtered = filterWeeklyByFavorites(days, new Set(['changomás']));
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]!.dayOfWeek).toBe('MONDAY');
+    expect(filtered[0]!.promotions).toHaveLength(1);
+    expect(filtered[0]!.promotions[0]!.store).toBe('ChangoMás');
+  });
+
+  it('returns empty when there are no favorites', () => {
+    const days = [
+      {
+        dayOfWeek: 'MONDAY',
+        promotions: [{ store: 'YPF', notes: '10%', entityName: 'BBVA' }],
+      },
+    ];
+    expect(filterWeeklyByFavorites(days, [])).toEqual([]);
   });
 });
 

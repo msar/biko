@@ -116,6 +116,29 @@ export function filterHiddenWeeklyGroups<T extends WeeklyPromoGroupLike>(
   }));
 }
 
+/** Deja solo promos favoritas; omite días que quedan vacíos. */
+export function filterWeeklyByFavorites<D extends WeeklyDayLike>(
+  days: D[],
+  favoriteKeys: ReadonlySet<string> | string[],
+): D[] {
+  const favorites = favoriteKeys instanceof Set ? favoriteKeys : new Set(favoriteKeys);
+  if (favorites.size === 0) return [];
+  return days
+    .map((day) => ({
+      ...day,
+      promotions: day.promotions.filter((promo) =>
+        favorites.has(
+          weeklyPromoGroupKey({
+            store: promo.store,
+            notes: promo.notes ?? null,
+            entityName: promo.entityName,
+          }),
+        ),
+      ),
+    }))
+    .filter((day) => day.promotions.length > 0) as D[];
+}
+
 /** Extrae monto mínimo de compra de textos MODO cuando está declarado. */
 export function parseMinPurchaseAmount(texts: string[]): number | null {
   const joined = texts.join(' ');

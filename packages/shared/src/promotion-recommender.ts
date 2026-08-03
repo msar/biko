@@ -224,7 +224,7 @@ export interface CategoryDaySchedule {
 
 /**
  * "¿Cuándo conviene ir?" para una categoría: días ordenados por mejor
- * descuento aprovechable (solo promos elegibles: banco del hogar + calidad).
+ * descuento aprovechable con los medios de pago del hogar.
  * Días sin promos no se incluyen.
  */
 export function getCategorySchedule(
@@ -241,7 +241,7 @@ export function getCategorySchedule(
     referenceDate,
     { mode: 'single', id: categoryId },
     householdProvince,
-    { banksOnly: true, essentialsOnly: true, householdPrograms },
+    { householdPrograms },
   )
     .filter((day) => day.promotions.length > 0)
     .map((day) => ({

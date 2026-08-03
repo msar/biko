@@ -204,7 +204,7 @@ describe('getCategorySchedule', () => {
     expect(getCategorySchedule('cat-fuel', [santanderVisa], promos)).toHaveLength(0);
   });
 
-  it('banksOnly hides generic MODO promos that only match a wallet', () => {
+  it('includes MODO wallet promos when the household has that wallet', () => {
     const genericModo = promo({
       id: 'modo-fuel',
       entityId: 'ent-modo',
@@ -215,7 +215,23 @@ describe('getCategorySchedule', () => {
       notes: '10% en YPF',
       sourceUrl: 'https://www.modo.com.ar/promos/ypf',
     });
-    expect(getCategorySchedule('cat-fuel', [santanderVisa, modoWallet], [genericModo])).toHaveLength(0);
+    const schedule = getCategorySchedule('cat-fuel', [santanderVisa, modoWallet], [genericModo]);
+    expect(schedule.length).toBeGreaterThan(0);
+    expect(schedule.some((d) => d.promotions.some((p) => p.promotionId === 'modo-fuel'))).toBe(true);
+  });
+
+  it('excludes MODO wallet promos when the household has no matching wallet', () => {
+    const genericModo = promo({
+      id: 'modo-fuel',
+      entityId: 'ent-modo',
+      entityName: 'MODO',
+      categoryIds: ['cat-fuel'],
+      categoryNames: ['Combustible'],
+      store: 'YPF',
+      notes: '10% en YPF',
+      sourceUrl: 'https://www.modo.com.ar/promos/ypf',
+    });
+    expect(getCategorySchedule('cat-fuel', [santanderVisa], [genericModo])).toHaveLength(0);
   });
 
   it('hides exclusive audience promos without the household program', () => {

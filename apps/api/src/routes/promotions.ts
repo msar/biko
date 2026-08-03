@@ -1,4 +1,4 @@
-import { getCategorySchedule, getWeeklyRecommendations, householdHasMatchingPaymentMethod, filterHiddenWeeklyGroups, WEEKLY_ESSENTIAL_CATEGORY_NAMES, promotionMatchesProvince, promotionMatchesAudience } from '@biko/shared';
+import { getCategorySchedule, getWeeklyRecommendations, householdHasMatchingPaymentMethod, filterHiddenWeeklyGroups, promotionMatchesProvince, promotionMatchesAudience } from '@biko/shared';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { mercadoPagoSource } from '../services/mercadopago-scraper.js';
@@ -139,15 +139,11 @@ export default async function promotionRoutes(app: FastifyInstance) {
     return app.prisma.promotion.update({ where: { id }, data: { active: false } });
   });
 
-  // Calendario semanal: solo rubros de compras frecuentes del hogar (Mi semana).
+  // Calendario semanal: todas las promos que matchean los medios de pago del hogar.
   app.get('/promotions/weekly', { preHandler: [app.authenticate] }, async (request) => {
     const { methods, province, bankPrograms } = await householdContext(app, request.user.householdId);
-    const [promos, essentialCategories, hidden] = await Promise.all([
+    const [promos, hidden] = await Promise.all([
       app.prisma.promotion.findMany({ where: { active: true }, include: PROMOTION_INCLUDE }),
-      app.prisma.category.findMany({
-        where: { householdId: null, name: { in: [...WEEKLY_ESSENTIAL_CATEGORY_NAMES] } },
-        select: { id: true },
-      }),
       app.prisma.householdHiddenWeeklyPromo.findMany({
         where: { householdId: request.user.householdId },
         select: { groupKey: true },
@@ -157,9 +153,9 @@ export default async function promotionRoutes(app: FastifyInstance) {
       methods,
       promos.map(toPromotionInput),
       new Date(),
-      { mode: 'any', ids: essentialCategories.map((c) => c.id) },
+      null,
       province,
-      { essentialsOnly: true, banksOnly: true, householdPrograms: bankPrograms },
+      { householdPrograms: bankPrograms },
     );
     return filterHiddenWeeklyGroups(days, hidden.map((h) => h.groupKey));
   });

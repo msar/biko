@@ -241,6 +241,7 @@ export function WeeklyDayCard({
   onDeactivate?: (promotionId: string) => void;
   onToggleFavorite?: (group: WeeklyPromoGroup) => void;
   favoriteKeys?: ReadonlySet<string>;
+  /** Max groups before “Ver más”. Pass Infinity (or omit limit) to show all. */
   cap?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -248,8 +249,9 @@ export function WeeklyDayCard({
     groupWeeklyPromos(day.promotions),
     favoriteKeys ?? [],
   );
-  const visible = expanded ? groups : groups.slice(0, cap);
-  const hiddenCount = groups.length - cap;
+  const limited = Number.isFinite(cap);
+  const visible = expanded || !limited ? groups : groups.slice(0, cap);
+  const hiddenCount = limited ? groups.length - cap : 0;
 
   return (
     <div className="week-day card">
@@ -294,7 +296,8 @@ export function TodayPromos({
   return (
     <div className="week-calendar">
       <p className="hint">
-        {new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
+        Promos de tus medios de pago para{' '}
+        {new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}.
       </p>
       {groups.length > 0 ? (
         <div className="week-day card">
@@ -310,8 +313,7 @@ export function TodayPromos({
         </div>
       ) : (
         <p className="empty-state">
-          {DAY_LABEL[today]}: sin promos para tus medios de pago. Cargá tus tarjetas en Ajustes o promos en la pestaña
-          Todas.
+          {DAY_LABEL[today]}: sin promos para tus medios de pago. Cargá tus tarjetas en Ajustes o buscá en Todas.
         </p>
       )}
     </div>

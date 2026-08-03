@@ -1,4 +1,4 @@
-import { dayOfWeekFromDate, DISCOUNT_KIND_LABEL, type DiscountKind } from '@biko/shared';
+import { dayOfWeekFromDate, DISCOUNT_KIND_LABEL, filterWeeklyByFavorites, type DiscountKind } from '@biko/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -75,13 +75,15 @@ function WeeklyCalendar({
   favoriteKeys: ReadonlySet<string>;
 }) {
   const [showHidden, setShowHidden] = useState(false);
-  const activeDays = weekly?.filter((day) => day.promotions.length > 0) ?? [];
+  const favoriteDays = useMemo(
+    () => (weekly ? filterWeeklyByFavorites(weekly, favoriteKeys) : []),
+    [weekly, favoriteKeys],
+  );
 
   return (
     <div className="week-calendar">
       <p className="hint">
-        Compras frecuentes del hogar: super, verdulería, combustible, farmacia… Solo promos de tus bancos.
-        Cada promo tiene link a MODO para ver condiciones (ej. compra mínima).
+        Tus promos favoritas, día por día. Marcá con ★ desde Hoy, ¿Cuándo ir? o Todas.
         {province && ` Filtrado para ${province}.`}
       </p>
       {(hiddenPromos?.length ?? 0) > 0 && (
@@ -106,18 +108,24 @@ function WeeklyCalendar({
           </ul>
         </div>
       )}
-      {activeDays.length === 0 && (
+      {favoriteKeys.size === 0 && (
         <p className="empty-state">
-          Sin promos de compras frecuentes para tus bancos. Agregá tus tarjetas en Ajustes.
+          Todavía no tenés favoritas. Marcá promos con ★ en Hoy, ¿Cuándo ir? o Todas para armar tu semana.
         </p>
       )}
-      {activeDays.map((day) => (
+      {favoriteKeys.size > 0 && favoriteDays.length === 0 && (
+        <p className="empty-state">
+          Tus favoritas no aplican esta semana con tus medios de pago. Probá otras o revisá Ajustes.
+        </p>
+      )}
+      {favoriteDays.map((day) => (
         <WeeklyDayCard
           key={day.dayOfWeek}
           day={day}
           onHideGroup={onHideGroup}
           onToggleFavorite={onToggleFavorite}
           favoriteKeys={favoriteKeys}
+          cap={Number.POSITIVE_INFINITY}
         />
       ))}
     </div>
@@ -143,7 +151,7 @@ function WhenToGo({
 
   return (
     <>
-      <p className="hint">Elegí qué querés comprar y te decimos qué día conviene.</p>
+      <p className="hint">Elegí un rubro y te ordenamos los días por mejor descuento.</p>
       <div className="category-grid">
         {categories.map((cat) => (
           <button
