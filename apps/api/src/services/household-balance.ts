@@ -1,4 +1,9 @@
-import { applySettlementOffsets, computeSettleTransfers } from '@biko/shared';
+import {
+  allocationShareForInstallment,
+  applySettlementOffsets,
+  computeSettleTransfers,
+  installmentCountsForSettleUp,
+} from '@biko/shared';
 import type { PrismaClient } from '@prisma/client';
 import { resolvePurchasePayer } from './purchase-payer.js';
 
@@ -53,14 +58,16 @@ export interface HouseholdBalanceResult {
 }
 
 /**
- * All-time HOUSEHOLD settle-up: expense paid/share, minus recorded settlements.
+ * All-time HOUSEHOLD settle-up: due/paid installment paid/share, minus recorded settlements.
+ * Future unpaid cuotas are excluded until they fall due.
  */
 export async function computeHouseholdBalance(
   prisma: PrismaClient,
   householdId: string,
-  opts?: { settlementLimit?: number },
+  opts?: { settlementLimit?: number; asOf?: Date },
 ): Promise<HouseholdBalanceResult> {
   const settlementLimit = opts?.settlementLimit ?? 50;
+  const asOf = opts?.asOf ?? new Date();
 
   const [purchases, settlementRows] = await Promise.all([
     prisma.purchase.findMany({
@@ -70,6 +77,7 @@ export async function computeHouseholdBalance(
         paidBy: { select: { id: true, name: true } },
         paymentMethod: { select: { owner: { select: { id: true, name: true } } } },
         allocations: { include: { user: { select: { id: true, name: true } } } },
+        installments: true,
       },
     }),
     prisma.householdSettlement.findMany({
@@ -90,15 +98,28 @@ export async function computeHouseholdBalance(
 
   for (const purchase of purchases) {
     const rate = rateToArs(purchase.exchangeRateToArs);
+    const netAmount = purchase.netAmount.toNumber();
     const payer = resolvePurchasePayer(purchase);
     memberNames.set(payer.id, payer.name);
-    paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + purchase.netAmount.toNumber() * rate);
     for (const allocation of purchase.allocations) {
       memberNames.set(allocation.userId, allocation.user.name);
-      shareByUser.set(
-        allocation.userId,
-        (shareByUser.get(allocation.userId) ?? 0) + allocation.amount.toNumber() * rate,
-      );
+    }
+
+    for (const inst of purchase.installments) {
+      if (!installmentCountsForSettleUp(inst, asOf)) continue;
+      const amount = inst.amount.toNumber() * rate;
+      paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + amount);
+
+      for (const allocation of purchase.allocations) {
+        const shareNative = allocationShareForInstallment(
+          inst.amount.toNumber(),
+          allocation.amount.toNumber(),
+          netAmount,
+        );
+        const share = shareNative * rate;
+        if (share <= 0) continue;
+        shareByUser.set(allocation.userId, (shareByUser.get(allocation.userId) ?? 0) + share);
+      }
     }
   }
 

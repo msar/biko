@@ -3,7 +3,39 @@ import {
   applySettlementOffsets,
   computePartyEqualSplit,
   computeSettleTransfers,
+  installmentCountsForSettleUp,
 } from './settle-up';
+
+describe('installmentCountsForSettleUp', () => {
+  const asOf = new Date(2026, 6, 15, 12, 0, 0); // 2026-07-15 noon
+
+  it('counts paid immediate installments', () => {
+    expect(
+      installmentCountsForSettleUp({ paid: true, dueDate: new Date(2026, 6, 15) }, asOf),
+    ).toBe(true);
+  });
+
+  it('counts unpaid installments that are already due', () => {
+    expect(
+      installmentCountsForSettleUp({ paid: false, dueDate: new Date(2026, 6, 10) }, asOf),
+    ).toBe(true);
+    expect(
+      installmentCountsForSettleUp({ paid: false, dueDate: new Date(2026, 6, 15) }, asOf),
+    ).toBe(true);
+  });
+
+  it('excludes future unpaid installments', () => {
+    expect(
+      installmentCountsForSettleUp({ paid: false, dueDate: new Date(2026, 7, 10) }, asOf),
+    ).toBe(false);
+  });
+
+  it('counts paid installments even with a future dueDate', () => {
+    expect(
+      installmentCountsForSettleUp({ paid: true, dueDate: new Date(2026, 11, 1) }, asOf),
+    ).toBe(true);
+  });
+});
 
 describe('computePartyEqualSplit', () => {
   it('returns zeros with fewer than two people', () => {

@@ -86,6 +86,21 @@ export function computePartyEqualSplit(participants: PartyParticipantPaid[]): Pa
 }
 
 /**
+ * Whether an installment counts toward household settle-up as of `asOf`.
+ * Counts if already marked paid, or if its due date has arrived (card cuotas
+ * start as unpaid but still create debt once due).
+ */
+export function installmentCountsForSettleUp(
+  inst: { paid: boolean; dueDate: Date },
+  asOf: Date = new Date(),
+): boolean {
+  if (inst.paid) return true;
+  const endOfAsOf = new Date(asOf);
+  endOfAsOf.setHours(23, 59, 59, 999);
+  return inst.dueDate.getTime() <= endOfAsOf.getTime();
+}
+
+/**
  * Minimal cash-flow netting: greedily match the largest debtor against the
  * largest creditor until everyone is settled. `balance` is paid - share,
  * so positive = is owed money (creditor), negative = owes money (debtor).
