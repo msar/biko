@@ -18,8 +18,42 @@ describe('santander scraper', () => {
 
   it('tags Sorpresa and Select audiences', () => {
     expect(inferSantanderAudience({ exclusiveCode: 'SOR', title: '20% Super' })).toEqual(['SANTANDER_SORPRESA']);
-    expect(inferSantanderAudience({ exclusiveCodes: ['SEL'], title: 'Select 15%' })).toEqual(['SANTANDER_SELECT']);
+    expect(inferSantanderAudience({ exclusiveCodes: ['SEC'], title: 'Select 15%' })).toEqual(['SANTANDER_SELECT']);
+    expect(inferSantanderAudience({ categories: [{ code: 'SEC', description: 'Select' }], title: '10%' })).toEqual([
+      'SANTANDER_SELECT',
+    ]);
     expect(inferSantanderAudience({ title: '10% general' })).toEqual([]);
+  });
+
+  it('normalizes a BFF publication payload', () => {
+    const promo = normalizeSantanderOffer({
+      id: 1616,
+      idPromotion: 6679,
+      customerDiscount: 30,
+      topAmount: 15000,
+      wednesday: true,
+      monday: false,
+      tuesday: false,
+      thursday: false,
+      friday: false,
+      saturday: false,
+      sunday: false,
+      texts: { title: '30% de ahorro', description: 'Tope $15.000' },
+      additionalText: '<p>Exclusivo para clientes Santander Select.</p>',
+      brands: [{ id: 245, name: 'Jumbo', desktopImage: 'https://example.com/jumbo.png' }],
+      categories: [{ code: 'SUP', description: 'Supermercado' }],
+      startDatePublication: '2024-05-06T00:00:00',
+      endDatePublication: '2099-09-30T00:00:00',
+    });
+    expect(promo).toMatchObject({
+      externalId: '6679',
+      store: 'Jumbo',
+      discountPercentage: 30,
+      discountCap: 15000,
+      daysOfWeek: ['WEDNESDAY'],
+      audienceSegments: ['SANTANDER_SELECT'],
+      categoryName: 'Supermercado',
+    });
   });
 
   it('normalizes a general benefit and a Sorpresa exclusive', () => {

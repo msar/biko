@@ -12,19 +12,27 @@ import type { PromotionSource, ScrapedPromo } from './promotion-sync.js';
 // Scraper de promociones Galicia / Galicia Eminent.
 //
 // UI: https://www.galicia.ar/personas/buscador-de-promociones
-// SPA: https://beneficios.galicia.ar/
-// BFF: https://loyalty.bff.bancogalicia.com.ar/personalizacion/v1/...
+// SPA: https://beneficios.galicia.ar/  (iframe)
+// API: /api/portal/* → loyalty.bff.bancogalicia.com.ar (WAF)
 //
-// El BFF suele estar detrás de WAF; intentamos varios endpoints con
-// headers de browser. Si todos fallan, el sync deja last-good.
+// Preferimos el proxy /api/portal con headers del SPA. Si el WAF
+// bloquea, intentamos Playwright interceptando XHR del catálogo.
 // ============================================================
 
 const BUSCADOR_URL = 'https://www.galicia.ar/personas/buscador-de-promociones';
-const BFF_BASE = 'https://loyalty.bff.bancogalicia.com.ar';
+const SPA_ORIGIN = 'https://beneficios.galicia.ar';
+const BFF_ORIGIN = 'https://loyalty.bff.bancogalicia.com.ar';
+const PORTAL_BASE = `${SPA_ORIGIN}/api/portal`;
+
+const CATALOG_PATH =
+  '/personalizacion/v1/promociones/catalogo?page=1&pageSize=200&idAudiencia=1';
 const CANDIDATE_APIS = [
-  `${BFF_BASE}/personalizacion/v1/promociones/catalogo?page=1&pageSize=200&idAudiencia=1`,
-  `${BFF_BASE}/catalogo/v1/promociones?page=1&pageSize=200`,
-  `${BFF_BASE}/personalizacion/v1/promociones/list/agrupador/1/carruseles`,
+  `${PORTAL_BASE}${CATALOG_PATH}`,
+  `${PORTAL_BASE}/catalogo/v1/promociones?page=1&pageSize=200`,
+  `${PORTAL_BASE}/personalizacion/v1/promociones/list/agrupador/1/carruseles`,
+  `${BFF_ORIGIN}${CATALOG_PATH}`,
+  `${BFF_ORIGIN}/catalogo/v1/promociones?page=1&pageSize=200`,
+  `${BFF_ORIGIN}/personalizacion/v1/promociones/list/agrupador/1/carruseles`,
 ];
 
 export interface GaliciaPromo {
@@ -94,6 +102,20 @@ const DAY_MAP: Record<string, string> = {
   sunday: 'SUNDAY',
 };
 
+const BROWSER_HEADERS: Record<string, string> = {
+  'User-Agent':
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  Accept: 'application/vnd.iman.v1+json, application/json, text/plain, */*',
+  'Content-Type': 'application/json',
+  'Accept-Language': 'es-AR,es;q=0.9,en;q=0.8',
+  Origin: SPA_ORIGIN,
+  Referer: `${SPA_ORIGIN}/`,
+  id_channel: 'onlinebanking',
+  id_canal: 'Quiero',
+  'Cache-Control': 'no-store, no-cache, must-revalidate',
+  Pragma: 'no-cache',
+};
+
 function brandName(marca: GaliciaPromo['marca']): string | null {
   if (!marca) return null;
   if (typeof marca === 'string') return marca.trim() || null;
@@ -159,10 +181,9 @@ function collectPromos(payload: unknown): GaliciaPromo[] {
   if (Array.isArray(payload)) return payload as GaliciaPromo[];
   if (typeof payload !== 'object') return [];
   const obj = payload as Record<string, unknown>;
-  for (const key of ['data', 'promociones', 'promotions', 'items', 'content', 'results', 'carruseles']) {
+  for (const key of ['data', 'promociones', 'promotions', 'items', 'content', 'results', 'carruseles', 'list']) {
     const value = obj[key];
     if (Array.isArray(value)) {
-      // carruseles may nest promos
       if (value.length && value[0] && typeof value[0] === 'object' && 'promociones' in (value[0] as object)) {
         return value.flatMap((c) => collectPromos(c));
       }
@@ -251,35 +272,148 @@ export function normalizeGaliciaPromo(promo: GaliciaPromo, now = new Date()): Sc
   };
 }
 
+function looksLikeJsonPayload(payload: unknown): boolean {
+  if (payload == null) return false;
+  if (typeof payload === 'object') return true;
+  return false;
+}
+
 async function fetchJson(url: string, ms = 25000): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        Accept: 'application/json, text/plain, */*',
-        Origin: 'https://beneficios.galicia.ar',
-        Referer: 'https://beneficios.galicia.ar/',
-        'Accept-Language': 'es-AR,es;q=0.9',
-      },
+      headers: BROWSER_HEADERS,
     });
     if (!res.ok) throw new Error(`${url} returned ${res.status}`);
-    return await res.json();
+    const ct = res.headers.get('content-type') ?? '';
+    const text = await res.text();
+    if (/text\/html/i.test(ct) && /^\s*</.test(text)) {
+      throw new Error(`${url} returned HTML (SPA fallback / WAF)`);
+    }
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      throw new Error(`${url} did not return JSON`);
+    }
   } finally {
     clearTimeout(timer);
   }
 }
 
+function normalizePayload(payload: unknown): ScrapedPromo[] {
+  const raw = collectPromos(payload);
+  return raw.map((p) => normalizeGaliciaPromo(p)).filter((p): p is ScrapedPromo => p != null);
+}
+
+/**
+ * Optional Playwright path: load the public SPA and capture catalog XHR JSON.
+ * Enabled when playwright is installed and BIKO_GALICIA_PLAYWRIGHT is not "0".
+ */
+async function fetchGaliciaViaPlaywright(log: FastifyBaseLogger): Promise<ScrapedPromo[]> {
+  if (process.env.BIKO_GALICIA_PLAYWRIGHT === '0') {
+    throw new Error('Playwright disabled (BIKO_GALICIA_PLAYWRIGHT=0)');
+  }
+
+  type PlaywrightChromium = {
+    launch: (opts?: {
+      headless?: boolean;
+      args?: string[];
+    }) => Promise<{
+      newPage: (opts?: {
+        userAgent?: string;
+        locale?: string;
+        extraHTTPHeaders?: Record<string, string>;
+      }) => Promise<{
+        on: (
+          event: 'response',
+          handler: (response: {
+            url: () => string;
+            status: () => number;
+            headers: () => Record<string, string>;
+            json: () => Promise<unknown>;
+          }) => void | Promise<void>,
+        ) => void;
+        goto: (url: string, opts?: { waitUntil?: string; timeout?: number }) => Promise<unknown>;
+        mouse: { wheel: (x: number, y: number) => Promise<void> };
+      }>;
+      close: () => Promise<void>;
+    }>;
+  };
+
+  let chromium: PlaywrightChromium;
+  try {
+    const mod = (await Function('return import("playwright")')()) as { chromium: PlaywrightChromium };
+    chromium = mod.chromium;
+  } catch {
+    throw new Error(
+      'playwright package not installed (npm i playwright && npx playwright install chromium)',
+    );
+  }
+
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--disable-blink-features=AutomationControlled'],
+  });
+
+  try {
+    const page = await browser.newPage({
+      userAgent: BROWSER_HEADERS['User-Agent'],
+      locale: 'es-AR',
+      extraHTTPHeaders: {
+        'Accept-Language': 'es-AR,es;q=0.9',
+      },
+    });
+
+    const payloads: unknown[] = [];
+    page.on('response', async (response) => {
+      try {
+        const url = response.url();
+        if (!/promociones|catalogo|carrusel/i.test(url)) return;
+        if (response.status() !== 200) return;
+        const ct = response.headers()['content-type'] ?? '';
+        if (!/json/i.test(ct)) return;
+        const json = await response.json();
+        if (looksLikeJsonPayload(json)) payloads.push(json);
+      } catch {
+        // Ignore body read races / non-JSON.
+      }
+    });
+
+    await page.goto(SPA_ORIGIN, { waitUntil: 'networkidle', timeout: 60000 });
+    await new Promise((r) => setTimeout(r, 4000));
+
+    for (let i = 0; i < 4; i++) {
+      await page.mouse.wheel(0, 2400);
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+
+    const promos = new Map<string, ScrapedPromo>();
+    for (const payload of payloads) {
+      for (const promo of normalizePayload(payload)) {
+        promos.set(promo.externalId, promo);
+      }
+    }
+
+    if (promos.size === 0) {
+      throw new Error('Playwright loaded SPA but captured no catalog JSON');
+    }
+
+    log.info({ count: promos.size, xhr: payloads.length }, 'Galicia benefits fetched via Playwright');
+    return [...promos.values()];
+  } finally {
+    await browser.close();
+  }
+}
+
 export async function fetchGaliciaPromos(log: FastifyBaseLogger): Promise<ScrapedPromo[]> {
   const errors: string[] = [];
+
   for (const url of CANDIDATE_APIS) {
     try {
       const payload = await fetchJson(url);
-      const raw = collectPromos(payload);
-      const promos = raw.map((p) => normalizeGaliciaPromo(p)).filter((p): p is ScrapedPromo => p != null);
+      const promos = normalizePayload(payload);
       if (promos.length > 0) {
         log.info({ url, count: promos.length }, 'Galicia benefits fetched');
         const byId = new Map(promos.map((p) => [p.externalId, p]));
@@ -290,6 +424,13 @@ export async function fetchGaliciaPromos(log: FastifyBaseLogger): Promise<Scrape
       errors.push(`${url}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  try {
+    return await fetchGaliciaViaPlaywright(log);
+  } catch (err) {
+    errors.push(`playwright: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   throw new Error(`Galicia benefits unreachable (WAF?). Tried: ${errors.join(' | ')}`);
 }
 

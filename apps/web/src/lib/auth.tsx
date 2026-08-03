@@ -1,5 +1,16 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { isSuperUser } from '@biko/shared';
+import {
+  browserSupportsWebAuthn,
+  platformAuthenticatorIsAvailable,
+  startAuthentication,
+  startRegistration,
+} from '@simplewebauthn/browser';
+import type {
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+} from '@simplewebauthn/browser';
 import { ApiError, api, getToken, onUnauthorized, setToken } from './api';
 import type { SessionUser } from './types';
 
@@ -14,6 +25,8 @@ interface AuthState {
     householdName?: string;
     inviteCode?: string;
   }) => Promise<void>;
+  loginWithPasskey: () => Promise<void>;
+  registerPasskey: (deviceName?: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -103,6 +116,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       applySession(res.token, res.user);
     },
+    loginWithPasskey: async () => {
+      const options = await api<PublicKeyCredentialRequestOptionsJSON>('/auth/webauthn/login/options', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      const assertion = await startAuthentication({ optionsJSON: options });
+      const res = await api<{ token: string; user: SessionUser }>('/auth/webauthn/login/verify', {
+        method: 'POST',
+        body: JSON.stringify({ response: assertion }),
+      });
+      applySession(res.token, res.user);
+    },
+    registerPasskey: async (deviceName) => {
+      const options = await api<PublicKeyCredentialCreationOptionsJSON>('/auth/webauthn/register/options', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      const attestation = await startRegistration({ optionsJSON: options });
+      await api('/auth/webauthn/register/verify', {
+        method: 'POST',
+        body: JSON.stringify({
+          response: attestation as RegistrationResponseJSON,
+          deviceName,
+        }),
+      });
+    },
     logout: () => clearSession(setUser),
   };
 
@@ -113,4 +152,13 @@ export function useAuth(): AuthState {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth fuera de AuthProvider');
   return ctx;
+}
+
+export async function canUsePlatformPasskey(): Promise<boolean> {
+  if (!browserSupportsWebAuthn()) return false;
+  try {
+    return await platformAuthenticatorIsAvailable();
+  } catch {
+    return false;
+  }
 }

@@ -81,8 +81,9 @@ El script crea `api`, `web` y `promotions-sync` (si no existen), configura varia
 
 **api**
 - `DATABASE_URL` → `${{Postgres.DATABASE_URL}}`
-- `JWT_SECRET` → generado con `${{ secret(...) }}`
+- `JWT_SECRET` → generado una sola vez (no rotar; invalida todas las sesiones)
 - `CORS_ORIGIN` → `https://${{web.RAILWAY_PUBLIC_DOMAIN}}`
+- `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` → dominio público de `web` (passkeys / Face ID)
 - `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` → Web Push (`npx web-push generate-vapid-keys`)
 - `CRON_SECRET` → protege `POST /internal/jobs/recurring`
 

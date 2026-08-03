@@ -215,6 +215,34 @@ model User {
   settlementsFrom HouseholdSettlement[] @relation("SettlementFrom")
   settlementsTo   HouseholdSettlement[] @relation("SettlementTo")
   settlementsCreated HouseholdSettlement[] @relation("SettlementCreatedBy")
+  webauthnCredentials WebAuthnCredential[]
+}
+
+// Passkeys / WebAuthn (Face ID, biometría) ligados al usuario.
+model WebAuthnCredential {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialId String   @unique
+  publicKey    Bytes
+  counter      BigInt
+  transports   String[] @default([])
+  deviceName   String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Challenges de corta vida para registro/login WebAuthn (multi-instancia safe).
+model WebAuthnChallenge {
+  id        String   @id @default(cuid())
+  userId    String?
+  challenge String   @unique
+  type      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
 }
 
 // Comercios/promos que el hogar ocultó en Mi semana (por groupKey de weeklyPromoGroupKey).

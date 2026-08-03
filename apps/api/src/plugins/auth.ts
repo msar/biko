@@ -23,9 +23,20 @@ declare module 'fastify' {
   }
 }
 
+const DEV_FALLBACK = 'dev-secret-change-me';
+
+function resolveJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  const isProd = process.env.NODE_ENV === 'production';
+  if (isProd && (!secret || secret === DEV_FALLBACK)) {
+    throw new Error('JWT_SECRET must be set to a non-default value in production');
+  }
+  return secret ?? DEV_FALLBACK;
+}
+
 export default fp(async (app: FastifyInstance) => {
   await app.register(jwt, {
-    secret: process.env.JWT_SECRET ?? 'dev-secret-change-me',
+    secret: resolveJwtSecret(),
     sign: { expiresIn: '180d' },
   });
 
@@ -33,13 +44,13 @@ export default fp(async (app: FastifyInstance) => {
     try {
       await request.jwtVerify();
     } catch {
-      reply.code(401).send({ error: 'No autorizado' });
+      return reply.code(401).send({ error: 'No autorizado' });
     }
   });
 
   app.decorate('requireSuperUser', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!isSuperUser(request.user.email)) {
-      reply.code(403).send({ error: 'Acceso denegado' });
+      return reply.code(403).send({ error: 'Acceso denegado' });
     }
   });
 });

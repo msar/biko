@@ -44,16 +44,40 @@ for legacy in biko modo-sync mercadopago-sync; do
   fi
 done
 
-JWT_SECRET="${JWT_SECRET:-\${{ secret(32, \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\") }}}"
+# Never rotate JWT_SECRET on re-runs — regenerating invalidates every logged-in client.
+EXISTING_JWT="$(railway variable list --service api --json 2>/dev/null | python3 -c 'import json,sys
+try:
+  raw=json.load(sys.stdin)
+  vars_=raw if isinstance(raw, dict) else {v.get("name"): v.get("value") for v in raw}
+  print(vars_.get("JWT_SECRET") or "")
+except Exception:
+  print("")' || true)"
+
+API_VARS=(
+  'DATABASE_URL=${{Postgres.DATABASE_URL}}'
+  'RAILPACK_BUILD_CMD=npm install && npx prisma generate --schema apps/api/prisma/schema.prisma'
+  'RAILPACK_START_CMD=npm run railway:release --workspace @biko/api && npm run start --workspace @biko/api'
+  'CORS_ORIGIN=https://${{web.RAILWAY_PUBLIC_DOMAIN}}'
+  'WEBAUTHN_RP_ID=${{web.RAILWAY_PUBLIC_DOMAIN}}'
+  'WEBAUTHN_ORIGIN=https://${{web.RAILWAY_PUBLIC_DOMAIN}}'
+)
+
+if [[ -n "${JWT_SECRET:-}" ]]; then
+  API_VARS+=("JWT_SECRET=$JWT_SECRET")
+  echo "Using JWT_SECRET from environment"
+elif [[ -n "$EXISTING_JWT" ]]; then
+  echo "Keeping existing JWT_SECRET (not overwriting)"
+else
+  # Fixed random once; Railway template secret() can regenerate on re-apply.
+  GENERATED_JWT="$(openssl rand -base64 48 | tr -d '\n/=+' | head -c 48)"
+  API_VARS+=("JWT_SECRET=$GENERATED_JWT")
+  echo "Generated a new stable JWT_SECRET"
+fi
 
 echo "Setting api variables..."
 railway variable set \
   --service api \
-  'DATABASE_URL=${{Postgres.DATABASE_URL}}' \
-  "JWT_SECRET=$JWT_SECRET" \
-  'RAILPACK_BUILD_CMD=npm install && npx prisma generate --schema apps/api/prisma/schema.prisma' \
-  'RAILPACK_START_CMD=npm run railway:release --workspace @biko/api && npm run start --workspace @biko/api' \
-  'CORS_ORIGIN=https://${{web.RAILWAY_PUBLIC_DOMAIN}}' \
+  "${API_VARS[@]}" \
   --skip-deploys --json >/dev/null
 
 echo "Setting web variables..."

@@ -1010,6 +1010,11 @@ label {
   text-align: center;
 }
 
+.login-divider {
+  text-align: center;
+  margin: 4px 0 8px;
+}
+
 .brand-logo {
   display: block;
   height: auto;

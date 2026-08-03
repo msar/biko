@@ -2,6 +2,8 @@ const BASE = import.meta.env.VITE_API_URL ?? '/api';
 
 let authToken: string | null = localStorage.getItem('biko:token');
 let unauthorizedHandler: (() => void) | null = null;
+/** Single in-flight /auth/me check so parallel 401s don't stampede. */
+let sessionRevalidate: Promise<boolean> | null = null;
 
 export function setToken(token: string | null) {
   authToken = token;
@@ -13,7 +15,7 @@ export function getToken() {
   return authToken;
 }
 
-/** Limpia sesión cuando cualquier request recibe 401 (token inválido o expirado). */
+/** Limpia sesión cuando el token es inválido o expiró. */
 export function onUnauthorized(handler: () => void) {
   unauthorizedHandler = handler;
 }
@@ -24,6 +26,51 @@ export class ApiError extends Error {
     message: string,
   ) {
     super(message);
+  }
+}
+
+function isPublicAuthPath(path: string): boolean {
+  return (
+    path === '/auth/login' ||
+    path === '/auth/register' ||
+    path.startsWith('/auth/webauthn/login/')
+  );
+}
+
+/** Confirm token is still valid; false → clear session. Network errors keep the session. */
+async function revalidateSession(): Promise<boolean> {
+  if (!authToken) return false;
+  if (sessionRevalidate) return sessionRevalidate;
+
+  sessionRevalidate = (async () => {
+    try {
+      const res = await fetch(`${BASE}/auth/me`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      return res.status !== 401;
+    } catch {
+      return true;
+    } finally {
+      sessionRevalidate = null;
+    }
+  })();
+
+  return sessionRevalidate;
+}
+
+async function handleUnauthorized(path: string): Promise<void> {
+  if (isPublicAuthPath(path)) return;
+
+  if (path === '/auth/me') {
+    setToken(null);
+    unauthorizedHandler?.();
+    return;
+  }
+
+  const stillValid = await revalidateSession();
+  if (!stillValid) {
+    setToken(null);
+    unauthorizedHandler?.();
   }
 }
 
@@ -41,8 +88,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401) {
-      setToken(null);
-      unauthorizedHandler?.();
+      await handleUnauthorized(path);
     }
     throw new ApiError(res.status, (body as { error?: string }).error ?? 'Error de red');
   }

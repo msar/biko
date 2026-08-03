@@ -6,7 +6,7 @@ import { AddPaymentMethodsWizard, EditPaymentMethodForm } from '../components/Pa
 import InstallAppSection from '../components/InstallAppSection';
 import { IosInstallSteps } from '../components/IosInstallSteps';
 import { api } from '../lib/api';
-import { useAuth } from '../lib/auth';
+import { canUsePlatformPasskey, useAuth } from '../lib/auth';
 import {
   getPushPermission,
   getPushBlockedReason,
@@ -22,6 +22,84 @@ import {
   paymentMethodDisplayName,
 } from '../lib/payment-method-catalog';
 import type { HouseholdMember, PaymentMethod, PaymentMethodDefinition } from '../lib/types';
+
+type PasskeyRow = { id: string; deviceName: string | null; createdAt: string };
+
+function PasskeySettingsSection() {
+  const { registerPasskey } = useAuth();
+  const [available, setAvailable] = useState(false);
+  const [credentials, setCredentials] = useState<PasskeyRow[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+
+  const refresh = async () => {
+    const res = await api<{ credentials: PasskeyRow[] }>('/auth/webauthn/credentials');
+    setCredentials(res.credentials);
+  };
+
+  useEffect(() => {
+    void canUsePlatformPasskey().then(setAvailable);
+    void refresh().catch(() => setCredentials([]));
+  }, []);
+
+  const onRegister = async () => {
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    try {
+      await registerPasskey('Este dispositivo');
+      setInfo('Listo. La próxima vez podés entrar con Face ID / biometría.');
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo registrar la passkey');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onRemove = async (id: string) => {
+    if (!confirm('¿Eliminar esta passkey?')) return;
+    setError(null);
+    try {
+      await api(`/auth/webauthn/credentials/${id}`, { method: 'DELETE' });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo eliminar');
+    }
+  };
+
+  if (!available && credentials.length === 0) return null;
+
+  return (
+    <section className="card">
+      <h2>Face ID / biometría</h2>
+      <p className="hint">
+        Entrá sin contraseña con Face ID (iPhone) o huella/rostro (Android). Funciona en la app instalada y en el
+        navegador compatible.
+      </p>
+      {error && <p className="error">{error}</p>}
+      {info && <p className="hint">{info}</p>}
+      {credentials.length > 0 && (
+        <ul className="method-list" style={{ listStyle: 'none', padding: 0 }}>
+          {credentials.map((c) => (
+            <li key={c.id} className="list-row" style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <span>{c.deviceName ?? 'Passkey'}</span>
+              <button type="button" className="btn-link" onClick={() => void onRemove(c.id)}>
+                Eliminar
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {available && (
+        <button type="button" className="btn-secondary" disabled={busy} onClick={() => void onRegister()}>
+          {busy ? '…' : credentials.length ? 'Agregar otra passkey' : 'Activar Face ID / biometría'}
+        </button>
+      )}
+    </section>
+  );
+}
 
 export default function SettingsPage() {
   const { user, logout } = useAuth();
@@ -193,6 +271,8 @@ export default function SettingsPage() {
           Cerrar sesión
         </button>
       </section>
+
+      <PasskeySettingsSection />
 
       <InstallAppSection />
 

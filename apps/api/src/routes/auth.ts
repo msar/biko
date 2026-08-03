@@ -3,6 +3,13 @@ import { ARGENTINE_PROVINCES, isSuperUser, normalizeBankPrograms } from '@biko/s
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ensureDefaultPaymentMethods } from '../services/household-defaults.js';
+import {
+  createAuthenticationOptions,
+  createRegistrationOptions,
+  sessionUserPayload,
+  verifyAndStoreRegistration,
+  verifyAuthentication,
+} from '../services/webauthn.js';
 
 const registerSchema = z.object({
   name: z.string().min(1),
@@ -86,6 +93,77 @@ export default async function authRoutes(app: FastifyInstance) {
         isSuperUser: isSuperUser(user.email),
       },
     };
+  });
+
+  app.post('/auth/webauthn/register/options', { preHandler: [app.authenticate] }, async (request) => {
+    const user = await app.prisma.user.findUniqueOrThrow({ where: { id: request.user.userId } });
+    return createRegistrationOptions(app.prisma, {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+    });
+  });
+
+  app.post('/auth/webauthn/register/verify', { preHandler: [app.authenticate] }, async (request) => {
+    const body = z
+      .object({
+        response: z.record(z.unknown()),
+        deviceName: z.string().min(1).max(80).optional(),
+      })
+      .parse(request.body);
+    const credential = await verifyAndStoreRegistration(
+      app.prisma,
+      request.user.userId,
+      body.response as unknown as Parameters<typeof verifyAndStoreRegistration>[2],
+      body.deviceName,
+    );
+    return { credential };
+  });
+
+  app.post('/auth/webauthn/login/options', async () => {
+    return createAuthenticationOptions(app.prisma);
+  });
+
+  app.post('/auth/webauthn/login/verify', async (request, reply) => {
+    const body = z.object({ response: z.record(z.unknown()) }).parse(request.body);
+    try {
+      const user = await verifyAuthentication(
+        app.prisma,
+        body.response as unknown as Parameters<typeof verifyAuthentication>[1],
+      );
+      const token = app.jwt.sign({
+        userId: user.id,
+        householdId: user.householdId,
+        email: user.email,
+      });
+      return {
+        token,
+        user: sessionUserPayload(user),
+      };
+    } catch (err) {
+      const status = (err as { statusCode?: number }).statusCode ?? 401;
+      return reply.code(status).send({
+        error: err instanceof Error ? err.message : 'No autorizado',
+      });
+    }
+  });
+
+  app.get('/auth/webauthn/credentials', { preHandler: [app.authenticate] }, async (request) => {
+    const credentials = await app.prisma.webAuthnCredential.findMany({
+      where: { userId: request.user.userId },
+      select: { id: true, deviceName: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { credentials };
+  });
+
+  app.delete('/auth/webauthn/credentials/:id', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+    const result = await app.prisma.webAuthnCredential.deleteMany({
+      where: { id, userId: request.user.userId },
+    });
+    if (result.count === 0) return reply.code(404).send({ error: 'Passkey no encontrada' });
+    return reply.code(204).send();
   });
 
   app.get('/auth/me', { preHandler: [app.authenticate] }, async (request) => {
