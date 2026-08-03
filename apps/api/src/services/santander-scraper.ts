@@ -398,7 +398,8 @@ function brandIdOf(item: SantanderBrandListItem | SantanderOffer): string | null
 
 async function listBrandIds(exclusive: string | undefined, log: FastifyBaseLogger): Promise<string[]> {
   const brands = new Set<string>();
-  for (let page = 0; page < MAX_PAGES; page++) {
+  // BFF pages are 1-based (see archived /bff-benefits/brands?page=1&limit=12).
+  for (let page = 1; page <= MAX_PAGES; page++) {
     const params = new URLSearchParams({
       limit: String(PAGE_SIZE),
       page: String(page),
@@ -421,7 +422,7 @@ async function listBrandIds(exclusive: string | undefined, log: FastifyBaseLogge
       'Santander brands page',
     );
     if (items.length < PAGE_SIZE) break;
-    if (Number.isFinite(total) && (page + 1) * PAGE_SIZE >= total) break;
+    if (Number.isFinite(total) && page * PAGE_SIZE >= total) break;
   }
   return [...brands];
 }
