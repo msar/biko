@@ -93,6 +93,7 @@ export interface Promotion {
   imageUrl: string | null;
   details: string[];
   provinces: string[];
+  audienceSegments: string[];
   storesAdherents: boolean;
   paymentFlow: string | null;
   validFrom: string | null;
@@ -284,6 +285,7 @@ export interface DayRecommendation {
     sourceUrl?: string | null;
     minPurchaseAmount?: number | null;
     details?: string[];
+    paymentFlow?: string | null;
   }>;
 }
 

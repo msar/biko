@@ -242,6 +242,8 @@ export default function AdminPage() {
           endpoint="/promotions/sync/mercadopago"
         />
         <SyncPromoSourceButton source="NARANJA_X" label="Naranja X" endpoint="/promotions/sync/naranjax" />
+        <SyncPromoSourceButton source="SANTANDER" label="Santander" endpoint="/promotions/sync/santander" />
+        <SyncPromoSourceButton source="GALICIA" label="Galicia" endpoint="/promotions/sync/galicia" />
       </section>
     </div>
   );

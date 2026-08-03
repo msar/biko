@@ -1,4 +1,5 @@
 import { dayOfWeekFromDate } from './enums';
+import { promotionMatchesAudience } from './bank-programs';
 import { promotionMatchesHouseholdPaymentMethod } from './payment-method-matching';
 import {
   HouseholdPaymentMethod,
@@ -108,9 +109,18 @@ export function findCandidatePromotions(params: {
   grossAmount: number | null;
   categoryId?: string | null;
   householdProvince?: string | null;
+  householdPrograms?: readonly string[] | null;
 }): SuggestionCandidate[] {
-  const { promotions, paymentMethod, date, store, grossAmount, categoryId = null, householdProvince = null } =
-    params;
+  const {
+    promotions,
+    paymentMethod,
+    date,
+    store,
+    grossAmount,
+    categoryId = null,
+    householdProvince = null,
+    householdPrograms = null,
+  } = params;
   const day = dayOfWeekFromDate(date);
 
   return promotions
@@ -118,6 +128,7 @@ export function findCandidatePromotions(params: {
     .filter((promo) => promotionMatchesDay(promo, day))
     .filter((promo) => promotionMatchesCategoryForPurchase(promo, categoryId, store, householdProvince))
     .filter((promo) => promotionMatchesProvince(promo.provinces ?? [], householdProvince))
+    .filter((promo) => promotionMatchesAudience(promo.audienceSegments, householdPrograms))
     .filter((promo) => promo.discountKind !== 'INSTALLMENTS' && promo.discountPercentage > 0)
     .filter((promo) => !isEmployeeOnlyPromo(promo))
     .filter((promo) => promotionMatchesHouseholdPaymentMethod(paymentMethod, promo))

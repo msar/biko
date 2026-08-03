@@ -30,6 +30,8 @@ export interface ScrapedPromo {
   provinces: string[];
   storesAdherents: boolean;
   paymentFlow: string | null;
+  /** Empty = open to any bank customer; else household needs a matching bankProgram. */
+  audienceSegments: string[];
 }
 
 export interface SyncResult {
@@ -113,6 +115,7 @@ export async function persistScrapedPromos(
       provinces: promo.provinces,
       storesAdherents: promo.storesAdherents,
       paymentFlow: promo.paymentFlow,
+      audienceSegments: promo.audienceSegments,
     };
 
     const existing = await prisma.promotion.findUnique({

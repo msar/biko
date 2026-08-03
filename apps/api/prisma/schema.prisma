@@ -165,6 +165,8 @@ model Household {
   inviteCode String   @unique @default(cuid())
   // Provincia del hogar para filtrar promos regionales (null = ver todas).
   province   String?
+  // Programas/suscripciones del hogar (SANTANDER_SELECT, SANTANDER_SORPRESA, GALICIA_EMINENT, …).
+  bankPrograms String[] @default([])
   createdAt  DateTime @default(now())
   // Backfill único de favoritos desde historial de compras con promo.
   favoritePromosSyncedAt DateTime?
@@ -310,6 +312,8 @@ model Promotion {
   provinces          String[]           @default([]) // vacío = aplica en todo el país
   storesAdherents    Boolean            @default(false) // requiere consultar locales adheridos
   paymentFlow        String?            // instore | online
+  // Vacío = abierta a clientes del banco; si hay valores, el hogar debe tener un bankProgram coincidente.
+  audienceSegments   String[]           @default([])
 
   validFrom          DateTime?
   validTo            DateTime?

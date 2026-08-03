@@ -77,6 +77,7 @@ interface ModoCard {
   stop_date?: string | null;
   slug?: string;
   search_tags?: string;
+  short_description?: string | null;
   stores_whitelist?: boolean;
   payment_flow?: string;
   content?: {
@@ -235,11 +236,21 @@ export function normalizeCard(card: ModoCard, categoryName: string | null, now =
   if (minPurchaseAmount != null) {
     details.push(`Compra mínima ${minPurchaseAmount.toLocaleString('es-AR')}`);
   }
+  const shortDescription =
+    typeof card.short_description === 'string' ? card.short_description : null;
+  let paymentFlow = card.payment_flow ?? null;
+  const tags = typeof card.search_tags === 'string' ? card.search_tags : '';
+  if (!paymentFlow) {
+    if (/\bpresencial\b/i.test(tags) || /\bpresencial\b/i.test(shortDescription ?? '')) paymentFlow = 'instore';
+    else if (/\bonline\b/i.test(tags) || /\bonline\b/i.test(shortDescription ?? '')) paymentFlow = 'online';
+  }
   const provinces = inferPromotionProvinces({
     title,
     store,
     where,
     tags: card.search_tags,
+    shortDescription,
+    details,
   });
 
   return {
@@ -261,7 +272,8 @@ export function normalizeCard(card: ModoCard, categoryName: string | null, now =
     details,
     provinces,
     storesAdherents: Boolean(card.stores_whitelist),
-    paymentFlow: card.payment_flow ?? null,
+    paymentFlow,
+    audienceSegments: [],
   };
 }
 

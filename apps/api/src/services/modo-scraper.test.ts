@@ -164,6 +164,33 @@ describe('normalizeCard', () => {
     );
     expect(promo?.provinces).toContain('Salta');
   });
+
+  it('infers Santa Fe from Alvear store and CABA from UADE', () => {
+    const alvear = normalizeCard(
+      {
+        ...card,
+        title: '25% en Supermercados Alvear',
+        where: 'Consultá los locales adheridos',
+        search_tags: 'supermercado alvear,reintegro,presencial',
+        short_description: '2608-Supermercados-Alvear-25off',
+      },
+      'Supermercado',
+    );
+    expect(alvear?.provinces).toEqual(['Santa Fe']);
+    expect(alvear?.paymentFlow).toBe('instore');
+
+    const uade = normalizeCard(
+      {
+        ...card,
+        title: '20% en La Cantina',
+        where: 'La Cantina, Kiokos y Comedores UADE',
+        search_tags: 'uade,santander,comedor,la cantina',
+        short_description: '2607-Santander-LaCantinaUADE-Presencial-20off',
+      },
+      'Restaurante',
+    );
+    expect(uade?.provinces).toEqual(['Ciudad Autónoma de Buenos Aires']);
+  });
 });
 
 describe('store and active helpers', () => {

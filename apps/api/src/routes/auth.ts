@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { ARGENTINE_PROVINCES, isSuperUser } from '@biko/shared';
+import { ARGENTINE_PROVINCES, isSuperUser, normalizeBankPrograms } from '@biko/shared';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ensureDefaultPaymentMethods } from '../services/household-defaults.js';
@@ -98,6 +98,7 @@ export default async function authRoutes(app: FastifyInstance) {
             name: true,
             inviteCode: true,
             province: true,
+            bankPrograms: true,
             users: { select: { id: true, name: true }, orderBy: { id: 'asc' } },
           },
         },
@@ -113,6 +114,7 @@ export default async function authRoutes(app: FastifyInstance) {
         name: user.household.name,
         inviteCode: user.household.inviteCode,
         province: user.household.province,
+        bankPrograms: user.household.bankPrograms,
         members: user.household.users,
       },
     };
@@ -120,15 +122,24 @@ export default async function authRoutes(app: FastifyInstance) {
 
   app.patch('/household', { preHandler: [app.authenticate] }, async (request, reply) => {
     const body = z
-      .object({ province: z.string().nullable() })
+      .object({
+        province: z.string().nullable().optional(),
+        bankPrograms: z.array(z.string()).optional(),
+      })
       .parse(request.body);
-    if (body.province != null && !ARGENTINE_PROVINCES.includes(body.province as (typeof ARGENTINE_PROVINCES)[number])) {
+    if (
+      body.province != null &&
+      !ARGENTINE_PROVINCES.includes(body.province as (typeof ARGENTINE_PROVINCES)[number])
+    ) {
       return reply.code(400).send({ error: 'Provincia inválida' });
     }
+    const data: { province?: string | null; bankPrograms?: string[] } = {};
+    if (body.province !== undefined) data.province = body.province;
+    if (body.bankPrograms !== undefined) data.bankPrograms = normalizeBankPrograms(body.bankPrograms);
     const household = await app.prisma.household.update({
       where: { id: request.user.householdId },
-      data: { province: body.province },
-      select: { id: true, name: true, inviteCode: true, province: true },
+      data,
+      select: { id: true, name: true, inviteCode: true, province: true, bankPrograms: true },
     });
     return { household };
   });

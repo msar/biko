@@ -32,6 +32,8 @@ export function toPromotionInput(promo: {
   imageUrl?: string | null;
   storesAdherents?: boolean;
   provinces?: string[];
+  audienceSegments?: string[];
+  paymentFlow?: string | null;
   notes?: string | null;
   sourceUrl?: string | null;
   details?: string[];
@@ -58,6 +60,8 @@ export function toPromotionInput(promo: {
     imageUrl: promo.imageUrl,
     storesAdherents: promo.storesAdherents,
     provinces: promo.provinces ?? [],
+    audienceSegments: promo.audienceSegments ?? [],
+    paymentFlow: promo.paymentFlow ?? null,
     notes: promo.notes,
     sourceUrl: promo.sourceUrl,
     details: promo.details ?? [],
@@ -126,10 +130,18 @@ export async function suggestPromotion(
     categoryId?: string | null;
     paymentMethod: { entityId: string | null; entityName?: string; type: string; network: string };
     householdProvince?: string | null;
+    householdPrograms?: readonly string[] | null;
   },
 ): Promise<Suggestion | null> {
-  const { householdId, date, store, grossAmount, categoryId = null, paymentMethod, householdProvince = null } =
-    params;
+  const {
+    householdId,
+    date,
+    store,
+    grossAmount,
+    categoryId = null,
+    paymentMethod,
+    householdProvince = null,
+  } = params;
   // Efectivo / medios sin entidad no participan de promociones bancarias.
   if (paymentMethod.entityId == null) return null;
 
@@ -160,6 +172,7 @@ export async function suggestPromotion(
     grossAmount,
     categoryId,
     householdProvince,
+    householdPrograms: params.householdPrograms ?? null,
   });
 
   const yearMonth = yearMonthOf(date);
@@ -273,6 +286,11 @@ export async function suggestForExpense(
     include: { definition: { include: { entity: true } } },
   });
 
+  const household = await db.household.findUnique({
+    where: { id: params.householdId },
+    select: { province: true, bankPrograms: true },
+  });
+
   const results: ExpenseSuggestion[] = [];
   for (const method of methods) {
     const suggestion = await suggestPromotion(db, {
@@ -281,12 +299,8 @@ export async function suggestForExpense(
       store: params.store,
       grossAmount: params.grossAmount,
       categoryId: params.categoryId,
-      householdProvince: (
-        await db.household.findUnique({
-          where: { id: params.householdId },
-          select: { province: true },
-        })
-      )?.province,
+      householdProvince: household?.province,
+      householdPrograms: household?.bankPrograms ?? [],
       paymentMethod: {
         entityId: method.definition.entityId,
         entityName: method.definition.entity?.name ?? method.definition.name,

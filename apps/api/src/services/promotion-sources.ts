@@ -1,11 +1,19 @@
 import type { PrismaClient } from '@prisma/client';
 import type { FastifyBaseLogger } from 'fastify';
+import { galiciaSource } from './galicia-scraper.js';
 import { mercadoPagoSource } from './mercadopago-scraper.js';
 import { modoSource } from './modo-scraper.js';
 import { naranjaXSource } from './naranjax-scraper.js';
+import { santanderSource } from './santander-scraper.js';
 import { syncPromotionSource, type PromotionSource, type SyncResult } from './promotion-sync.js';
 
-export const PROMOTION_SOURCES: PromotionSource[] = [modoSource, naranjaXSource, mercadoPagoSource];
+export const PROMOTION_SOURCES: PromotionSource[] = [
+  modoSource,
+  naranjaXSource,
+  mercadoPagoSource,
+  santanderSource,
+  galiciaSource,
+];
 
 export type SourceSyncOutcome =
   | { source: string; ok: true; result: SyncResult }

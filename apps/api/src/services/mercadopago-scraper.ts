@@ -225,6 +225,7 @@ export function normalizeMercadoPagoCard(card: MercadoPagoCard, now = new Date()
     provinces: inferPromotionProvinces({ title: card.description, store, where: card.description }),
     storesAdherents: false,
     paymentFlow: /tienda online|compra online/i.test(card.description) ? 'online' : null,
+    audienceSegments: [],
   };
 }
 

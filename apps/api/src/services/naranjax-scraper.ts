@@ -339,6 +339,7 @@ export function normalizeBinderPlan(binder: NxBinder, plan: NxPlan, now = new Da
     }),
     storesAdherents: false,
     paymentFlow: plan.promotionDetails?.appliesOnline ? 'online' : null,
+    audienceSegments: [],
   };
 }
 
@@ -402,6 +403,7 @@ export function normalizeFeatured(card: NxFeatured, now = new Date()): ScrapedPr
     provinces: inferPromotionProvinces({ title: titleRaw, store }),
     storesAdherents: false,
     paymentFlow: /viajes\.naranjax\.com/i.test(sourceUrl!) ? 'online' : null,
+    audienceSegments: [],
   };
 }
 

@@ -1,4 +1,4 @@
-import { ARGENTINE_PROVINCES } from '@biko/shared';
+import { ARGENTINE_PROVINCES, BANK_PROGRAMS, BANK_PROGRAM_LABEL, type BankProgram } from '@biko/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
@@ -71,6 +71,7 @@ export default function SettingsPage() {
           name: string;
           inviteCode: string;
           province: string | null;
+          bankPrograms: string[];
           members: HouseholdMember[];
         };
       }>('/auth/me'),
@@ -84,8 +85,26 @@ export default function SettingsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
       void queryClient.invalidateQueries({ queryKey: ['promotions'] });
+      void queryClient.invalidateQueries({ queryKey: ['me'] });
     },
   });
+
+  const bankProgramsMutation = useMutation({
+    mutationFn: (bankPrograms: BankProgram[]) =>
+      api('/household', { method: 'PATCH', body: JSON.stringify({ bankPrograms }) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
+      void queryClient.invalidateQueries({ queryKey: ['promotions'] });
+      void queryClient.invalidateQueries({ queryKey: ['me'] });
+    },
+  });
+
+  const toggleBankProgram = (program: BankProgram) => {
+    const current = new Set(me?.household.bankPrograms ?? []);
+    if (current.has(program)) current.delete(program);
+    else current.add(program);
+    bankProgramsMutation.mutate([...current] as BankProgram[]);
+  };
 
   const closePanel = () => {
     setPanel('none');
@@ -141,7 +160,7 @@ export default function SettingsPage() {
             onChange={(e) => provinceMutation.mutate(e.target.value || null)}
             disabled={provinceMutation.isPending}
           >
-            <option value="">Sin filtro (ver todo el país)</option>
+            <option value="">Sin provincia (se muestran promos nacionales y sin zona)</option>
             {ARGENTINE_PROVINCES.map((p) => (
               <option key={p} value={p}>
                 {p}
@@ -149,6 +168,26 @@ export default function SettingsPage() {
             ))}
           </select>
         </label>
+        <fieldset className="filter-block" style={{ marginTop: '1rem', border: 0, padding: 0 }}>
+          <legend className="field-label">Programas / suscripciones</legend>
+          <p className="hint">Activá los que tengas para ver promos exclusivas (Select, Sorpresa, Eminent).</p>
+          <div className="method-list">
+            {BANK_PROGRAMS.map((program) => {
+              const selected = (me?.household.bankPrograms ?? []).includes(program);
+              return (
+                <button
+                  key={program}
+                  type="button"
+                  className={`method-chip ${selected ? 'selected' : ''}`}
+                  onClick={() => toggleBankProgram(program)}
+                  disabled={bankProgramsMutation.isPending}
+                >
+                  {BANK_PROGRAM_LABEL[program]}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
         <p className="hint">Sesión: {user?.email}</p>
         <button className="btn-link" onClick={logout}>
           Cerrar sesión

@@ -1,9 +1,11 @@
-import { getCategorySchedule, getWeeklyRecommendations, householdHasMatchingPaymentMethod, filterHiddenWeeklyGroups, WEEKLY_ESSENTIAL_CATEGORY_NAMES } from '@biko/shared';
+import { getCategorySchedule, getWeeklyRecommendations, householdHasMatchingPaymentMethod, filterHiddenWeeklyGroups, WEEKLY_ESSENTIAL_CATEGORY_NAMES, promotionMatchesProvince, promotionMatchesAudience } from '@biko/shared';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { mercadoPagoSource } from '../services/mercadopago-scraper.js';
 import { modoSource } from '../services/modo-scraper.js';
 import { naranjaXSource } from '../services/naranjax-scraper.js';
+import { galiciaSource } from '../services/galicia-scraper.js';
+import { santanderSource } from '../services/santander-scraper.js';
 import { syncAllPromotionSources } from '../services/promotion-sources.js';
 import { syncPromotionSource } from '../services/promotion-sync.js';
 import {
@@ -70,14 +72,17 @@ async function householdMethodsForRecommender(app: FastifyInstance, householdId:
 async function householdContext(app: FastifyInstance, householdId: string) {
   const [methods, household] = await Promise.all([
     householdMethodsForRecommender(app, householdId),
-    app.prisma.household.findUniqueOrThrow({ where: { id: householdId }, select: { province: true } }),
+    app.prisma.household.findUniqueOrThrow({
+      where: { id: householdId },
+      select: { province: true, bankPrograms: true },
+    }),
   ]);
-  return { methods, province: household.province };
+  return { methods, province: household.province, bankPrograms: household.bankPrograms };
 }
 
 export default async function promotionRoutes(app: FastifyInstance) {
   app.get('/promotions', { preHandler: [app.authenticate] }, async (request) => {
-    const { methods } = await householdContext(app, request.user.householdId);
+    const { methods, province, bankPrograms } = await householdContext(app, request.user.householdId);
     const promos = await app.prisma.promotion.findMany({
       include: FULL_INCLUDE,
       orderBy: [{ active: 'desc' }, { entity: { name: 'asc' } }],
@@ -92,6 +97,8 @@ export default async function promotionRoutes(app: FastifyInstance) {
           cardNetwork: p.cardNetwork,
         }),
       )
+      .filter((p) => promotionMatchesProvince(p.provinces, province))
+      .filter((p) => promotionMatchesAudience(p.audienceSegments, bankPrograms))
       .map((p) => ({ ...p, categoryIds: p.categories.map((c) => c.categoryId) }));
   });
 
@@ -134,7 +141,7 @@ export default async function promotionRoutes(app: FastifyInstance) {
 
   // Calendario semanal: solo rubros de compras frecuentes del hogar (Mi semana).
   app.get('/promotions/weekly', { preHandler: [app.authenticate] }, async (request) => {
-    const { methods, province } = await householdContext(app, request.user.householdId);
+    const { methods, province, bankPrograms } = await householdContext(app, request.user.householdId);
     const [promos, essentialCategories, hidden] = await Promise.all([
       app.prisma.promotion.findMany({ where: { active: true }, include: PROMOTION_INCLUDE }),
       app.prisma.category.findMany({
@@ -152,7 +159,7 @@ export default async function promotionRoutes(app: FastifyInstance) {
       new Date(),
       { mode: 'any', ids: essentialCategories.map((c) => c.id) },
       province,
-      { essentialsOnly: true, banksOnly: true },
+      { essentialsOnly: true, banksOnly: true, householdPrograms: bankPrograms },
     );
     return filterHiddenWeeklyGroups(days, hidden.map((h) => h.groupKey));
   });
@@ -229,11 +236,18 @@ export default async function promotionRoutes(app: FastifyInstance) {
       where: { id: categoryId, OR: [{ householdId: null }, { householdId: request.user.householdId }] },
     });
     if (!category) return reply.code(404).send({ error: 'Categoría no encontrada' });
-    const { methods, province } = await householdContext(app, request.user.householdId);
+    const { methods, province, bankPrograms } = await householdContext(app, request.user.householdId);
     const promos = await app.prisma.promotion.findMany({ where: { active: true }, include: PROMOTION_INCLUDE });
     return {
       category: { id: category.id, name: category.name, icon: category.icon },
-      days: getCategorySchedule(categoryId, methods, promos.map(toPromotionInput), new Date(), province),
+      days: getCategorySchedule(
+        categoryId,
+        methods,
+        promos.map(toPromotionInput),
+        new Date(),
+        province,
+        bankPrograms,
+      ),
     };
   });
 
@@ -245,6 +259,11 @@ export default async function promotionRoutes(app: FastifyInstance) {
       include: { definition: { include: { entity: true } } },
     });
     if (!method) return reply.code(400).send({ error: 'Medio de pago inválido' });
+
+    const household = await app.prisma.household.findUnique({
+      where: { id: request.user.householdId },
+      select: { province: true, bankPrograms: true },
+    });
 
     const suggestion = await suggestPromotion(app.prisma, {
       householdId: request.user.householdId,
@@ -258,12 +277,8 @@ export default async function promotionRoutes(app: FastifyInstance) {
         type: method.definition.type,
         network: method.definition.network,
       },
-      householdProvince: (
-        await app.prisma.household.findUnique({
-          where: { id: request.user.householdId },
-          select: { province: true },
-        })
-      )?.province,
+      householdProvince: household?.province,
+      householdPrograms: household?.bankPrograms ?? [],
     });
     return { suggestion };
   });
@@ -311,6 +326,26 @@ export default async function promotionRoutes(app: FastifyInstance) {
     } catch (err) {
       app.log.error(err, 'Naranja X sync failed');
       return reply.code(502).send({ error: 'No se pudo sincronizar con Naranja X' });
+    }
+  });
+
+  app.post('/promotions/sync/santander', { preHandler: superUserOnly }, async (request, reply) => {
+    const fresh = freshQuery.parse(request.query).fresh ?? false;
+    try {
+      return await syncPromotionSource(app.prisma, santanderSource, app.log, { fresh });
+    } catch (err) {
+      app.log.error(err, 'Santander sync failed');
+      return reply.code(502).send({ error: 'No se pudo sincronizar con Santander' });
+    }
+  });
+
+  app.post('/promotions/sync/galicia', { preHandler: superUserOnly }, async (request, reply) => {
+    const fresh = freshQuery.parse(request.query).fresh ?? false;
+    try {
+      return await syncPromotionSource(app.prisma, galiciaSource, app.log, { fresh });
+    } catch (err) {
+      app.log.error(err, 'Galicia sync failed');
+      return reply.code(502).send({ error: 'No se pudo sincronizar con Galicia' });
     }
   });
 

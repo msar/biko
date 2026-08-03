@@ -9,6 +9,7 @@ export * from './installment-attribution';
 export * from './promotion-recommender';
 export * from './promotion-suggester';
 export * from './provinces';
+export * from './bank-programs';
 export * from './weekly-promo-quality';
 export * from './super-user';
 export * from './category-groups';

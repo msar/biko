@@ -1,8 +1,8 @@
 import { dayOfWeekFromDate, DISCOUNT_KIND_LABEL, type DiscountKind } from '@biko/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, DAY_LABEL } from '../lib/api';
-import { filterPromosByLocation } from '../lib/promo-display';
 import {
   groupWeeklyPromos,
   promotionToWeeklyPromo,
@@ -299,17 +299,18 @@ export default function PromotionsPage() {
   const [filterDiscountKind, setFilterDiscountKind] = useState<DiscountKind | null>(null);
   const [filterSource, setFilterSource] = useState<'all' | 'MANUAL' | 'SCRAPED'>('all');
   const [activeOnly, setActiveOnly] = useState(true);
-  const [locationFilter, setLocationFilter] = useState<'household' | 'all'>('household');
+  const [filterPaymentFlow, setFilterPaymentFlow] = useState<'all' | 'instore' | 'online'>('all');
 
   const today = dayOfWeekFromDate(new Date());
 
   const { data: me } = useQuery({
     queryKey: ['me'],
-    queryFn: () => api<{ household: { province: string | null } }>('/auth/me'),
+    queryFn: () =>
+      api<{ household: { province: string | null; bankPrograms: string[] } }>('/auth/me'),
   });
 
   const { data: weekly } = useQuery({
-    queryKey: ['promotions', 'weekly', me?.household.province],
+    queryKey: ['promotions', 'weekly', me?.household.province, me?.household.bankPrograms],
     queryFn: () => api<DayRecommendation[]>('/promotions/weekly'),
   });
 
@@ -405,18 +406,19 @@ export default function PromotionsPage() {
 
   const trimmedSearch = searchQuery.trim();
 
-  const visiblePromos = filterPromosByLocation(
+  const visiblePromos =
     promotions?.filter((p) => {
       if (activeOnly && !p.active) return false;
       if (filterSource !== 'all' && p.source !== filterSource) return false;
       if (filterEntity && p.entityId !== filterEntity) return false;
       if (filterCategory && p.categoryIds.length > 0 && !p.categoryIds.includes(filterCategory)) return false;
       if (filterDiscountKind && p.discountKind !== filterDiscountKind) return false;
+      if (filterPaymentFlow !== 'all') {
+        if (p.paymentFlow !== filterPaymentFlow) return false;
+      }
       if (!promoMatchesSearch(p, trimmedSearch, categoryNamesById)) return false;
       return true;
-    }) ?? [],
-    locationFilter === 'household' ? (me?.household.province ?? null) : null,
-  );
+    }) ?? [];
 
   const catalogGroups = useMemo(
     () => groupWeeklyPromos(visiblePromos.map(promotionToWeeklyPromo)),
@@ -472,13 +474,45 @@ export default function PromotionsPage() {
       </div>
 
       {tab === 'hoy' && (
-        <TodayPromos
-          weekly={weekly}
-          today={today}
-          onHideGroup={onHideGroup}
-          onToggleFavorite={onToggleFavorite}
-          favoriteKeys={favoriteKeys}
-        />
+        <>
+          <div className="filter-block">
+            <span className="field-label">Canal</span>
+            <div className="segmented">
+              <button
+                className={filterPaymentFlow === 'all' ? 'active' : ''}
+                onClick={() => setFilterPaymentFlow('all')}
+              >
+                Todos
+              </button>
+              <button
+                className={filterPaymentFlow === 'instore' ? 'active' : ''}
+                onClick={() => setFilterPaymentFlow('instore')}
+              >
+                Presencial
+              </button>
+              <button
+                className={filterPaymentFlow === 'online' ? 'active' : ''}
+                onClick={() => setFilterPaymentFlow('online')}
+              >
+                Online
+              </button>
+            </div>
+          </div>
+          <TodayPromos
+            weekly={
+              filterPaymentFlow === 'all'
+                ? weekly
+                : weekly?.map((day) => ({
+                    ...day,
+                    promotions: day.promotions.filter((p) => p.paymentFlow === filterPaymentFlow),
+                  }))
+            }
+            today={today}
+            onHideGroup={onHideGroup}
+            onToggleFavorite={onToggleFavorite}
+            favoriteKeys={favoriteKeys}
+          />
+        </>
       )}
 
       {tab === 'calendar' && (
@@ -520,20 +554,39 @@ export default function PromotionsPage() {
             </div>
           </div>
           <div className="filter-block">
-            <span className="field-label">Ubicación</span>
+            <span className="field-label">Canal</span>
             <div className="segmented">
               <button
-                className={locationFilter === 'household' ? 'active' : ''}
-                onClick={() => setLocationFilter('household')}
+                className={filterPaymentFlow === 'all' ? 'active' : ''}
+                onClick={() => setFilterPaymentFlow('all')}
               >
-                {me?.household.province ? `Mi zona (${me.household.province})` : 'Configurar en Ajustes'}
+                Todos
               </button>
-              <button className={locationFilter === 'all' ? 'active' : ''} onClick={() => setLocationFilter('all')}>
-                Todo el país
+              <button
+                className={filterPaymentFlow === 'instore' ? 'active' : ''}
+                onClick={() => setFilterPaymentFlow('instore')}
+              >
+                Presencial
+              </button>
+              <button
+                className={filterPaymentFlow === 'online' ? 'active' : ''}
+                onClick={() => setFilterPaymentFlow('online')}
+              >
+                Online
               </button>
             </div>
-            {!me?.household.province && locationFilter === 'household' && (
-              <small className="hint">Elegí tu provincia en Ajustes para ocultar promos de otras zonas.</small>
+          </div>
+          <div className="filter-block">
+            <span className="field-label">Ubicación</span>
+            {me?.household.province ? (
+              <p className="hint">
+                Filtrando por tu provincia ({me.household.province}). Cambiála en{' '}
+                <Link to="/ajustes">Ajustes</Link>.
+              </p>
+            ) : (
+              <p className="hint">
+                Configurá tu provincia en <Link to="/ajustes">Ajustes</Link> para ocultar promos de otras zonas.
+              </p>
             )}
           </div>
           <div className="filter-block">

@@ -154,6 +154,7 @@ async function resolveExpenseDiscount(
   paymentMethod: { definition: { entityId: string | null; entity: { name: string } | null; name: string; type: string; network: string } },
   categoryId: string,
   householdProvince: string | null,
+  householdPrograms: readonly string[] = [],
 ): Promise<ResolvedDiscount> {
   const mode = resolvePromotionMode(body);
   const noDiscount: ResolvedDiscount = {
@@ -232,6 +233,7 @@ async function resolveExpenseDiscount(
     grossAmount: body.grossAmount,
     categoryId,
     householdProvince,
+    householdPrograms,
     paymentMethod: {
       entityId: paymentMethod.definition.entityId,
       entityName: paymentMethod.definition.entity?.name ?? paymentMethod.definition.name,
@@ -323,7 +325,7 @@ export async function createPurchaseWithAllocations(
 
   const household = await tx.household.findUniqueOrThrow({
     where: { id: householdId },
-    select: { province: true },
+    select: { province: true, bankPrograms: true },
   });
 
   const discount = await resolveExpenseDiscount(
@@ -333,6 +335,7 @@ export async function createPurchaseWithAllocations(
     paymentMethod,
     category.id,
     household.province,
+    household.bankPrograms,
   );
 
   if (body.scope === 'HOUSEHOLD' && body.myShareAmount != null && body.myShareAmount > discount.netAmount) {
@@ -458,7 +461,7 @@ export async function updatePurchaseWithAllocations(
 
   const household = await tx.household.findUniqueOrThrow({
     where: { id: householdId },
-    select: { province: true },
+    select: { province: true, bankPrograms: true },
   });
 
   const discount = await resolveExpenseDiscount(
@@ -468,6 +471,7 @@ export async function updatePurchaseWithAllocations(
     paymentMethod,
     category.id,
     household.province,
+    household.bankPrograms,
   );
 
   if (body.scope === 'HOUSEHOLD' && body.myShareAmount != null && body.myShareAmount > discount.netAmount) {

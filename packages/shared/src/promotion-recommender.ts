@@ -1,4 +1,5 @@
 import { CardNetwork, DayOfWeek, PaymentMethodType } from './enums';
+import { promotionMatchesAudience } from './bank-programs';
 import { findHouseholdPaymentMethodForPromo } from './payment-method-matching';
 import { promotionMatchesProvince } from './provinces';
 import { isActionableWeeklyPromo } from './weekly-promo-quality';
@@ -28,6 +29,8 @@ export interface PromotionInput {
   active: boolean;
   /** Vacío = nacional. */
   provinces?: string[];
+  /** Vacío = abierta; si hay valores, el hogar necesita un bankProgram coincidente. */
+  audienceSegments?: string[];
   discountKind?: string;
   discountLabel?: string | null;
   imageUrl?: string | null;
@@ -36,6 +39,7 @@ export interface PromotionInput {
   notes?: string | null;
   sourceUrl?: string | null;
   details?: string[];
+  paymentFlow?: string | null;
   /** Banco patrocinador en MODO (singular, legacy). */
   sponsorBank?: string | null;
   /** Bancos adheridos en MODO; si hay varios, matchea cualquiera del hogar. */
@@ -77,6 +81,7 @@ export interface DayRecommendation {
     sourceUrl?: string | null;
     minPurchaseAmount?: number | null;
     details?: string[];
+    paymentFlow?: string | null;
   }>;
 }
 
@@ -164,9 +169,13 @@ export function getWeeklyRecommendations(
   referenceDate: Date = new Date(),
   categoryFilter: CategoryFilter = null,
   householdProvince: string | null = null,
-  options: { essentialsOnly?: boolean; banksOnly?: boolean } = {},
+  options: {
+    essentialsOnly?: boolean;
+    banksOnly?: boolean;
+    householdPrograms?: readonly string[] | null;
+  } = {},
 ): DayRecommendation[] {
-  const { essentialsOnly = false, banksOnly = false } = options;
+  const { essentialsOnly = false, banksOnly = false, householdPrograms = null } = options;
   return WEEK.map((day) => ({
     dayOfWeek: day,
     promotions: promotions
@@ -175,6 +184,7 @@ export function getWeeklyRecommendations(
       .filter((promo) => promotionMatchesDay(promo, day))
       .filter((promo) => promotionMatchesCategoryFilter(promo, categoryFilter))
       .filter((promo) => promotionMatchesProvince(promo.provinces ?? [], householdProvince))
+      .filter((promo) => promotionMatchesAudience(promo.audienceSegments, householdPrograms))
       .filter((promo) => promo.discountKind !== 'INSTALLMENTS' && promo.discountPercentage > 0)
       .filter((promo) => !essentialsOnly || isActionableWeeklyPromo(promo))
       .flatMap((promo) => {
@@ -198,6 +208,7 @@ export function getWeeklyRecommendations(
             sourceUrl: promo.sourceUrl,
             minPurchaseAmount: promo.minPurchaseAmount,
             details: promo.details,
+            paymentFlow: promo.paymentFlow,
           },
         ];
       })
@@ -213,8 +224,8 @@ export interface CategoryDaySchedule {
 
 /**
  * "¿Cuándo conviene ir?" para una categoría: días ordenados por mejor
- * descuento aprovechable (solo promos que matchean la categoría y algún
- * medio de pago del hogar). Días sin promos no se incluyen.
+ * descuento aprovechable (solo promos elegibles: banco del hogar + calidad).
+ * Días sin promos no se incluyen.
  */
 export function getCategorySchedule(
   categoryId: string,
@@ -222,6 +233,7 @@ export function getCategorySchedule(
   promotions: PromotionInput[],
   referenceDate: Date = new Date(),
   householdProvince: string | null = null,
+  householdPrograms: readonly string[] | null = null,
 ): CategoryDaySchedule[] {
   return getWeeklyRecommendations(
     householdPaymentMethods,
@@ -229,6 +241,7 @@ export function getCategorySchedule(
     referenceDate,
     { mode: 'single', id: categoryId },
     householdProvince,
+    { banksOnly: true, essentialsOnly: true, householdPrograms },
   )
     .filter((day) => day.promotions.length > 0)
     .map((day) => ({

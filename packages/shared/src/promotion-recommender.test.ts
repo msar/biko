@@ -33,7 +33,7 @@ function promo(overrides: Partial<PromotionInput>): PromotionInput {
     id: 'promo-x',
     entityId: 'ent-santander',
     entityName: 'Santander',
-    store: null,
+    store: 'ChangoMás',
     daysOfWeek: [],
     categoryIds: [],
     paymentMethodType: null,
@@ -44,6 +44,9 @@ function promo(overrides: Partial<PromotionInput>): PromotionInput {
     validFrom: null,
     validTo: null,
     active: true,
+    sourceUrl: 'https://www.modo.com.ar/promos/test',
+    notes: '20% en ChangoMás',
+    categoryNames: ['Supermercado'],
     ...overrides,
   };
 }
@@ -200,6 +203,37 @@ describe('getCategorySchedule', () => {
     ];
     expect(getCategorySchedule('cat-fuel', [santanderVisa], promos)).toHaveLength(0);
   });
+
+  it('banksOnly hides generic MODO promos that only match a wallet', () => {
+    const genericModo = promo({
+      id: 'modo-fuel',
+      entityId: 'ent-modo',
+      entityName: 'MODO',
+      categoryIds: ['cat-fuel'],
+      categoryNames: ['Combustible'],
+      store: 'YPF',
+      notes: '10% en YPF',
+      sourceUrl: 'https://www.modo.com.ar/promos/ypf',
+    });
+    expect(getCategorySchedule('cat-fuel', [santanderVisa, modoWallet], [genericModo])).toHaveLength(0);
+  });
+
+  it('hides exclusive audience promos without the household program', () => {
+    const sorpresa = promo({
+      id: 'sor',
+      categoryIds: ['cat-fuel'],
+      categoryNames: ['Combustible'],
+      store: 'YPF',
+      notes: '20% Sorpresa',
+      daysOfWeek: [DayOfWeek.WEDNESDAY],
+      audienceSegments: ['SANTANDER_SORPRESA'],
+      sourceUrl: 'https://www.santander.com.ar/personas/beneficios',
+    });
+    expect(getCategorySchedule('cat-fuel', [santanderVisa], [sorpresa], new Date(), null, [])).toHaveLength(0);
+    expect(
+      getCategorySchedule('cat-fuel', [santanderVisa], [sorpresa], new Date(), null, ['SANTANDER_SORPRESA']),
+    ).toHaveLength(1);
+  });
 });
 
 describe('findCandidatePromotions', () => {
@@ -234,7 +268,7 @@ describe('findCandidatePromotions', () => {
   it('prefers store-specific promos and matches store case-insensitively', () => {
     const candidates = findCandidatePromotions({
       promotions: [
-        promo({ id: 'generic', discountPercentage: 30 }),
+        promo({ id: 'generic', store: null, discountPercentage: 30 }),
         promo({ id: 'store', store: 'ChangoMás', discountPercentage: 20 }),
       ],
       paymentMethod: santanderVisa,

@@ -4,5 +4,7 @@ export function promoDetailsLinkLabel(sourceUrl: string | null | undefined): str
   if (/naranjax\.com/i.test(sourceUrl)) return 'Ver detalles en NX';
   if (/modo\.com\.ar/i.test(sourceUrl)) return 'Ver detalles en MODO';
   if (/mercadopago\.com/i.test(sourceUrl)) return 'Ver detalles en Mercado Pago';
+  if (/santander\.com\.ar/i.test(sourceUrl)) return 'Ver detalles en Santander';
+  if (/galicia\.ar|bancogalicia/i.test(sourceUrl)) return 'Ver detalles en Galicia';
   return 'Ver detalles';
 }
