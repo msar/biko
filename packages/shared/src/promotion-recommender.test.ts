@@ -9,6 +9,7 @@ import {
   promotionMatchesAnyCategory,
   promotionMatchesCategory,
   promotionMatchesDay,
+  promotionMatchesPaymentFlow,
 } from './promotion-recommender';
 import { findCandidatePromotions } from './promotion-suggester';
 
@@ -77,6 +78,28 @@ describe('promotionMatchesDay', () => {
     expect(promotionMatchesDay(p, DayOfWeek.MONDAY)).toBe(true);
     expect(promotionMatchesDay(p, DayOfWeek.WEDNESDAY)).toBe(true);
     expect(promotionMatchesDay(p, DayOfWeek.TUESDAY)).toBe(false);
+  });
+});
+
+describe('promotionMatchesPaymentFlow', () => {
+  it('all filter matches any canal', () => {
+    expect(promotionMatchesPaymentFlow(null, 'all')).toBe(true);
+    expect(promotionMatchesPaymentFlow('instore', 'all')).toBe(true);
+    expect(promotionMatchesPaymentFlow('online', 'all')).toBe(true);
+  });
+
+  it('null / both apply to presencial and online', () => {
+    expect(promotionMatchesPaymentFlow(null, 'instore')).toBe(true);
+    expect(promotionMatchesPaymentFlow(null, 'online')).toBe(true);
+    expect(promotionMatchesPaymentFlow('both', 'instore')).toBe(true);
+    expect(promotionMatchesPaymentFlow('both', 'online')).toBe(true);
+  });
+
+  it('specific canal only matches itself', () => {
+    expect(promotionMatchesPaymentFlow('instore', 'instore')).toBe(true);
+    expect(promotionMatchesPaymentFlow('instore', 'online')).toBe(false);
+    expect(promotionMatchesPaymentFlow('online', 'online')).toBe(true);
+    expect(promotionMatchesPaymentFlow('online', 'instore')).toBe(false);
   });
 });
 

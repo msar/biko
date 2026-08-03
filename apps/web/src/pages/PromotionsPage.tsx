@@ -1,4 +1,4 @@
-import { dayOfWeekFromDate, DISCOUNT_KIND_LABEL, filterWeeklyByFavorites, type DiscountKind } from '@biko/shared';
+import { dayOfWeekFromDate, DISCOUNT_KIND_LABEL, filterWeeklyByFavorites, promotionMatchesPaymentFlow, type DiscountKind } from '@biko/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -431,9 +431,7 @@ export default function PromotionsPage() {
       if (filterEntity && p.entityId !== filterEntity) return false;
       if (filterCategory && p.categoryIds.length > 0 && !p.categoryIds.includes(filterCategory)) return false;
       if (filterDiscountKind && p.discountKind !== filterDiscountKind) return false;
-      if (filterPaymentFlow !== 'all') {
-        if (p.paymentFlow !== filterPaymentFlow) return false;
-      }
+      if (!promotionMatchesPaymentFlow(p.paymentFlow, filterPaymentFlow)) return false;
       if (!promoMatchesSearch(p, trimmedSearch, categoryNamesById)) return false;
       return true;
     }) ?? [];
@@ -522,7 +520,9 @@ export default function PromotionsPage() {
                 ? weekly
                 : weekly?.map((day) => ({
                     ...day,
-                    promotions: day.promotions.filter((p) => p.paymentFlow === filterPaymentFlow),
+                    promotions: day.promotions.filter((p) =>
+                      promotionMatchesPaymentFlow(p.paymentFlow, filterPaymentFlow),
+                    ),
                   }))
             }
             today={today}

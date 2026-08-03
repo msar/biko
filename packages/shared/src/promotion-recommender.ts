@@ -118,6 +118,19 @@ export function promotionMatchesDay(promo: Pick<PromotionInput, 'daysOfWeek'>, d
 }
 
 /**
+ * Filtro de canal (presencial / online).
+ * Sin canal declarado (null) o "both": aplica a ambos — típico de supermercados.
+ */
+export function promotionMatchesPaymentFlow(
+  paymentFlow: string | null | undefined,
+  filter: 'all' | 'instore' | 'online',
+): boolean {
+  if (filter === 'all') return true;
+  if (paymentFlow == null || paymentFlow === '' || paymentFlow === 'both') return true;
+  return paymentFlow === filter;
+}
+
+/**
  * Una promo aplica a una categoría si no declara rubros (promo genérica /
  * cargada a mano sin rubro) o si la incluye.
  */
