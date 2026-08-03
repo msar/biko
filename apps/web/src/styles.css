@@ -1998,8 +1998,19 @@ label {
 
 .when-day-head {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.when-day-head strong {
+  margin-right: auto;
+}
+
+.when-day-discount {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted, #666);
 }
 
 .badge-best {

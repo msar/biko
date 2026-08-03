@@ -197,6 +197,17 @@ describe('getCategorySchedule', () => {
     expect(schedule[0]!.bestDiscount).toBe(30);
   });
 
+  it('excludes other categories and uncategorized promos', () => {
+    const promos = [
+      promo({ id: 'fuel', categoryIds: ['cat-fuel'], daysOfWeek: [DayOfWeek.WEDNESDAY], discountPercentage: 20 }),
+      promo({ id: 'super', categoryIds: ['cat-super'], daysOfWeek: [DayOfWeek.WEDNESDAY], discountPercentage: 50 }),
+      promo({ id: 'generic', categoryIds: [], daysOfWeek: [DayOfWeek.WEDNESDAY], discountPercentage: 80 }),
+    ];
+    const schedule = getCategorySchedule('cat-fuel', [santanderVisa], promos);
+    expect(schedule).toHaveLength(1);
+    expect(schedule[0]!.promotions.map((p) => p.promotionId)).toEqual(['fuel']);
+  });
+
   it('skips promos whose payment method the household lacks', () => {
     const promos = [
       promo({ id: 'naranja-fuel', entityId: 'ent-naranja', entityName: 'Naranja X', categoryIds: ['cat-fuel'] }),

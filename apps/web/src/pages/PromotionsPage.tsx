@@ -143,7 +143,13 @@ function WhenToGo({
 }) {
   const [categoryId, setCategoryId] = useState<string | null>(null);
 
-  const { data: schedule, isLoading } = useQuery({
+  // Solo rubros globales (seed): ¿Cuándo ir? es para compras tipificadas (combustible, super…).
+  const shoppingCategories = useMemo(
+    () => categories.filter((cat) => cat.householdId == null),
+    [categories],
+  );
+
+  const { data: schedule, isLoading, isFetching } = useQuery({
     queryKey: ['promotions', 'by-category', categoryId],
     queryFn: () => api<CategorySchedule>(`/promotions/by-category/${categoryId}`),
     enabled: Boolean(categoryId),
@@ -153,9 +159,10 @@ function WhenToGo({
     <>
       <p className="hint">Elegí un rubro y te ordenamos los días por mejor descuento.</p>
       <div className="category-grid">
-        {categories.map((cat) => (
+        {shoppingCategories.map((cat) => (
           <button
             key={cat.id}
+            type="button"
             className={`category-chip ${categoryId === cat.id ? 'selected' : ''}`}
             onClick={() => setCategoryId(cat.id)}
           >
@@ -165,7 +172,9 @@ function WhenToGo({
         ))}
       </div>
 
-      {categoryId && schedule && schedule.days.length === 0 && !isLoading && (
+      {categoryId && (isLoading || isFetching) && <p className="hint">Buscando mejores días…</p>}
+
+      {categoryId && schedule && schedule.days.length === 0 && !isLoading && !isFetching && (
         <p className="empty-state">
           Sin promos de {schedule.category.name} para tus medios de pago. Probá cargar una promo manualmente.
         </p>
@@ -175,6 +184,7 @@ function WhenToGo({
         <div key={day.dayOfWeek} className={`card when-day ${idx === 0 ? 'best' : ''}`}>
           <div className="when-day-head">
             <strong>{DAY_LABEL[day.dayOfWeek]}</strong>
+            <span className="when-day-discount">hasta {day.bestDiscount}%</span>
             {idx === 0 && <span className="badge-best">Mejor día</span>}
           </div>
           {groupWeeklyPromos(day.promotions).map((group) => (

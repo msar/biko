@@ -144,7 +144,8 @@ function promotionMatchesCategoryFilter(
   filter: CategoryFilter,
 ): boolean {
   if (filter == null) return true;
-  if (filter.mode === 'single') return promotionMatchesCategory(promo, filter.id);
+  // "¿Cuándo ir?" / allowlist: la promo debe declarar el rubro. Sin categoría ≠ todas.
+  if (filter.mode === 'single') return promotionMatchesAnyCategory(promo, [filter.id]);
   return promotionMatchesAnyCategory(promo, filter.ids);
 }
 
