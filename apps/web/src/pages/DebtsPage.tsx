@@ -360,7 +360,7 @@ export default function DebtsPage() {
       )}
 
       <p className="hint center">
-        <Link to="/ajustes">← Volver a ajustes</Link>
+        <Link to="/ajustes">← Volver a Más</Link>
       </p>
 
       <ConfirmDialog

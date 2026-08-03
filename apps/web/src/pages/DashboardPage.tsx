@@ -99,6 +99,12 @@ export default function DashboardPage() {
           <Link to="/recurrentes" className="btn-link">
             Recurrentes
           </Link>
+          <Link to="/deudas" className="btn-link">
+            Deudas
+          </Link>
+          <Link to="/juntada" className="btn-link">
+            Liquidar juntada
+          </Link>
           <Link to="/historico" className="btn-link">
             Largo plazo ›
           </Link>

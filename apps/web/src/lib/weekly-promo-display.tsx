@@ -313,7 +313,7 @@ export function TodayPromos({
         </div>
       ) : (
         <p className="empty-state">
-          {DAY_LABEL[today]}: sin promos para tus medios de pago. Cargá tus tarjetas en Ajustes o buscá en Todas.
+          {DAY_LABEL[today]}: sin promos para tus medios de pago. Cargá tus tarjetas en Más o buscá en Todas.
         </p>
       )}
     </div>

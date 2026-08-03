@@ -112,7 +112,7 @@ export default function App() {
             <span className="nav-icon">📅</span>Promos
           </NavLink>
           <NavLink to="/ajustes">
-            <span className="nav-icon">👤</span>Perfil
+            <span className="nav-icon">⋯</span>Más
           </NavLink>
         </nav>
       )}

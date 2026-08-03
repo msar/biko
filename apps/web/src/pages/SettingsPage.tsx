@@ -1,4 +1,10 @@
-import { ARGENTINE_PROVINCES, BANK_PROGRAMS, BANK_PROGRAM_LABEL, type BankProgram } from '@biko/shared';
+import {
+  ARGENTINE_PROVINCES,
+  BANK_PROGRAM_SHORT_LABEL,
+  bankProgramEntityNames,
+  programsForEntityName,
+  type BankProgram,
+} from '@biko/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
@@ -24,6 +30,12 @@ import {
 import type { HouseholdMember, PaymentMethod, PaymentMethodDefinition } from '../lib/types';
 
 type PasskeyRow = { id: string; deviceName: string | null; createdAt: string };
+
+type DisplayGroup = {
+  entityId: string;
+  entityName: string;
+  items: PaymentMethod[];
+};
 
 function PasskeySettingsSection() {
   const { registerPasskey } = useAuth();
@@ -98,6 +110,42 @@ function PasskeySettingsSection() {
         </button>
       )}
     </section>
+  );
+}
+
+function BankProgramsRow({
+  entityName,
+  selected,
+  pending,
+  onToggle,
+}: {
+  entityName: string;
+  selected: readonly string[];
+  pending: boolean;
+  onToggle: (program: BankProgram) => void;
+}) {
+  const programs = programsForEntityName(entityName);
+  if (programs.length === 0) return null;
+  const selectedSet = new Set(selected);
+
+  return (
+    <div className="bank-programs-row">
+      <span className="field-label">Programas {entityName}</span>
+      <p className="hint">Activá los que tengas para ver promos exclusivas.</p>
+      <div className="method-list">
+        {programs.map((program) => (
+          <button
+            key={program}
+            type="button"
+            className={`method-chip ${selectedSet.has(program) ? 'selected' : ''}`}
+            onClick={() => onToggle(program)}
+            disabled={pending}
+          >
+            {BANK_PROGRAM_SHORT_LABEL[program]}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -215,14 +263,33 @@ export default function SettingsPage() {
   const editMethod = methods?.find((m) => m.id === editId);
   const grouped = methods ? groupMethodsByEntity(methods) : [];
 
+  const displayGroups: DisplayGroup[] = (() => {
+    const byName = new Map(grouped.map((g) => [g.entityName, g]));
+    for (const name of bankProgramEntityNames()) {
+      if (!byName.has(name)) {
+        byName.set(name, {
+          entityId: `program-stub-${name}`,
+          entityName: name,
+          kind: 'BANK',
+          items: [],
+        });
+      }
+    }
+    return [...byName.values()]
+      .map((g) => ({ entityId: g.entityId, entityName: g.entityName, items: g.items }))
+      .sort((a, b) => a.entityName.localeCompare(b.entityName));
+  })();
+
+  const householdPrograms = me?.household.bankPrograms ?? [];
+
   return (
     <div className="page">
       <header className="page-header">
-        <h1>Ajustes</h1>
+        <h1>Más</h1>
       </header>
 
       <section className="card">
-        <h2>Hogar</h2>
+        <h2>Cuenta</h2>
         <p>
           <strong>{me?.household.name}</strong>
         </p>
@@ -246,26 +313,6 @@ export default function SettingsPage() {
             ))}
           </select>
         </label>
-        <fieldset className="filter-block" style={{ marginTop: '1rem', border: 0, padding: 0 }}>
-          <legend className="field-label">Programas / suscripciones</legend>
-          <p className="hint">Activá los que tengas para ver promos exclusivas (Select, Sorpresa, Eminent).</p>
-          <div className="method-list">
-            {BANK_PROGRAMS.map((program) => {
-              const selected = (me?.household.bankPrograms ?? []).includes(program);
-              return (
-                <button
-                  key={program}
-                  type="button"
-                  className={`method-chip ${selected ? 'selected' : ''}`}
-                  onClick={() => toggleBankProgram(program)}
-                  disabled={bankProgramsMutation.isPending}
-                >
-                  {BANK_PROGRAM_LABEL[program]}
-                </button>
-              );
-            })}
-          </div>
-        </fieldset>
         <p className="hint">Sesión: {user?.email}</p>
         <button className="btn-link" onClick={logout}>
           Cerrar sesión
@@ -351,38 +398,6 @@ export default function SettingsPage() {
             {pushBusy ? '…' : pushEnabled ? 'Desactivar alertas' : 'Activar alertas'}
           </button>
         )}
-        <p className="hint">
-          También podés gestionar <Link to="/recurrentes">pagos recurrentes</Link> (luz, gas,
-          gym…), <Link to="/deudas">deudas con contactos</Link> o{' '}
-          <Link to="/importar-resumen">importar un resumen</Link> de tarjeta.
-        </p>
-      </section>
-
-      <section className="card">
-        <h2>Deudas</h2>
-        <p className="hint">Registrá lo que te deben o debés a amigos y familiares, con cuotas si aplica.</p>
-        <Link to="/deudas" className="btn-link">
-          Ir a deudas →
-        </Link>
-      </section>
-
-      <section className="card">
-        <h2>Liquidar juntada</h2>
-        <p className="hint">
-          Cuando varios pagaron en una juntada, calculá quién le paga a quién y registrá tu parte como
-          gasto.
-        </p>
-        <Link to="/juntada" className="btn-link">
-          Ir a liquidar →
-        </Link>
-      </section>
-
-      <section className="card">
-        <h2>Importar resumen</h2>
-        <p className="hint">Cargá el PDF de Santander o BBVA y categorizá los consumos nuevos.</p>
-        <Link to="/importar-resumen" className="btn-link">
-          Importar resumen de tarjeta →
-        </Link>
       </section>
 
       <section className="card">
@@ -425,9 +440,15 @@ export default function SettingsPage() {
           />
         )}
 
-        {grouped.map((group) => (
+        {displayGroups.map((group) => (
           <div key={group.entityId} className="payment-method-group">
             <h3 className="payment-method-group-title">{group.entityName}</h3>
+            <BankProgramsRow
+              entityName={group.entityName}
+              selected={householdPrograms}
+              pending={bankProgramsMutation.isPending}
+              onToggle={toggleBankProgram}
+            />
             {group.items.map((m) => (
               <div key={m.id} className="list-row payment-method-row">
                 <div>
@@ -482,6 +503,28 @@ export default function SettingsPage() {
         {methods && methods.length === 0 && panel === 'none' && (
           <p className="hint">Agregá tus tarjetas y billeteras del catálogo.</p>
         )}
+      </section>
+
+      <section className="card">
+        <h2>Herramientas</h2>
+        <div className="tools-list">
+          <Link to="/deudas" className="tools-list-link">
+            <span>Deudas</span>
+            <span aria-hidden>→</span>
+          </Link>
+          <Link to="/juntada" className="tools-list-link">
+            <span>Liquidar juntada</span>
+            <span aria-hidden>→</span>
+          </Link>
+          <Link to="/importar-resumen" className="tools-list-link">
+            <span>Importar resumen</span>
+            <span aria-hidden>→</span>
+          </Link>
+          <Link to="/recurrentes" className="tools-list-link">
+            <span>Recurrentes</span>
+            <span aria-hidden>→</span>
+          </Link>
+        </div>
       </section>
     </div>
   );

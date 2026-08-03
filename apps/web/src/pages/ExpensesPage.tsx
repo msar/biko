@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { api, fmtARS, fmtDate, fmtMoneyExact, toArsDisplay } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -61,6 +61,9 @@ export default function ExpensesPage() {
     <div className="page">
       <header className="page-header">
         <h1>Gastos</h1>
+        <Link to="/importar-resumen" className="btn-link">
+          Importar resumen
+        </Link>
       </header>
 
       {pending.length > 0 && (

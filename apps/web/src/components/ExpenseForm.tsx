@@ -886,7 +886,7 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
         <h2 className="field-label">Medio de pago</h2>
         {methods && methods.length === 0 && (
           <p className="hint">
-            No tenés medios de pago cargados. Agregalos en <a href="/ajustes">Ajustes</a>.
+            No tenés medios de pago cargados. Agregalos en <a href="/ajustes">Más</a>.
           </p>
         )}
         {(methods ? groupMethodsByEntity(methods) : []).map((group) => (

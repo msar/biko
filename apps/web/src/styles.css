@@ -602,6 +602,44 @@ body {
   letter-spacing: 0.04em;
 }
 
+.bank-programs-row {
+  margin: 0 0 10px;
+}
+
+.bank-programs-row .field-label {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.bank-programs-row .hint {
+  margin: 0 0 6px;
+}
+
+.tools-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.tools-list-link {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
+  font-weight: 500;
+}
+
+.tools-list-link:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.tools-list-link:first-child {
+  padding-top: 0;
+}
+
 .payment-method-wizard {
   margin-bottom: 12px;
 }

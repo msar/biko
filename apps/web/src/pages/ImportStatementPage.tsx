@@ -306,7 +306,7 @@ export default function ImportStatementPage() {
     <div className="page">
       <header className="page-header">
         <Link to="/ajustes" className="btn-link">
-          ← Ajustes
+          ← Más
         </Link>
         <h1>Importar resumen</h1>
       </header>
@@ -348,7 +348,7 @@ export default function ImportStatementPage() {
           <h2>2. Tarjeta</h2>
           {creditCards.length === 0 ? (
             <p className="hint">
-              Agregá una tarjeta de crédito en <Link to="/ajustes">Ajustes</Link> primero.
+              Agregá una tarjeta de crédito en <Link to="/ajustes">Más</Link> primero.
             </p>
           ) : (
             <select value={paymentMethodId} onChange={(e) => setPaymentMethodId(e.target.value)}>

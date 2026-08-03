@@ -207,7 +207,7 @@ export default function PartySettlePage() {
       )}
 
       <p className="hint">
-        <Link to="/ajustes">← Volver a ajustes</Link>
+        <Link to="/ajustes">← Volver a Más</Link>
       </p>
     </div>
   );

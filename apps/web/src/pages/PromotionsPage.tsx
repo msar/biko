@@ -115,7 +115,7 @@ function WeeklyCalendar({
       )}
       {favoriteKeys.size > 0 && favoriteDays.length === 0 && (
         <p className="empty-state">
-          Tus favoritas no aplican esta semana con tus medios de pago. Probá otras o revisá Ajustes.
+          Tus favoritas no aplican esta semana con tus medios de pago. Probá otras o revisá Más.
         </p>
       )}
       {favoriteDays.map((day) => (
@@ -599,11 +599,11 @@ export default function PromotionsPage() {
             {me?.household.province ? (
               <p className="hint">
                 Filtrando por tu provincia ({me.household.province}). Cambiála en{' '}
-                <Link to="/ajustes">Ajustes</Link>.
+                <Link to="/ajustes">Más</Link>.
               </p>
             ) : (
               <p className="hint">
-                Configurá tu provincia en <Link to="/ajustes">Ajustes</Link> para ocultar promos de otras zonas.
+                Configurá tu provincia en <Link to="/ajustes">Más</Link> para ocultar promos de otras zonas.
               </p>
             )}
           </div>

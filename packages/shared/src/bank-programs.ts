@@ -1,4 +1,4 @@
-/** Known household bank programs / paid tiers (self-declared in Ajustes). */
+/** Known household bank programs / paid tiers (self-declared in Más → Medios de pago). */
 export const BANK_PROGRAMS = [
   'SANTANDER_SELECT',
   'SANTANDER_SORPRESA',
@@ -12,6 +12,27 @@ export const BANK_PROGRAM_LABEL: Record<BankProgram, string> = {
   SANTANDER_SORPRESA: 'Santander Sorpresa',
   GALICIA_EMINENT: 'Galicia Eminent',
 };
+
+/** Short chip labels when shown under a bank group (e.g. "Programas Santander"). */
+export const BANK_PROGRAM_SHORT_LABEL: Record<BankProgram, string> = {
+  SANTANDER_SELECT: 'Select',
+  SANTANDER_SORPRESA: 'Sorpresa',
+  GALICIA_EMINENT: 'Eminent',
+};
+
+/** Catalog entity names that have known programs (matches seed entity names). */
+export const BANK_PROGRAMS_BY_ENTITY_NAME: Readonly<Record<string, readonly BankProgram[]>> = {
+  Santander: ['SANTANDER_SELECT', 'SANTANDER_SORPRESA'],
+  Galicia: ['GALICIA_EMINENT'],
+};
+
+export function programsForEntityName(entityName: string): readonly BankProgram[] {
+  return BANK_PROGRAMS_BY_ENTITY_NAME[entityName] ?? [];
+}
+
+export function bankProgramEntityNames(): string[] {
+  return Object.keys(BANK_PROGRAMS_BY_ENTITY_NAME);
+}
 
 export function isBankProgram(value: string): value is BankProgram {
   return (BANK_PROGRAMS as readonly string[]).includes(value);

@@ -35,7 +35,7 @@ export default function PushEnableBanner() {
           className="btn-primary install-banner-action"
           onClick={() => setVisible(false)}
         >
-          Ir a Ajustes
+          Ir a Más
         </Link>
         <button
           type="button"

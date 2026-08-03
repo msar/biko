@@ -222,7 +222,7 @@ export default function AdminPage() {
     <div className="page">
       <header className="page-header">
         <h1>Admin</h1>
-        <Link to="/ajustes" className="icon-btn" aria-label="Volver a ajustes">
+        <Link to="/ajustes" className="icon-btn" aria-label="Volver a Más">
           ←
         </Link>
       </header>
