@@ -640,6 +640,24 @@ body {
   padding-top: 0;
 }
 
+.settings-subsection {
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.settings-subsection:first-of-type {
+  padding-top: 0;
+  margin-top: 8px;
+  border-top: 0;
+}
+
+.settings-subsection h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
 .payment-method-wizard {
   margin-bottom: 12px;
 }

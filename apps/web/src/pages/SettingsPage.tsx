@@ -84,8 +84,8 @@ function PasskeySettingsSection() {
   if (!available && credentials.length === 0) return null;
 
   return (
-    <section className="card">
-      <h2>Face ID / biometría</h2>
+    <div className="settings-subsection">
+      <h3>Biometría</h3>
       <p className="hint">
         Entrá sin contraseña con Face ID (iPhone) o huella/rostro (Android). Funciona en la app instalada y en el
         navegador compatible.
@@ -109,7 +109,7 @@ function PasskeySettingsSection() {
           {busy ? '…' : credentials.length ? 'Agregar otra passkey' : 'Activar Face ID / biometría'}
         </button>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -289,115 +289,131 @@ export default function SettingsPage() {
       </header>
 
       <section className="card">
-        <h2>Cuenta</h2>
-        <p>
-          <strong>{me?.household.name}</strong>
-        </p>
-        {me && (
-          <p className="hint">
-            Código de invitación para tu pareja: <code>{me.household.inviteCode}</code>
-          </p>
-        )}
-        <label>
-          Provincia (para filtrar promos)
-          <select
-            value={me?.household.province ?? ''}
-            onChange={(e) => provinceMutation.mutate(e.target.value || null)}
-            disabled={provinceMutation.isPending}
-          >
-            <option value="">Sin provincia (se muestran promos nacionales y sin zona)</option>
-            {ARGENTINE_PROVINCES.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="hint">Sesión: {user?.email}</p>
-        <button className="btn-link" onClick={logout}>
-          Cerrar sesión
-        </button>
+        <h2>Herramientas</h2>
+        <div className="tools-list">
+          <Link to="/deudas" className="tools-list-link">
+            <span>Deudas</span>
+            <span aria-hidden>→</span>
+          </Link>
+          <Link to="/juntada" className="tools-list-link">
+            <span>Liquidar juntada</span>
+            <span aria-hidden>→</span>
+          </Link>
+          <Link to="/importar-resumen" className="tools-list-link">
+            <span>Importar resumen</span>
+            <span aria-hidden>→</span>
+          </Link>
+          <Link to="/recurrentes" className="tools-list-link">
+            <span>Pagos recurrentes</span>
+            <span aria-hidden>→</span>
+          </Link>
+        </div>
       </section>
 
-      <PasskeySettingsSection />
-
-      <InstallAppSection />
-
-      {user?.isSuperUser && (
-        <section className="card">
-          <h2>Administración</h2>
-          <p className="hint">Herramientas de mantenimiento del catálogo de promociones.</p>
-          <Link to="/admin" className="btn-link">
-            Sincronización de promos →
-          </Link>
-        </section>
-      )}
-
       <section className="card">
-        <h2>Notificaciones push</h2>
-        <p className="hint">Estado: {pushStatus}</p>
-        {pushError && <p className="error">{pushError}</p>}
-        {!pushSupported() && pushBlockHint && (
-          <div className="push-help">
-            <p className="hint">{pushBlockHint}</p>
-            {pushBlockReason === 'ios-browser' && <IosInstallSteps />}
-            {standalone && pushBlockReason === 'ios-version' && (
-              <p className="hint">
-                Mientras tanto, los avisos siguen apareciendo en la campanita de la barra superior.
-              </p>
-            )}
-          </div>
-        )}
-        {pushSupported() && (
-          <button
-            type="button"
-            className={pushEnabled ? 'btn-secondary' : 'btn-primary'}
-            disabled={pushBusy || pushStatus === 'Bloqueadas por el navegador'}
-            onClick={() => {
-              setPushError(null);
-              setPushBusy(true);
-              if (pushEnabled) {
-                void unsubscribeFromPush((body) =>
-                  api('/notifications/push-subscriptions', {
-                    method: 'DELETE',
-                    body: JSON.stringify(body),
-                  }),
+        <h2>Ajustes</h2>
+
+        <div className="settings-subsection">
+          <h3>Cuenta</h3>
+          <p>
+            <strong>{me?.household.name}</strong>
+          </p>
+          {me && (
+            <p className="hint">
+              Código de invitación para tu pareja: <code>{me.household.inviteCode}</code>
+            </p>
+          )}
+          <label>
+            Provincia (para filtrar promos)
+            <select
+              value={me?.household.province ?? ''}
+              onChange={(e) => provinceMutation.mutate(e.target.value || null)}
+              disabled={provinceMutation.isPending}
+            >
+              <option value="">Sin provincia (se muestran promos nacionales y sin zona)</option>
+              {ARGENTINE_PROVINCES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="hint">Sesión: {user?.email}</p>
+          <button className="btn-link" onClick={logout}>
+            Cerrar sesión
+          </button>
+        </div>
+
+        <PasskeySettingsSection />
+
+        <div className="settings-subsection">
+          <h3>Notificaciones</h3>
+          <p className="hint">Estado: {pushStatus}</p>
+          {pushError && <p className="error">{pushError}</p>}
+          {!pushSupported() && pushBlockHint && (
+            <div className="push-help">
+              <p className="hint">{pushBlockHint}</p>
+              {pushBlockReason === 'ios-browser' && <IosInstallSteps />}
+              {standalone && pushBlockReason === 'ios-version' && (
+                <p className="hint">
+                  Mientras tanto, los avisos siguen apareciendo en la campanita de la barra superior.
+                </p>
+              )}
+            </div>
+          )}
+          {pushSupported() && (
+            <button
+              type="button"
+              className={pushEnabled ? 'btn-secondary' : 'btn-primary'}
+              disabled={pushBusy || pushStatus === 'Bloqueadas por el navegador'}
+              onClick={() => {
+                setPushError(null);
+                setPushBusy(true);
+                if (pushEnabled) {
+                  void unsubscribeFromPush((body) =>
+                    api('/notifications/push-subscriptions', {
+                      method: 'DELETE',
+                      body: JSON.stringify(body),
+                    }),
+                  )
+                    .then(() => {
+                      setPushEnabled(false);
+                      setPushStatus('Desactivadas');
+                    })
+                    .catch((err) =>
+                      setPushError(err instanceof Error ? err.message : 'No se pudo desactivar'),
+                    )
+                    .finally(() => setPushBusy(false));
+                  return;
+                }
+                void subscribeToPush(
+                  async () => {
+                    const res = await api<{ publicKey: string }>('/notifications/vapid-public-key');
+                    return res.publicKey;
+                  },
+                  (body) =>
+                    api('/notifications/push-subscriptions', {
+                      method: 'POST',
+                      body: JSON.stringify(body),
+                    }),
                 )
-                  .then(() => {
-                    setPushEnabled(false);
-                    setPushStatus('Desactivadas');
+                  .then((r) => {
+                    const enabled = r === 'granted';
+                    setPushEnabled(enabled);
+                    setPushStatus(enabled ? 'Activadas' : 'No concedidas');
                   })
                   .catch((err) =>
-                    setPushError(err instanceof Error ? err.message : 'No se pudo desactivar'),
+                    setPushError(err instanceof Error ? err.message : 'No se pudo activar'),
                   )
                   .finally(() => setPushBusy(false));
-                return;
-              }
-              void subscribeToPush(
-                async () => {
-                  const res = await api<{ publicKey: string }>('/notifications/vapid-public-key');
-                  return res.publicKey;
-                },
-                (body) =>
-                  api('/notifications/push-subscriptions', {
-                    method: 'POST',
-                    body: JSON.stringify(body),
-                  }),
-              )
-                .then((r) => {
-                  const enabled = r === 'granted';
-                  setPushEnabled(enabled);
-                  setPushStatus(enabled ? 'Activadas' : 'No concedidas');
-                })
-                .catch((err) =>
-                  setPushError(err instanceof Error ? err.message : 'No se pudo activar'),
-                )
-                .finally(() => setPushBusy(false));
-            }}
-          >
-            {pushBusy ? '…' : pushEnabled ? 'Desactivar alertas' : 'Activar alertas'}
-          </button>
-        )}
+              }}
+            >
+              {pushBusy ? '…' : pushEnabled ? 'Desactivar alertas' : 'Activar alertas'}
+            </button>
+          )}
+        </div>
+
+        <InstallAppSection embedded />
       </section>
 
       <section className="card">
@@ -505,27 +521,15 @@ export default function SettingsPage() {
         )}
       </section>
 
-      <section className="card">
-        <h2>Herramientas</h2>
-        <div className="tools-list">
-          <Link to="/deudas" className="tools-list-link">
-            <span>Deudas</span>
-            <span aria-hidden>→</span>
+      {user?.isSuperUser && (
+        <section className="card">
+          <h2>Administración</h2>
+          <p className="hint">Herramientas de mantenimiento del catálogo de promociones.</p>
+          <Link to="/admin" className="btn-link">
+            Sincronización de promos →
           </Link>
-          <Link to="/juntada" className="tools-list-link">
-            <span>Liquidar juntada</span>
-            <span aria-hidden>→</span>
-          </Link>
-          <Link to="/importar-resumen" className="tools-list-link">
-            <span>Importar resumen</span>
-            <span aria-hidden>→</span>
-          </Link>
-          <Link to="/recurrentes" className="tools-list-link">
-            <span>Recurrentes</span>
-            <span aria-hidden>→</span>
-          </Link>
-        </div>
-      </section>
+        </section>
+      )}
     </div>
   );
 }
