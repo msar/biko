@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import ChartTooltip from '../components/charts/ChartTooltip';
 import PieChart from '../components/charts/PieChart';
-import StackedBars, { shortMonth } from '../components/charts/StackedBars';
+import StackedBars, { shortMonth, type SegmentSelectPayload } from '../components/charts/StackedBars';
 import ConfirmDialog from '../components/ConfirmDialog';
+import ScopeTabs from '../components/ScopeTabs';
 import { api, fmtARS, fmtDate } from '../lib/api';
 import type { DashboardScope, HouseholdSettlement, LongTermDashboard } from '../lib/types';
 
@@ -11,9 +13,16 @@ const FALLBACK_COLORS = ['#1e305e', '#00a8b5', '#e8b93c', '#b3423f', '#10683f', 
 
 type ChartMode = 'bars' | 'pie';
 
+interface TooltipState {
+  title: string;
+  value: string;
+  meta?: string;
+}
+
 function monthLabel(month: string): string {
   const [y, m] = month.split('-').map(Number);
-  return new Date(y!, m! - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+  const raw = new Date(y!, m! - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
 /** Compact ARS for crowded bar labels: $1.2M / $689k / $450. */
@@ -32,13 +41,20 @@ function monthTotal(byMonth: Array<{ month: string; total: number }>, month: str
   return byMonth.find((b) => b.month === month)?.total ?? 0;
 }
 
+function pctOf(part: number, total: number): string {
+  if (total <= 0) return '0%';
+  return `${Math.round((part / total) * 100)}%`;
+}
+
 export default function LongTermPage() {
   const queryClient = useQueryClient();
   const [scope, setScope] = useState<DashboardScope>('household');
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [chartMode, setChartMode] = useState<ChartMode>('bars');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [confirmSettle, setConfirmSettle] = useState(false);
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard', 'long-term', 12, scope],
@@ -59,7 +75,9 @@ export default function LongTermPage() {
 
   useEffect(() => {
     setSelectedMonth(null);
+    setSelectedGroupId(null);
     setExpandedGroups(new Set());
+    setTooltip(null);
   }, [scope]);
 
   const months = data?.months.map((m) => m.month) ?? [];
@@ -111,6 +129,30 @@ export default function LongTermPage() {
       ? (data?.months.find((m) => m.month === selectedMonth)?.total ?? 0)
       : (data?.months.reduce((sum, m) => sum + m.total, 0) ?? 0);
 
+  const periodTotal = selectedMonthTotal;
+  const maxDetail = detailGroups[0]?.total ?? 1;
+
+  const clearGroupSelection = () => {
+    setSelectedGroupId(null);
+    setTooltip(null);
+  };
+
+  const selectGroup = (groupId: string | null) => {
+    if (!groupId || selectedGroupId === groupId) {
+      clearGroupSelection();
+      return;
+    }
+    const group = detailGroups.find((g) => g.groupId === groupId);
+    setSelectedGroupId(groupId);
+    if (group) {
+      setTooltip({
+        title: group.name,
+        value: fmtARS.format(group.total),
+        meta: `${pctOf(group.total, periodTotal)} del período`,
+      });
+    }
+  };
+
   const toggleGroup = (groupId: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
@@ -123,6 +165,33 @@ export default function LongTermPage() {
   const handleMonthSelect = (month: string) => {
     setSelectedMonth((prev) => (prev === month ? null : month));
     setExpandedGroups(new Set());
+    clearGroupSelection();
+  };
+
+  const handleSegmentSelect = (payload: SegmentSelectPayload) => {
+    if (selectedMonth !== payload.month) {
+      setSelectedMonth(payload.month);
+    }
+    setSelectedGroupId(payload.seriesId);
+    setTooltip({
+      title: `${payload.seriesName} · ${shortMonth(payload.month)}`,
+      value: fmtARS.format(payload.value),
+      meta: `${pctOf(payload.value, payload.monthTotal)} del mes`,
+    });
+  };
+
+  const handleLegendClick = (groupId: string) => {
+    const wasSelected = selectedGroupId === groupId;
+    selectGroup(wasSelected ? null : groupId);
+    if (!wasSelected) {
+      setExpandedGroups((prev) => {
+        const next = new Set(prev);
+        next.add(groupId);
+        return next;
+      });
+    } else {
+      toggleGroup(groupId);
+    }
   };
 
   return (
@@ -136,17 +205,7 @@ export default function LongTermPage() {
         </Link>
       </header>
 
-      <div className="segmented dashboard-scope">
-        <button type="button" className={scope === 'household' ? 'active' : ''} onClick={() => setScope('household')}>
-          Hogar
-        </button>
-        <button type="button" className={scope === 'personal' ? 'active' : ''} onClick={() => setScope('personal')}>
-          Personal
-        </button>
-        <button type="button" className={scope === 'all' ? 'active' : ''} onClick={() => setScope('all')}>
-          Todo
-        </button>
-      </div>
+      <ScopeTabs value={scope} onChange={setScope} />
 
       {isLoading && !data && <p className="empty-state">Cargando…</p>}
 
@@ -187,7 +246,7 @@ export default function LongTermPage() {
               </button>
             </>
           ) : (
-            <p className="settle-even">Están a mano 🤝</p>
+            <p className="settle-even">Están a mano</p>
           )}
           {data.settlements && data.settlements.length > 0 && (
             <div className="settlement-history">
@@ -243,12 +302,12 @@ export default function LongTermPage() {
           <div className="row-between">
             <h2>Gasto por mes</h2>
             {selectedMonth && (
-              <button type="button" className="btn-link" onClick={() => setSelectedMonth(null)}>
+              <button type="button" className="btn-link" onClick={() => handleMonthSelect(selectedMonth)}>
                 Ver todo
               </button>
             )}
           </div>
-          <p className="chart-hint">Tocá un mes para ver el detalle abajo</p>
+          <p className="chart-hint">Tocá un mes para filtrar el detalle</p>
           <StackedBars
             months={months}
             series={[{ id: 'total', name: 'Total', color: '#1e305e', values: data.months.map((m) => m.total) }]}
@@ -264,6 +323,15 @@ export default function LongTermPage() {
               {selectedMonth ? monthLabel(selectedMonth) : 'Últimos 12 meses'}
             </span>
             <strong className="month-detail-amount">{fmtARS.format(selectedMonthTotal)}</strong>
+            {selectedMonth && (
+              <button
+                type="button"
+                className="btn-link month-detail-clear"
+                onClick={() => handleMonthSelect(selectedMonth)}
+              >
+                Limpiar
+              </button>
+            )}
           </div>
         </section>
       )}
@@ -300,46 +368,68 @@ export default function LongTermPage() {
               formatValue={(n) => fmtARS.format(n)}
               selectedMonth={selectedMonth}
               onMonthSelect={handleMonthSelect}
+              selectedSeriesId={selectedGroupId}
+              onSegmentSelect={handleSegmentSelect}
             />
           )}
 
           {chartMode === 'bars' && selectedMonth && (
             <div className="month-group-bars">
-              {detailGroups.map((group) => {
-                const max = detailGroups[0]?.total ?? 1;
-                return (
-                  <div key={group.groupId} className="bar-row">
-                    <span className="bar-label">
-                      {group.icon} {group.name}
-                    </span>
-                    <div className="bar-track">
-                      <div
-                        className="bar-fill"
-                        style={{ width: `${(group.total / max) * 100}%`, background: group.color }}
-                      />
-                    </div>
-                    <span className="bar-amount">{fmtARS.format(group.total)}</span>
+              {detailGroups.map((group) => (
+                <button
+                  key={group.groupId}
+                  type="button"
+                  className={`bar-row${selectedGroupId === group.groupId ? ' selected' : ''}${
+                    selectedGroupId && selectedGroupId !== group.groupId ? ' dimmed' : ''
+                  }`}
+                  onClick={() => selectGroup(group.groupId)}
+                >
+                  <span className="bar-label">
+                    {group.icon} {group.name}
+                  </span>
+                  <div className="bar-track">
+                    <div
+                      className="bar-fill"
+                      style={{ width: `${(group.total / maxDetail) * 100}%`, background: group.color }}
+                    />
                   </div>
-                );
-              })}
+                  <span className="bar-pct">{pctOf(group.total, periodTotal)}</span>
+                  <span className="bar-amount">{fmtARS.format(group.total)}</span>
+                </button>
+              ))}
             </div>
           )}
 
           {chartMode === 'pie' && (
             <div className="pie-chart-wrap">
-              <PieChart slices={pieSlices} formatValue={(n) => fmtARS.format(n)} />
+              <PieChart
+                slices={pieSlices}
+                formatValue={(n) => fmtARS.format(n)}
+                selectedId={selectedGroupId}
+                onSelect={selectGroup}
+              />
             </div>
+          )}
+
+          {tooltip && (
+            <ChartTooltip
+              title={tooltip.title}
+              value={tooltip.value}
+              meta={tooltip.meta}
+              onDismiss={clearGroupSelection}
+            />
           )}
 
           <div className="chart-legend">
             {detailGroups.map((group) => {
               const open = expandedGroups.has(group.groupId);
+              const selected = selectedGroupId === group.groupId;
               return (
                 <div key={group.groupId} className="chart-legend-group">
                   <button
                     type="button"
-                    className="chart-legend-item chart-legend-toggle"
-                    onClick={() => toggleGroup(group.groupId)}
+                    className={`chart-legend-item chart-legend-toggle${selected ? ' selected' : ''}`}
+                    onClick={() => handleLegendClick(group.groupId)}
                   >
                     <span className="chart-legend-dot" style={{ background: group.color }} />
                     <span className="group-chevron">{open ? '▾' : '▸'}</span>

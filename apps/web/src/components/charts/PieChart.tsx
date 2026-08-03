@@ -9,6 +9,8 @@ interface PieChartProps {
   slices: Slice[];
   formatValue?: (n: number) => string;
   size?: number;
+  selectedId?: string | null;
+  onSelect?: (id: string | null) => void;
 }
 
 function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
@@ -39,7 +41,13 @@ function describeDonutSlice(
   ].join(' ');
 }
 
-export default function PieChart({ slices, formatValue, size = 180 }: PieChartProps) {
+export default function PieChart({
+  slices,
+  formatValue,
+  size = 180,
+  selectedId = null,
+  onSelect,
+}: PieChartProps) {
   const total = slices.reduce((sum, s) => sum + s.value, 0);
   if (total <= 0) {
     return <p className="empty-state">Sin datos para este período</p>;
@@ -65,20 +73,58 @@ export default function PieChart({ slices, formatValue, size = 180 }: PieChartPr
       return { ...s, path, pct: (s.value / total) * 100 };
     });
 
+  const selected = selectedId ? paths.find((p) => p.id === selectedId) : null;
+  const centerLabel = selected ? selected.name : 'Total';
+  const centerValue = selected ? selected.value : total;
+  const centerPct = selected ? `${selected.pct.toFixed(0)}%` : null;
+  const interactive = typeof onSelect === 'function';
+
+  const ariaSummary = paths
+    .map((p) => `${p.name}: ${formatValue ? formatValue(p.value) : p.value} (${p.pct.toFixed(0)}%)`)
+    .join(', ');
+
   return (
-    <div className="pie-chart" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="pie-chart-svg" aria-hidden>
-        {paths.map((p) => (
-          <path key={p.id} d={p.path} fill={p.color} stroke="#fff" strokeWidth={1.5}>
-            <title>
-              {p.name}: {formatValue ? formatValue(p.value) : p.value} ({p.pct.toFixed(0)}%)
-            </title>
-          </path>
-        ))}
+    <div
+      className="pie-chart"
+      style={{ width: size, height: size }}
+      role="img"
+      aria-label={`Distribución por grupo. ${ariaSummary}`}
+    >
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="pie-chart-svg">
+        {paths.map((p) => {
+          const isSelected = selectedId === p.id;
+          const dimmed = selectedId != null && !isSelected;
+          return (
+            <path
+              key={p.id}
+              d={p.path}
+              fill={p.color}
+              stroke="#fff"
+              strokeWidth={1.5}
+              className={`pie-chart-slice${isSelected ? ' selected' : ''}${dimmed ? ' dimmed' : ''}`}
+              tabIndex={interactive ? 0 : undefined}
+              role={interactive ? 'button' : undefined}
+              aria-pressed={interactive ? isSelected : undefined}
+              aria-label={`${p.name}: ${formatValue ? formatValue(p.value) : p.value} (${p.pct.toFixed(0)}%)`}
+              onClick={() => {
+                if (!onSelect) return;
+                onSelect(isSelected ? null : p.id);
+              }}
+              onKeyDown={(e) => {
+                if (!onSelect) return;
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelect(isSelected ? null : p.id);
+                }
+              }}
+            />
+          );
+        })}
       </svg>
       <div className="pie-chart-center">
-        <span className="pie-chart-total-label">Total</span>
-        <strong className="pie-chart-total">{formatValue ? formatValue(total) : total}</strong>
+        <span className="pie-chart-total-label">{centerLabel}</span>
+        <strong className="pie-chart-total">{formatValue ? formatValue(centerValue) : centerValue}</strong>
+        {centerPct ? <span className="pie-chart-pct">{centerPct}</span> : null}
       </div>
     </div>
   );

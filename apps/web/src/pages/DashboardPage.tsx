@@ -1,13 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import MonthNav from '../components/MonthNav';
+import QuickActions from '../components/QuickActions';
+import ScopeTabs from '../components/ScopeTabs';
 import { api, fmtARS, fmtDate } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type { DashboardScope, MonthlyDashboard, RecurringOccurrence } from '../lib/types';
 
 function monthLabel(month: string): string {
   const [y, m] = month.split('-').map(Number);
-  return new Date(y!, m! - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+  const raw = new Date(y!, m! - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
 function shiftMonth(month: string, delta: number): string {
@@ -19,6 +23,11 @@ function shiftMonth(month: string, delta: number): string {
 function currentMonth(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function pctOf(part: number, total: number): string {
+  if (total <= 0) return '0%';
+  return `${Math.round((part / total) * 100)}%`;
 }
 
 const SCOPE_LABELS: Record<DashboardScope, string> = {
@@ -56,7 +65,10 @@ export default function DashboardPage() {
   });
 
   const maxGroup = Math.max(1, ...(data?.byGroup.map((g) => g.total) ?? []));
+  const maxUser = Math.max(1, ...(data?.byUser.map((u) => u.total) ?? []));
+  const monthTotal = data?.total ?? 0;
   const showSettle = scope === 'household';
+  const topGroup = data?.byGroup[0];
 
   useEffect(() => {
     setExpandedGroups(new Set());
@@ -86,30 +98,16 @@ export default function DashboardPage() {
 
   return (
     <div className="page">
-      <header className="page-header">
-        <div>
-          <h1>Hola, {user?.name}</h1>
-          <div className="month-nav">
-            <button onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
-            <span>{monthLabel(month)}</span>
-            <button onClick={() => setMonth(shiftMonth(month, 1))}>›</button>
-          </div>
-        </div>
-        <div className="header-links">
-          <Link to="/recurrentes" className="btn-link">
-            Recurrentes
-          </Link>
-          <Link to="/deudas" className="btn-link">
-            Deudas
-          </Link>
-          <Link to="/juntada" className="btn-link">
-            Liquidar juntada
-          </Link>
-          <Link to="/historico" className="btn-link">
-            Largo plazo ›
-          </Link>
-        </div>
+      <header className="dashboard-greeting">
+        <h1>Hola, {user?.name}</h1>
+        <MonthNav
+          label={monthLabel(month)}
+          onPrev={() => setMonth(shiftMonth(month, -1))}
+          onNext={() => setMonth(shiftMonth(month, 1))}
+        />
       </header>
+
+      <QuickActions />
 
       {pendingOcc && pendingOcc.length > 0 && (
         <section className="card">
@@ -135,23 +133,18 @@ export default function DashboardPage() {
         </section>
       )}
 
-      <div className="segmented dashboard-scope">
-        <button type="button" className={scope === 'household' ? 'active' : ''} onClick={() => setScope('household')}>
-          Hogar
-        </button>
-        <button type="button" className={scope === 'personal' ? 'active' : ''} onClick={() => setScope('personal')}>
-          Personal
-        </button>
-        <button type="button" className={scope === 'all' ? 'active' : ''} onClick={() => setScope('all')}>
-          Todo
-        </button>
-      </div>
+      <ScopeTabs value={scope} onChange={setScope} />
 
       <section className="hero-card">
         <span className="hero-label">{SCOPE_LABELS[scope]}</span>
         <span className="hero-amount">{isLoading && !data ? '…' : fmtARS.format(data?.total ?? 0)}</span>
         {data && data.totalSavings > 0 && (
-          <span className="hero-savings">Ahorraste {fmtARS.format(data.totalSavings)} con promos 🎉</span>
+          <span className="hero-savings">Ahorraste {fmtARS.format(data.totalSavings)} con promos</span>
+        )}
+        {topGroup && monthTotal > 0 && (
+          <span className="hero-groups-hint">
+            Mayor gasto: {topGroup.icon} {topGroup.name} ({pctOf(topGroup.total, monthTotal)})
+          </span>
         )}
       </section>
 
@@ -173,7 +166,10 @@ export default function DashboardPage() {
                       style={{ width: `${(group.total / maxGroup) * 100}%`, background: group.color }}
                     />
                   </div>
-                  <span className="bar-amount">{fmtARS.format(group.total)}</span>
+                  <span className="bar-amount-stack">
+                    <span className="bar-amount">{fmtARS.format(group.total)}</span>
+                    <span className="bar-pct">{pctOf(group.total, monthTotal)}</span>
+                  </span>
                 </button>
                 {open && (
                   <div className="group-categories">
@@ -200,7 +196,10 @@ export default function DashboardPage() {
                                 }}
                               />
                             </div>
-                            <span className="bar-amount">{fmtARS.format(cat.total)}</span>
+                            <span className="bar-amount-stack">
+                              <span className="bar-amount">{fmtARS.format(cat.total)}</span>
+                              <span className="bar-pct">{pctOf(cat.total, monthTotal)}</span>
+                            </span>
                           </button>
                           {catOpen && (
                             <div className="category-expenses">
@@ -244,13 +243,23 @@ export default function DashboardPage() {
       {showSettle && data && data.byUser.length > 0 && (
         <section className="card">
           <h2>Por persona</h2>
-          <div className="pill-row">
-            {data.byUser.map((u) => (
-              <div key={u.userId} className="pill">
-                <strong>{u.name}</strong> {fmtARS.format(u.total)}
+          {data.byUser.map((u) => (
+            <div key={u.userId} className="person-bar-row">
+              <span className="bar-label">
+                <strong>{u.name}</strong>
+              </span>
+              <div className="bar-track">
+                <div
+                  className="bar-fill"
+                  style={{ width: `${(u.total / maxUser) * 100}%`, background: 'var(--brand-teal)' }}
+                />
               </div>
-            ))}
-          </div>
+              <span className="bar-amount-stack">
+                <span className="bar-amount">{fmtARS.format(u.total)}</span>
+                <span className="bar-pct">{pctOf(u.total, monthTotal)}</span>
+              </span>
+            </div>
+          ))}
         </section>
       )}
 
@@ -284,7 +293,7 @@ export default function DashboardPage() {
                 ))}
               </div>
             ) : (
-              <p className="settle-even">Están a mano 🤝</p>
+              <p className="settle-even">Están a mano</p>
             )}
           </section>
         )}
