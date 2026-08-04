@@ -43,6 +43,9 @@ export interface TripAccommodation {
   address: string | null;
   checkIn: string | null;
   checkOut: string | null;
+  checkInTime: string | null;
+  checkOutTime: string | null;
+  amount: number | null;
   link: string | null;
   notes: string | null;
 }

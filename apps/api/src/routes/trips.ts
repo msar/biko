@@ -111,11 +111,30 @@ const listItemPatchSchema = z.object({
   dayDate: optionalDate,
 });
 
+const optionalTime = z
+  .union([
+    z.null(),
+    z.literal('').transform(() => null),
+    z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora inválida (HH:mm)'),
+  ])
+  .optional();
+
+const optionalAmount = z
+  .union([
+    z.null(),
+    z.literal('').transform(() => null),
+    z.number().nonnegative().finite(),
+  ])
+  .optional();
+
 const accommodationSchema = z.object({
   label: z.string().max(200).nullish(),
-  address: z.string().max(500).nullish(),
+  address: z.string().max(2000).nullish(),
   checkIn: optionalDate,
   checkOut: optionalDate,
+  checkInTime: optionalTime,
+  checkOutTime: optionalTime,
+  amount: optionalAmount,
   link: z.string().max(1000).nullish(),
   notes: z.string().max(2000).nullish(),
 });

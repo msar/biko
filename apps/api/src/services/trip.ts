@@ -273,6 +273,9 @@ function serializeTrip(trip: {
     address: string | null;
     checkIn: Date | null;
     checkOut: Date | null;
+    checkInTime: string | null;
+    checkOutTime: string | null;
+    amount: unknown;
     link: string | null;
     notes: string | null;
   } | null;
@@ -293,7 +296,33 @@ function serializeTrip(trip: {
     updatedAt: trip.updatedAt,
     members: trip.members.map(serializeMember),
     inviteCode: trip.invites[0]?.code ?? null,
-    accommodation: trip.accommodation,
+    accommodation: trip.accommodation ? serializeAccommodation(trip.accommodation) : null,
+  };
+}
+
+function serializeAccommodation(acc: {
+  id: string;
+  label: string | null;
+  address: string | null;
+  checkIn: Date | null;
+  checkOut: Date | null;
+  checkInTime: string | null;
+  checkOutTime: string | null;
+  amount: unknown;
+  link: string | null;
+  notes: string | null;
+}) {
+  return {
+    id: acc.id,
+    label: acc.label,
+    address: acc.address,
+    checkIn: acc.checkIn,
+    checkOut: acc.checkOut,
+    checkInTime: acc.checkInTime,
+    checkOutTime: acc.checkOutTime,
+    amount: acc.amount == null ? null : toNum(acc.amount),
+    link: acc.link,
+    notes: acc.notes,
   };
 }
 
@@ -926,6 +955,9 @@ export async function upsertTripAccommodation(
     address?: string | null;
     checkIn?: Date | null;
     checkOut?: Date | null;
+    checkInTime?: string | null;
+    checkOutTime?: string | null;
+    amount?: number | null;
     link?: string | null;
     notes?: string | null;
   },
@@ -933,23 +965,32 @@ export async function upsertTripAccommodation(
   const me = await requireTripMember(db, tripId, userId);
   assertTripWritable(me.trip.status);
 
+  if (input.amount != null && !(input.amount >= 0)) {
+    throw new TripValidationError('El costo debe ser mayor o igual a 0');
+  }
+
   const data = {
     label: input.label?.trim() || null,
     address: input.address?.trim() || null,
     checkIn: input.checkIn ?? null,
     checkOut: input.checkOut ?? null,
+    checkInTime: input.checkInTime?.trim() || null,
+    checkOutTime: input.checkOutTime?.trim() || null,
+    amount: input.amount == null ? null : round2(input.amount),
     link: input.link?.trim() || null,
     notes: input.notes?.trim() || null,
   };
 
-  return db.tripAccommodation.upsert({
+  const row = await db.tripAccommodation.upsert({
     where: { tripId },
     create: { tripId, ...data },
     update: data,
   });
+  return serializeAccommodation(row);
 }
 
 export async function getTripAccommodation(db: Db, tripId: string, userId: string) {
   await requireTripMember(db, tripId, userId);
-  return db.tripAccommodation.findUnique({ where: { tripId } });
+  const row = await db.tripAccommodation.findUnique({ where: { tripId } });
+  return row ? serializeAccommodation(row) : null;
 }
