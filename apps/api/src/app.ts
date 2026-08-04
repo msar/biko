@@ -17,6 +17,7 @@ import statementImportRoutes from './routes/statement-imports.js';
 import exchangeRateRoutes from './routes/exchange-rates.js';
 import debtRoutes from './routes/debts.js';
 import settlementRoutes from './routes/settlements.js';
+import tripRoutes from './routes/trips.js';
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -54,6 +55,7 @@ export async function buildApp() {
   await app.register(exchangeRateRoutes);
   await app.register(debtRoutes);
   await app.register(settlementRoutes);
+  await app.register(tripRoutes);
 
   return app;
 }

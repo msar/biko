@@ -95,6 +95,44 @@ enum RecurringCadence {
   MONTHLY
 }
 
+enum TripStatus {
+  PLANNING
+  ACTIVE
+  CLOSED
+}
+
+enum TripMemberRole {
+  ORGANIZER
+  MEMBER
+}
+
+enum TripMemberInviteStatus {
+  PENDING
+  JOINED
+  DECLINED
+}
+
+enum TripListItemType {
+  TODO
+  PACK
+  BUY
+}
+
+enum TripListItemStatus {
+  PENDING
+  DONE
+}
+
+enum TripExpenseCategory {
+  ALOJAMIENTO
+  VUELOS
+  TRANSPORTE
+  COMIDA
+  RESTAURANTES
+  ACTIVIDADES
+  OTROS
+}
+
 enum RecurringOccurrenceStatus {
   PENDING
   COMPLETED
@@ -216,6 +254,10 @@ model User {
   settlementsTo   HouseholdSettlement[] @relation("SettlementTo")
   settlementsCreated HouseholdSettlement[] @relation("SettlementCreatedBy")
   webauthnCredentials WebAuthnCredential[]
+  tripsCreated        Trip[]               @relation("TripCreator")
+  tripInvitesCreated  TripInvite[]         @relation("TripInviteCreator")
+  tripMembers         TripMember[]
+  tripExportBatches   TripExportBatch[]    @relation("TripExportCreator")
 }
 
 // Passkeys / WebAuthn (Face ID, biometría) ligados al usuario.
@@ -774,4 +816,168 @@ model ExchangeRate {
 
   @@unique([date, fromCurrency, toCurrency, source])
   @@index([fromCurrency, toCurrency, date])
+}
+
+// ============================================================
+// TRIP MANAGER (standalone — owned by createdByUserId, not household)
+// ============================================================
+
+model Trip {
+  id                String     @id @default(cuid())
+  createdByUserId   String
+  createdBy         User       @relation("TripCreator", fields: [createdByUserId], references: [id])
+  name              String
+  destination       String?
+  startDate         DateTime?
+  endDate           DateTime?
+  status            TripStatus @default(PLANNING)
+  baseCurrency      String     @default("ARS")
+  exportHouseholdId String?
+  exportBatchId     String?
+  exportedAt        DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  members       TripMember[]
+  invites       TripInvite[]
+  expenses      TripExpense[]
+  settlements   TripSettlement[]
+  listItems     TripListItem[]
+  accommodation TripAccommodation?
+  exportBatches TripExportBatch[]
+
+  @@index([createdByUserId, status])
+  @@index([status, updatedAt])
+}
+
+model TripMember {
+  id           String                 @id @default(cuid())
+  tripId       String
+  trip         Trip                   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  userId       String?
+  user         User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  displayName  String
+  role         TripMemberRole         @default(MEMBER)
+  inviteStatus TripMemberInviteStatus @default(JOINED)
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  paidExpenses    TripExpense[]            @relation("TripExpensePayer")
+  allocations     TripExpenseAllocation[]
+  settlementsFrom TripSettlement[]         @relation("TripSettlementFrom")
+  settlementsTo   TripSettlement[]         @relation("TripSettlementTo")
+  assignedItems   TripListItem[]           @relation("TripListAssignee")
+
+  @@unique([tripId, userId])
+  @@index([tripId, inviteStatus])
+  @@index([userId])
+}
+
+model TripInvite {
+  id              String    @id @default(cuid())
+  tripId          String
+  trip            Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  code            String    @unique @default(cuid())
+  expiresAt       DateTime?
+  createdByUserId String
+  createdBy       User      @relation("TripInviteCreator", fields: [createdByUserId], references: [id])
+  createdAt       DateTime  @default(now())
+
+  @@index([tripId])
+}
+
+model TripExpense {
+  id                 String              @id @default(cuid())
+  tripId             String
+  trip               Trip                @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  paidByMemberId     String
+  paidByMember       TripMember          @relation("TripExpensePayer", fields: [paidByMemberId], references: [id])
+  amount             Decimal             @db.Decimal(12, 2)
+  category           TripExpenseCategory
+  note               String?
+  date               DateTime
+  currency           String              @default("ARS")
+  splitMode          SplitMode           @default(EQUAL)
+  exportedPurchaseId String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  allocations TripExpenseAllocation[]
+
+  @@index([tripId, date])
+  @@index([paidByMemberId])
+}
+
+model TripExpenseAllocation {
+  id            String      @id @default(cuid())
+  tripExpenseId String
+  tripExpense   TripExpense @relation(fields: [tripExpenseId], references: [id], onDelete: Cascade)
+  tripMemberId  String
+  tripMember    TripMember  @relation(fields: [tripMemberId], references: [id])
+  amount        Decimal     @db.Decimal(12, 2)
+
+  @@unique([tripExpenseId, tripMemberId])
+  @@index([tripMemberId])
+}
+
+model TripSettlement {
+  id           String     @id @default(cuid())
+  tripId       String
+  trip         Trip       @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  fromMemberId String
+  fromMember   TripMember @relation("TripSettlementFrom", fields: [fromMemberId], references: [id])
+  toMemberId   String
+  toMember     TripMember @relation("TripSettlementTo", fields: [toMemberId], references: [id])
+  amount       Decimal    @db.Decimal(12, 2)
+  note         String?
+  settledAt    DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+
+  @@index([tripId, settledAt])
+}
+
+model TripListItem {
+  id               String             @id @default(cuid())
+  tripId           String
+  trip             Trip               @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type             TripListItemType
+  title            String
+  notes            String?
+  quantity         Int?
+  assigneeMemberId String?
+  assigneeMember   TripMember?        @relation("TripListAssignee", fields: [assigneeMemberId], references: [id], onDelete: SetNull)
+  status           TripListItemStatus @default(PENDING)
+  dayDate          DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([tripId, type, status])
+}
+
+model TripAccommodation {
+  id        String    @id @default(cuid())
+  tripId    String    @unique
+  trip      Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  label     String?
+  address   String?
+  checkIn   DateTime?
+  checkOut  DateTime?
+  link      String?
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model TripExportBatch {
+  id              String   @id @default(cuid())
+  tripId          String
+  trip            Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  householdId     String
+  exportedByUserId String
+  exportedBy      User     @relation("TripExportCreator", fields: [exportedByUserId], references: [id])
+  purchaseIds     String[] @default([])
+  createdAt       DateTime @default(now())
+
+  @@unique([tripId, householdId])
+  @@index([householdId])
 }

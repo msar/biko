@@ -49,6 +49,12 @@ const CATEGORIES: Array<{ name: string; icon: string; color: string }> = [
   { name: 'Deportes', icon: '⚽', color: '#3d8a6b' },
   { name: 'Entretenimiento', icon: '🎬', color: '#8a5b9e' },
   { name: 'Viajes', icon: '✈️', color: '#4a7fb5' },
+  { name: 'Alojamiento', icon: '🏨', color: '#4a7fb5' },
+  { name: 'Vuelos', icon: '✈️', color: '#3d6f9e' },
+  { name: 'Movilidad viaje', icon: '🚕', color: '#5b8a9e' },
+  { name: 'Comida viaje', icon: '🛒', color: '#4f8a5b' },
+  { name: 'Restaurantes viaje', icon: '🍽️', color: '#b5567a' },
+  { name: 'Actividades', icon: '🎟️', color: '#8a5b9e' },
   { name: 'Impuestos', icon: '🧾', color: '#6b6b6b' },
   { name: 'Otros', icon: '📦', color: '#888888' },
 ];

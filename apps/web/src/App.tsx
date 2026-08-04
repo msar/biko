@@ -21,6 +21,10 @@ import BrandMark from './components/BrandLogo';
 import InstallAppBanner from './components/InstallAppBanner';
 import PushEnableBanner from './components/PushEnableBanner';
 import ExpenseDetailPage from './pages/ExpenseDetailPage';
+import TripsPage, { NewTripPage } from './pages/TripsPage';
+import TripHubPage from './pages/TripHubPage';
+import NewTripExpensePage from './pages/NewTripExpensePage';
+import TripJoinPage from './pages/TripJoinPage';
 
 function OnlineBanner() {
   const [online, setOnline] = useState(navigator.onLine);
@@ -70,7 +74,9 @@ export default function App() {
   const hideNav =
     location.pathname === '/nuevo' ||
     location.pathname.startsWith('/gastos/') ||
-    location.pathname.startsWith('/importar-resumen');
+    location.pathname.startsWith('/importar-resumen') ||
+    location.pathname === '/viajes/nuevo' ||
+    (location.pathname.startsWith('/viajes/') && location.pathname.includes('/gastos/'));
 
   return (
     <div className="app">
@@ -93,6 +99,11 @@ export default function App() {
           <Route path="/recurrentes" element={<RecurringPaymentsPage />} />
           <Route path="/deudas" element={<DebtsPage />} />
           <Route path="/juntada" element={<PartySettlePage />} />
+          <Route path="/viajes" element={<TripsPage />} />
+          <Route path="/viajes/nuevo" element={<NewTripPage />} />
+          <Route path="/viajes/invitar/:code" element={<TripJoinPage />} />
+          <Route path="/viajes/:id/gastos/nuevo" element={<NewTripExpensePage />} />
+          <Route path="/viajes/:id" element={<TripHubPage />} />
           <Route path="/admin" element={<AdminRoute />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

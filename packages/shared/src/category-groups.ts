@@ -107,7 +107,15 @@ export const CATEGORY_GROUPS: CategoryGroupDef[] = [
     name: 'Viajes',
     icon: '✈️',
     color: '#4a7fb5',
-    categoryNames: ['Viajes'],
+    categoryNames: [
+      'Alojamiento',
+      'Vuelos',
+      'Movilidad viaje',
+      'Comida viaje',
+      'Restaurantes viaje',
+      'Actividades',
+      'Viajes', // catch-all / Otros
+    ],
   },
   {
     id: 'impuestos',

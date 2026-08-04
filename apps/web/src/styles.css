@@ -2660,3 +2660,67 @@ code {
   border-radius: 12px;
   z-index: 5;
 }
+
+/* --- Viajes / Trip Manager --- */
+
+.trip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trip-list-card {
+  text-align: left;
+  cursor: pointer;
+  border: none;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+}
+
+.trip-list-card:hover {
+  outline: 2px solid color-mix(in srgb, var(--brand-teal) 35%, transparent);
+}
+
+.trip-status {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.trip-status-closed {
+  opacity: 0.7;
+}
+
+.trip-hub-tabs {
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+
+.trip-hub-tabs button {
+  white-space: nowrap;
+  flex: 1 0 auto;
+}
+
+.trip-invite-code {
+  display: block;
+  word-break: break-all;
+  font-size: var(--text-sm);
+  padding: 10px;
+  background: var(--cream);
+  border-radius: 8px;
+  margin: 8px 0 12px;
+}
+
+.form-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.list-plain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+

@@ -295,6 +295,10 @@ export default function SettingsPage() {
             <span>Deudas</span>
             <span aria-hidden>→</span>
           </Link>
+          <Link to="/viajes" className="tools-list-link">
+            <span>Viajes</span>
+            <span aria-hidden>→</span>
+          </Link>
           <Link to="/juntada" className="tools-list-link">
             <span>Liquidar juntada</span>
             <span aria-hidden>→</span>

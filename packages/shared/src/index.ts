@@ -13,6 +13,7 @@ export * from './bank-programs';
 export * from './weekly-promo-quality';
 export * from './super-user';
 export * from './category-groups';
+export * from './trip-categories';
 export * from './recurring-dates';
 export * from './statement-parse';
 export * from './statement-match';

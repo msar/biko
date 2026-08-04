@@ -36,6 +36,17 @@ describe('resolveCategoryGroupId', () => {
     expect(resolveCategoryGroupId('Delivery')).toBe('restaurante');
     expect(resolveCategoryGroupId('Supermercado')).toBe('comida');
   });
+
+  it('maps Viajes subcategories to viajes group', () => {
+    expect(resolveCategoryGroupId('Viajes')).toBe('viajes');
+    expect(resolveCategoryGroupId('Alojamiento')).toBe('viajes');
+    expect(resolveCategoryGroupId('Vuelos')).toBe('viajes');
+    expect(resolveCategoryGroupId('Movilidad viaje')).toBe('viajes');
+    expect(resolveCategoryGroupId('Comida viaje')).toBe('viajes');
+    expect(resolveCategoryGroupId('Restaurantes viaje')).toBe('viajes');
+    expect(resolveCategoryGroupId('Actividades')).toBe('viajes');
+    expect(resolveCategoryGroupId('Transporte')).toBe('transporte');
+  });
 });
 
 describe('groupCategories', () => {

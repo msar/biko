@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 
 const ACTIONS = [
+  { to: '/viajes', label: 'Viajes' },
   { to: '/recurrentes', label: 'Recurrentes' },
   { to: '/deudas', label: 'Deudas' },
   { to: '/juntada', label: 'Liquidar juntada' },
