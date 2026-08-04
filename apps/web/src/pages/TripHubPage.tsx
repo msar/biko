@@ -14,8 +14,11 @@ import {
   TRIP_CATEGORY_COLORS,
   TRIP_CATEGORY_LABELS,
   TRIP_STATUS_LABEL,
+  accommodationMapsHref,
   dateInputValue,
-  mapsUrl,
+  formatStayMoment,
+  isHttpUrl,
+  timeInputValue,
   tripInviteUrl,
 } from '../lib/trip-utils';
 
@@ -527,11 +530,15 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
 function AlojamientoTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const queryClient = useQueryClient();
   const acc = trip.accommodation;
+  const currency = (trip.baseCurrency === 'USD' ? 'USD' : 'ARS') as 'ARS' | 'USD';
   const [editing, setEditing] = useState(!acc);
   const [label, setLabel] = useState(acc?.label ?? '');
   const [address, setAddress] = useState(acc?.address ?? '');
   const [checkIn, setCheckIn] = useState(dateInputValue(acc?.checkIn));
   const [checkOut, setCheckOut] = useState(dateInputValue(acc?.checkOut));
+  const [checkInTime, setCheckInTime] = useState(timeInputValue(acc?.checkInTime));
+  const [checkOutTime, setCheckOutTime] = useState(timeInputValue(acc?.checkOutTime));
+  const [amount, setAmount] = useState(acc?.amount != null ? String(acc.amount) : '');
   const [link, setLink] = useState(acc?.link ?? '');
   const [notes, setNotes] = useState(acc?.notes ?? '');
   const [error, setError] = useState<string | null>(null);
@@ -549,32 +556,57 @@ function AlojamientoTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const onSave = (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    const amountTrim = amount.trim().replace(',', '.');
+    let amountValue: number | null = null;
+    if (amountTrim) {
+      const n = Number(amountTrim);
+      if (!Number.isFinite(n) || n < 0) {
+        setError('Ingresá un costo válido');
+        return;
+      }
+      amountValue = n;
+    }
     saveMutation.mutate({
       label: label.trim() || null,
       address: address.trim() || null,
       checkIn: checkIn || null,
       checkOut: checkOut || null,
+      checkInTime: checkInTime || null,
+      checkOutTime: checkOutTime || null,
+      amount: amountValue,
       link: link.trim() || null,
       notes: notes.trim() || null,
     });
   };
 
   if (!editing && acc) {
+    const checkInLabel = formatStayMoment(acc.checkIn, acc.checkInTime, fmtDate);
+    const checkOutLabel = formatStayMoment(acc.checkOut, acc.checkOutTime, fmtDate);
     return (
-      <section className="card">
+      <section className="card trip-accommodation-card">
         <h2>{acc.label || 'Alojamiento'}</h2>
         {acc.address && (
-          <p>
-            <a href={mapsUrl(acc.address)} target="_blank" rel="noreferrer">
-              {acc.address}
-            </a>
+          <p className="trip-accommodation-address">
+            {isHttpUrl(acc.address) ? (
+              <a href={accommodationMapsHref(acc.address)} target="_blank" rel="noreferrer">
+                Ver en mapa
+              </a>
+            ) : (
+              <a href={accommodationMapsHref(acc.address)} target="_blank" rel="noreferrer">
+                {acc.address}
+              </a>
+            )}
           </p>
         )}
-        {(acc.checkIn || acc.checkOut) && (
+        {(checkInLabel || checkOutLabel) && (
           <p className="hint">
-            Check-in {acc.checkIn ? fmtDate(acc.checkIn) : '—'} · Check-out{' '}
-            {acc.checkOut ? fmtDate(acc.checkOut) : '—'}
+            {checkInLabel ? `Check-in ${checkInLabel}` : 'Check-in —'}
+            {' · '}
+            {checkOutLabel ? `Check-out ${checkOutLabel}` : 'Check-out —'}
           </p>
+        )}
+        {acc.amount != null && (
+          <p className="trip-accommodation-cost">Costo {fmtMoney(acc.amount, currency)}</p>
         )}
         {acc.link && (
           <p>
@@ -583,9 +615,25 @@ function AlojamientoTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
             </a>
           </p>
         )}
-        {acc.notes && <p className="hint">{acc.notes}</p>}
+        {acc.notes && <p className="hint trip-accommodation-notes">{acc.notes}</p>}
         {!closed && (
-          <button type="button" className="btn-secondary" onClick={() => setEditing(true)}>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              setLabel(acc.label ?? '');
+              setAddress(acc.address ?? '');
+              setCheckIn(dateInputValue(acc.checkIn));
+              setCheckOut(dateInputValue(acc.checkOut));
+              setCheckInTime(timeInputValue(acc.checkInTime));
+              setCheckOutTime(timeInputValue(acc.checkOutTime));
+              setAmount(acc.amount != null ? String(acc.amount) : '');
+              setLink(acc.link ?? '');
+              setNotes(acc.notes ?? '');
+              setError(null);
+              setEditing(true);
+            }}
+          >
             Editar
           </button>
         )}
@@ -605,8 +653,12 @@ function AlojamientoTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
         <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Airbnb Centro" />
       </label>
       <label>
-        Dirección
-        <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Calle 123" />
+        Dirección o link de mapa
+        <input
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          placeholder="Calle 123 o link de Google Maps"
+        />
       </label>
       <div className="form-row-2">
         <label>
@@ -614,12 +666,31 @@ function AlojamientoTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           <input type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} />
         </label>
         <label>
+          Hora check-in
+          <input type="time" value={checkInTime} onChange={(e) => setCheckInTime(e.target.value)} />
+        </label>
+      </div>
+      <div className="form-row-2">
+        <label>
           Check-out
           <input type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} />
         </label>
+        <label>
+          Hora check-out
+          <input type="time" value={checkOutTime} onChange={(e) => setCheckOutTime(e.target.value)} />
+        </label>
       </div>
       <label>
-        Link
+        Costo ({currency})
+        <input
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="Opcional"
+        />
+      </label>
+      <label>
+        Link de reserva
         <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" />
       </label>
       <label>

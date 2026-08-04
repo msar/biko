@@ -115,7 +115,10 @@ const optionalTime = z
   .union([
     z.null(),
     z.literal('').transform(() => null),
-    z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Hora inválida (HH:mm)'),
+    z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, 'Hora inválida (HH:mm)')
+      .transform((v) => v.slice(0, 5)),
   ])
   .optional();
 

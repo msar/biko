@@ -2718,6 +2718,26 @@ code {
   gap: 10px;
 }
 
+.trip-accommodation-card {
+  overflow: hidden;
+}
+
+.trip-accommodation-address,
+.trip-accommodation-notes {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.trip-accommodation-address a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.trip-accommodation-cost {
+  margin: 6px 0;
+  font-weight: 600;
+}
+
 .list-plain {
   list-style: none;
   margin: 0;
