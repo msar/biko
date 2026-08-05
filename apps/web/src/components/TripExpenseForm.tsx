@@ -2,6 +2,14 @@ import { TRIP_CATEGORY_LABELS, TRIP_EXPENSE_CATEGORIES, type TripExpenseCategory
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import {
+  applyRemainingToAmount,
+  moneyRemaining,
+  parseMoneyInput,
+  remainingBalance,
+  remainingHintLabel,
+  roundMoney,
+} from '../lib/amount-remaining';
 import { api } from '../lib/api';
 import type { SplitMode, TripExpense, TripHub, TripMember } from '../lib/trip-types';
 import { dateInputValue, todayIso } from '../lib/trip-utils';
@@ -145,26 +153,35 @@ export default function TripExpenseForm({ mode, trip, expenseId, initial, title 
     onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo guardar'),
   });
 
-  const amountNum = useMemo(() => {
-    const n = Number(amount.replace(',', '.'));
-    return Number.isFinite(n) ? n : 0;
-  }, [amount]);
+  const amountNum = useMemo(() => parseMoneyInput(amount), [amount]);
 
   const parsedPayments = useMemo(() => {
     return payers
       .map((p) => ({
         memberId: p.memberId,
-        amount: Number(String(p.amount).replace(',', '.')),
+        amount: parseMoneyInput(p.amount),
       }))
       .filter((p) => p.memberId && Number.isFinite(p.amount) && p.amount > 0);
   }, [payers]);
 
   const paymentsSum = useMemo(
-    () => Math.round(parsedPayments.reduce((s, p) => s + p.amount, 0) * 100) / 100,
+    () => roundMoney(parsedPayments.reduce((s, p) => s + p.amount, 0)),
     [parsedPayments],
   );
 
-  const paymentsRemaining = Math.round((amountNum - paymentsSum) * 100) / 100;
+  const paymentsRemaining = moneyRemaining(
+    amountNum,
+    payers.map((p) => parseMoneyInput(p.amount)),
+  );
+  const canAssignPaymentResto = remainingBalance(paymentsRemaining) === 'short';
+
+  const splitAmountParts = useMemo(
+    () => members.map((m) => parseMoneyInput(splitValues[m.id] ?? '')),
+    [members, splitValues],
+  );
+  const splitAmountsRemaining = moneyRemaining(amountNum, splitAmountParts);
+  const canAssignSplitResto =
+    assignMode === 'all' && splitSubMode === 'AMOUNT' && remainingBalance(splitAmountsRemaining) === 'short';
 
   const usedMemberIds = useMemo(() => new Set(payers.map((p) => p.memberId)), [payers]);
 
@@ -187,6 +204,13 @@ export default function TripExpenseForm({ mode, trip, expenseId, initial, title 
     if (unique.size !== parsedPayments.length) {
       setError('Cada viajero puede aparecer una sola vez entre los pagadores');
       return;
+    }
+
+    if (assignMode === 'all' && splitSubMode === 'AMOUNT') {
+      if (remainingBalance(splitAmountsRemaining) !== 'ok') {
+        setError('La suma de los montos del reparto debe coincidir con el total del gasto');
+        return;
+      }
     }
 
     const body: Record<string, unknown> = {
@@ -220,8 +244,8 @@ export default function TripExpenseForm({ mode, trip, expenseId, initial, title 
 
   const setAmountAndSync = (raw: string) => {
     setAmount(raw);
-    const n = Number(raw.replace(',', '.'));
-    if (!Number.isFinite(n) || n <= 0) return;
+    const n = parseMoneyInput(raw);
+    if (!(n > 0)) return;
     setPayers((prev) => {
       if (prev.length !== 1) return prev;
       return [{ ...prev[0]!, amount: String(n) }];
@@ -242,6 +266,23 @@ export default function TripExpenseForm({ mode, trip, expenseId, initial, title 
 
   const removePayer = (key: string) => {
     setPayers((prev) => (prev.length <= 1 ? prev : prev.filter((p) => p.key !== key)));
+  };
+
+  const assignPaymentResto = (key: string) => {
+    if (!canAssignPaymentResto) return;
+    setPayers((prev) =>
+      prev.map((p) =>
+        p.key === key ? { ...p, amount: applyRemainingToAmount(p.amount, paymentsRemaining) } : p,
+      ),
+    );
+  };
+
+  const assignSplitResto = (memberId: string) => {
+    if (!canAssignSplitResto) return;
+    setSplitValues((prev) => ({
+      ...prev,
+      [memberId]: applyRemainingToAmount(prev[memberId] ?? '', splitAmountsRemaining),
+    }));
   };
 
   const backTo =
@@ -332,6 +373,15 @@ export default function TripExpenseForm({ mode, trip, expenseId, initial, title 
                   </button>
                 )}
               </div>
+              {canAssignPaymentResto && (
+                <button
+                  type="button"
+                  className="btn-link amount-resto-btn"
+                  onClick={() => assignPaymentResto(row.key)}
+                >
+                  Usar resto
+                </button>
+              )}
             </label>
           </div>
         ))}
@@ -340,13 +390,11 @@ export default function TripExpenseForm({ mode, trip, expenseId, initial, title 
             + Agregar pagador
           </button>
         )}
-        {amountNum > 0 && payers.length > 1 && (
-          <p className={`hint ${Math.abs(paymentsRemaining) > 0.01 ? 'error' : ''}`}>
-            {Math.abs(paymentsRemaining) <= 0.01
-              ? 'Suma de pagos OK'
-              : paymentsRemaining > 0
-                ? `Faltan ${paymentsRemaining.toFixed(2)}`
-                : `Sobran ${Math.abs(paymentsRemaining).toFixed(2)}`}
+        {amountNum > 0 &&
+          payers.length > 0 &&
+          (payers.length > 1 || remainingBalance(paymentsRemaining) !== 'ok') && (
+          <p className={`hint ${remainingBalance(paymentsRemaining) !== 'ok' ? 'error' : ''}`}>
+            {remainingHintLabel(paymentsRemaining)}
           </p>
         )}
 
@@ -431,8 +479,22 @@ export default function TripExpenseForm({ mode, trip, expenseId, initial, title 
                           : '$'
                     }
                   />
+                  {splitSubMode === 'AMOUNT' && canAssignSplitResto && (
+                    <button
+                      type="button"
+                      className="btn-link amount-resto-btn"
+                      onClick={() => assignSplitResto(m.id)}
+                    >
+                      Usar resto
+                    </button>
+                  )}
                 </label>
               ))}
+            {splitSubMode === 'AMOUNT' && amountNum > 0 && (
+              <p className={`hint ${remainingBalance(splitAmountsRemaining) !== 'ok' ? 'error' : ''}`}>
+                {remainingHintLabel(splitAmountsRemaining)}
+              </p>
+            )}
           </>
         )}
 

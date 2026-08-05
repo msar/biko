@@ -1167,6 +1167,10 @@ label {
   margin: 2px 0;
 }
 
+.hint.error {
+  color: var(--red);
+}
+
 .hint.center {
   text-align: center;
 }
@@ -1999,6 +2003,9 @@ label {
 .expense-detail-value {
   text-align: right;
   font-weight: 560;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .expense-detail-actions {
@@ -2731,6 +2738,12 @@ code {
 .trip-payer-amount-wrap input {
   flex: 1;
   min-width: 0;
+}
+
+.amount-resto-btn {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.8rem;
 }
 
 .trip-accommodation-card {

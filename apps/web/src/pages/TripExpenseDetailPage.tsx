@@ -7,6 +7,8 @@ import { api, fmtDate, fmtMoney } from '../lib/api';
 import type { TripExpense, TripHub } from '../lib/trip-types';
 import {
   TRIP_CATEGORY_COLORS,
+  accommodationMapsHref,
+  isHttpUrl,
   tripExpenseSplitModeLabel,
 } from '../lib/trip-utils';
 
@@ -159,7 +161,25 @@ export default function TripExpenseDetailPage() {
             {expense.accommodation.label?.trim() || 'Alojamiento del viaje'}
           </DetailRow>
           {expense.accommodation.address && (
-            <DetailRow label="Dirección">{expense.accommodation.address}</DetailRow>
+            <DetailRow label="Dirección">
+              {isHttpUrl(expense.accommodation.address) ? (
+                <a
+                  href={accommodationMapsHref(expense.accommodation.address)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Ver en mapa
+                </a>
+              ) : (
+                <a
+                  href={accommodationMapsHref(expense.accommodation.address)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {expense.accommodation.address}
+                </a>
+              )}
+            </DetailRow>
           )}
           <p className="hint">
             <Link to={`/viajes/${tripId}`}>Ver en el viaje</Link>

@@ -5,6 +5,13 @@ import { findCandidatePromotions, calculateDiscount } from '@biko/shared';
 import StoreAutocomplete from './StoreAutocomplete';
 import ExpenseSuggestionPromo, { suggestionBenefitText } from './ExpenseSuggestionPromo';
 import { api, fmtARS } from '../lib/api';
+import {
+  applyRemainingToAmount,
+  moneyRemaining,
+  parseMoneyInput,
+  remainingBalance,
+  remainingHintLabel,
+} from '../lib/amount-remaining';
 import { useAuth } from '../lib/auth';
 import { resolveExpensePayer } from '../lib/expense-labels';
 import { enqueueExpense, type OutboxExpense } from '../lib/outbox';
@@ -426,8 +433,9 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
       return { me: equalShare, partner: Math.max(0, estimatedNet - equalShare) };
     }
     if (splitSubMode === 'AMOUNT') {
-      const mine = Number(myAmount) || 0;
-      return { me: mine, partner: Math.max(0, estimatedNet - mine) };
+      const mine = parseMoneyInput(myAmount);
+      const theirs = parseMoneyInput(partnerAmount);
+      return { me: mine, partner: theirs };
     }
     if (splitSubMode === 'SHARES') {
       const a = Number(myShares) || 0;
@@ -461,25 +469,19 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
     if (scope === 'PERSONAL') setChargeTo('me');
   }, [scope]);
 
-  // Keep Monto fields aligned with the current estimated net (changes with promos).
+  // Seed Monto fields when entering amount split / net changes and fields are empty.
   useEffect(() => {
     if (chargeTo !== 'split' || splitSubMode !== 'AMOUNT' || estimatedNet <= 0) return;
-    setMyAmount((prev) => {
-      if (prev === '' || !Number.isFinite(Number(prev))) {
-        return String(Math.round((estimatedNet / 2) * 100) / 100);
-      }
-      const clamped = Math.min(Math.max(0, Number(prev)), estimatedNet);
-      return String(Math.round(clamped * 100) / 100);
-    });
+    const half = String(Math.round((estimatedNet / 2) * 100) / 100);
+    setMyAmount((prev) => (prev === '' || !Number.isFinite(Number(prev)) ? half : prev));
+    setPartnerAmount((prev) => (prev === '' || !Number.isFinite(Number(prev)) ? half : prev));
   }, [chargeTo, splitSubMode, estimatedNet]);
 
-  useEffect(() => {
-    if (chargeTo !== 'split' || splitSubMode !== 'AMOUNT' || estimatedNet <= 0) return;
-    if (myAmount === '' || !Number.isFinite(Number(myAmount))) return;
-    const mine = Math.min(Math.max(0, Number(myAmount)), estimatedNet);
-    const theirs = Math.round((estimatedNet - mine) * 100) / 100;
-    setPartnerAmount(String(theirs));
-  }, [chargeTo, splitSubMode, estimatedNet, myAmount]);
+  const splitAmountRemaining = moneyRemaining(estimatedNet, [
+    parseMoneyInput(myAmount),
+    parseMoneyInput(partnerAmount),
+  ]);
+  const canAssignSplitResto = remainingBalance(splitAmountRemaining) === 'short';
 
   const buildPayload = (): Omit<OutboxExpense, 'clientId' | 'createdAt'> => {
     const payload: Omit<OutboxExpense, 'clientId' | 'createdAt'> = {
@@ -517,11 +519,9 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
         if (mode === 'EQUAL') {
           // nothing else
         } else if (mode === 'AMOUNT') {
-          const mine = Number(myAmount) || 0;
-          const theirs = Math.round((estimatedNet - mine) * 100) / 100;
           payload.splitValues = [
-            { userId: user.id, value: mine },
-            { userId: partner.id, value: theirs },
+            { userId: user.id, value: parseMoneyInput(myAmount) },
+            { userId: partner.id, value: parseMoneyInput(partnerAmount) },
           ];
         } else if (mode === 'SHARES') {
           payload.splitValues = [
@@ -605,10 +605,8 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
     switch (splitSubMode) {
       case 'EQUAL':
         return true;
-      case 'AMOUNT': {
-        const mine = Number(myAmount);
-        return Number.isFinite(mine) && mine >= 0 && mine <= estimatedNet + 0.001;
-      }
+      case 'AMOUNT':
+        return remainingBalance(splitAmountRemaining) === 'ok';
       case 'SHARES':
         return Number(myShares) >= 0 && Number(partnerShares) >= 0 && Number(myShares) + Number(partnerShares) > 0;
       case 'PERCENTAGE':
@@ -758,38 +756,64 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
               )}
 
               {splitSubMode === 'AMOUNT' && (
-                <div className="field-row split-fields">
-                  <label>
-                    Tu parte $
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      value={myAmount}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setMyAmount(v);
-                        const mine = Number(v) || 0;
-                        setPartnerAmount(String(Math.max(0, Math.round((estimatedNet - mine) * 100) / 100)));
-                      }}
-                      placeholder={String(Math.round(equalShare))}
-                    />
-                  </label>
-                  <label>
-                    {partner.name} $
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      value={partnerAmount}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setPartnerAmount(v);
-                        const theirs = Number(v) || 0;
-                        setMyAmount(String(Math.max(0, Math.round((estimatedNet - theirs) * 100) / 100)));
-                      }}
-                      placeholder={String(Math.round(equalShare))}
-                    />
-                  </label>
-                </div>
+                <>
+                  <div className="field-row split-fields">
+                    <label>
+                      Tu parte $
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={myAmount}
+                        onChange={(e) => setMyAmount(e.target.value)}
+                        placeholder={String(Math.round(equalShare))}
+                      />
+                      {canAssignSplitResto && (
+                        <button
+                          type="button"
+                          className="btn-link amount-resto-btn"
+                          onClick={() =>
+                            setMyAmount(applyRemainingToAmount(myAmount, splitAmountRemaining))
+                          }
+                        >
+                          Usar resto
+                        </button>
+                      )}
+                    </label>
+                    <label>
+                      {partner.name} $
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={partnerAmount}
+                        onChange={(e) => setPartnerAmount(e.target.value)}
+                        placeholder={String(Math.round(equalShare))}
+                      />
+                      {canAssignSplitResto && (
+                        <button
+                          type="button"
+                          className="btn-link amount-resto-btn"
+                          onClick={() =>
+                            setPartnerAmount(
+                              applyRemainingToAmount(partnerAmount, splitAmountRemaining),
+                            )
+                          }
+                        >
+                          Usar resto
+                        </button>
+                      )}
+                    </label>
+                  </div>
+                  {estimatedNet > 0 && (
+                    <p
+                      className={`hint ${remainingBalance(splitAmountRemaining) !== 'ok' ? 'error' : ''}`}
+                    >
+                      {remainingHintLabel(splitAmountRemaining)}
+                      {remainingBalance(splitAmountRemaining) === 'ok'
+                        ? ` · ${fmtARS.format(estimatedNet)}`
+                        : ''}
+                    </p>
+                  )}
+                </>
               )}
 
               {splitSubMode === 'SHARES' && (
@@ -854,7 +878,10 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
                 </div>
               )}
 
-              {chargeTo === 'split' && splitSubMode !== 'EQUAL' && estimatedNet > 0 && (
+              {chargeTo === 'split' &&
+                splitSubMode !== 'EQUAL' &&
+                splitSubMode !== 'AMOUNT' &&
+                estimatedNet > 0 && (
                 <p className="split-partner">
                   Vos {fmtARS.format(previewShares.me)} · {partner.name} {fmtARS.format(previewShares.partner)} de{' '}
                   {fmtARS.format(estimatedNet)}
