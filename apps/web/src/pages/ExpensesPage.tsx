@@ -9,7 +9,7 @@ import { getOutbox, onOutboxChange, OutboxExpense } from '../lib/outbox';
 import type { Purchase } from '../lib/types';
 
 /** Matches GET /expenses default; keep in sync with API `listQuerySchema`. */
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 10;
 
 function expensesListUrl(offset: number): string {
   const params = new URLSearchParams({
