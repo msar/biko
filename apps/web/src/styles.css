@@ -2718,6 +2718,21 @@ code {
   gap: 10px;
 }
 
+.trip-payer-row {
+  align-items: end;
+}
+
+.trip-payer-amount-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trip-payer-amount-wrap input {
+  flex: 1;
+  min-width: 0;
+}
+
 .trip-accommodation-card {
   overflow: hidden;
 }

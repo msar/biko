@@ -97,12 +97,39 @@ const tripCategory = z.enum([
   'OTROS',
 ]);
 
-const expenseBodySchema = z.object({
+const expensePaymentSchema = z.object({
+  memberId: z.string().min(1),
   amount: z.number().positive(),
-  category: tripCategory,
-  paidByMemberId: z.string().min(1),
+});
+
+const expenseBodySchema = z
+  .object({
+    amount: z.number().positive(),
+    category: tripCategory,
+    paidByMemberId: z.string().min(1).optional(),
+    payments: z.array(expensePaymentSchema).min(1).optional(),
+    note: z.string().max(500).nullish(),
+    date: dateInput,
+    currency: z.string().min(1).max(8).optional(),
+    splitMode: z.enum(['EQUAL', 'ASSIGN', 'AMOUNT', 'SHARES', 'PERCENTAGE']).optional(),
+    assignToMemberId: z.string().min(1).nullish(),
+    splitValues: z
+      .array(z.object({ memberId: z.string().min(1), value: z.number().positive() }))
+      .nullish(),
+    participantMemberIds: z.array(z.string().min(1)).nullish(),
+  })
+  .refine((b) => Boolean(b.paidByMemberId) || (b.payments && b.payments.length > 0), {
+    message: 'Indicá al menos un pagador',
+    path: ['payments'],
+  });
+
+const expensePatchSchema = z.object({
+  amount: z.number().positive().optional(),
+  category: tripCategory.optional(),
+  paidByMemberId: z.string().min(1).optional(),
+  payments: z.array(expensePaymentSchema).min(1).optional(),
   note: z.string().max(500).nullish(),
-  date: dateInput,
+  date: dateInput.optional(),
   currency: z.string().min(1).max(8).optional(),
   splitMode: z.enum(['EQUAL', 'ASSIGN', 'AMOUNT', 'SHARES', 'PERCENTAGE']).optional(),
   assignToMemberId: z.string().min(1).nullish(),
@@ -372,7 +399,7 @@ export default async function tripRoutes(app: FastifyInstance) {
 
   app.patch('/trips/:tripId/expenses/:expenseId', { preHandler: [app.authenticate] }, async (request, reply) => {
     const { tripId, expenseId } = expenseIdParams.parse(request.params);
-    const body = expenseBodySchema.partial().parse(request.body ?? {});
+    const body = expensePatchSchema.parse(request.body ?? {});
     try {
       return await updateTripExpense(app.prisma, tripId, expenseId, request.user.userId, body);
     } catch (error) {

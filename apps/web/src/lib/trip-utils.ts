@@ -72,3 +72,18 @@ export function todayIso(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+
+export function formatTripExpensePayers(
+  expense: {
+    paidByMember: { displayName: string };
+    payments?: Array<{ displayName: string; amount: number }>;
+  },
+  fmtMoney: (n: number) => string,
+): string {
+  const payments = expense.payments ?? [];
+  if (payments.length <= 1) {
+    const name = payments[0]?.displayName ?? expense.paidByMember.displayName;
+    return `Pagó ${name}`;
+  }
+  return `Pagaron ${payments.map((p) => `${p.displayName} (${fmtMoney(p.amount)})`).join(', ')}`;
+}

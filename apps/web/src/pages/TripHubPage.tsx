@@ -17,6 +17,7 @@ import {
   accommodationMapsHref,
   dateInputValue,
   formatStayMoment,
+  formatTripExpensePayers,
   isHttpUrl,
   timeInputValue,
   tripInviteUrl,
@@ -357,7 +358,7 @@ function GastosTab({
             <strong>{fmtMoney(e.amount)}</strong>
           </div>
           <p className="hint">
-            Pagó {e.paidByMember.displayName} · {fmtDate(e.date)}
+            {formatTripExpensePayers(e, fmtMoney)} · {fmtDate(e.date)}
           </p>
           {e.note && <p className="hint">{e.note}</p>}
         </div>
@@ -610,7 +611,15 @@ function AlojamientoTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           </p>
         )}
         {acc.amount != null && (
-          <p className="trip-accommodation-cost">Costo {fmtMoney(acc.amount, currency)}</p>
+          <p className="trip-accommodation-cost">
+            Costo {fmtMoney(acc.amount, currency)}
+            <span className="hint"> · cuenta en Gastos y balances</span>
+          </p>
+        )}
+        {acc.expenseId && !closed && (
+          <p className="hint">
+            Para cambiar quién pagó o el reparto, editá el gasto de Alojamiento en Gastos.
+          </p>
         )}
         {acc.link && (
           <p>
@@ -693,6 +702,10 @@ function AlojamientoTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           placeholder="Opcional"
         />
       </label>
+      <p className="hint">
+        El costo se registra como gasto de Alojamiento (reparto igual entre viajeros) y suma a
+        balances. Quién pagó se puede ajustar desde Gastos.
+      </p>
       <label>
         Link de reserva
         <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" />

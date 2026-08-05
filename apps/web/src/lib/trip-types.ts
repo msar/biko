@@ -55,6 +55,7 @@ export interface TripAccommodation {
   checkInTime: string | null;
   checkOutTime: string | null;
   amount: number | null;
+  expenseId: string | null;
   link: string | null;
   notes: string | null;
 }
@@ -155,6 +156,13 @@ export interface TripExpense {
   exportedPurchaseId: string | null;
   createdAt: string;
   updatedAt: string;
+  payments: Array<{
+    id: string;
+    tripMemberId: string;
+    amount: number;
+    displayName: string;
+    userId: string | null;
+  }>;
   allocations: Array<{
     id: string;
     tripMemberId: string;

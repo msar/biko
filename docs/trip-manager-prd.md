@@ -156,9 +156,9 @@ They **do** see: trip Resumen, Gastos (trip-scoped), Listas, Alojamiento, Person
 
 **Behaviors**
 
-- Log amount, payer (trip member), category, optional note, date, currency (ARS default; multi-currency as display-only or single FX rate per trip in v1.1).
-- Split modes **reuse the same algorithms** as household expenses (equal, by %, by shares, by amount, assign to subset)—shared library in [`packages/shared/src/expense-allocation.ts`](../packages/shared/src/expense-allocation.ts), not a runtime dependency on household purchases.
-- Running balances: who owes whom **within the trip** (simplify transfers on settle; same idea as [`packages/shared/src/settle-up.ts`](../packages/shared/src/settle-up.ts) / `/juntada`, trip-scoped).
+- Log amount, **one or more payers** (trip members with amounts summing to the total), category, optional note, date, currency (ARS default; multi-currency as display-only or single FX rate per trip in v1.1).
+- Split modes **reuse the same algorithms** as household expenses (equal, by %, by shares, by amount, assign to subset)—shared library in [`packages/shared/src/expense-allocation.ts`](../packages/shared/src/expense-allocation.ts), not a runtime dependency on household purchases. Allocations (who owes) are separate from payments (who paid).
+- Running balances: who owes whom **within the trip** (simplify transfers on settle; same idea as [`packages/shared/src/settle-up.ts`](../packages/shared/src/settle-up.ts) / `/juntada`, trip-scoped). **Paid** = sum of payment rows; **share** = sum of allocations.
 - Trip spend dashboard: total by category (%), by person (paid vs share).
 - Trip settle-up (**Liquidar viaje**) is the **primary money close**. It is complete without any household action.
 
@@ -191,12 +191,13 @@ They **do** see: trip Resumen, Gastos (trip-scoped), Listas, Alojamiento, Person
 - Shareable **invite code/link** (trip invite, not household invite). On join, the invitee can **claim** an unclaimed slot (“¿Quién sos?”) or add themselves as “Otro / no estoy en la lista”.
 - Joining adds/claims a trip roster seat only; they see expenses, lists, accommodation—**never** household Gastos/promos/balance.
 - **Trip-household groups** (named groups on the trip, e.g. “Los García”) are trip-internal only—not Biko hogar membership. Organizer assigns travellers into groups.
-- **Settlement units:** balances and Liquidar aggregate per trip-household group (paid + share roll up); ungrouped travellers stay individual units. Expense payer remains a person; allocations may stay per-member. Pasar a Biko (Biko hogar) is unchanged when eligible.
+- **Settlement units:** balances and Liquidar aggregate per trip-household group (paid + share roll up); ungrouped travellers stay individual units. Expense payments may be multi-member; allocations may stay per-member. Pasar a Biko (Biko hogar) is unchanged when eligible.
 - Roles as above. Guests cannot Pasar a Biko or see household finances.
 
 ### 5. Trip accommodation
 
 - One primary stay in v1 (enough for most couple/weekend trips): name/label, **address**, check-in / check-out dates, optional link (Airbnb/booking), optional notes (door code—treat as sensitive).
+- Optional **cost** is a real trip expense in category **Alojamiento** (linked via `TripAccommodation.expenseId`), equal-split among PENDING+JOINED by default; counts in Gastos and balances (not metadata-only). Clear cost → remove the linked unexported expense. Multi-payer / custom split editable from Gastos.
 - Trip-level fields: name, destination (free text), start/end dates (may match or wrap stay dates).
 - Multi-stay / multi-city: backlog.
 
@@ -337,7 +338,7 @@ flowchart LR
 2. **Personas** — copy invite link; members/guests join roster only.
 3. **Alojamiento** — one primary stay (address, check-in/out, optional booking link/notes).
 4. **Listas** — add Hacer items; add Traer / Comprar with optional assignee.
-5. **Gastos** — FAB add expense (amount, payer, category, split, note, date); Resumen updates totals and balances.
+5. **Gastos** — FAB add expense (amount, one or more payers, category, split, note, date); Resumen updates totals and balances.
 6. **Liquidar viaje** — show minimized transfers (reuse settle-up simplification); record trip settlements; mark trip closed (read-only).
 7. **Done** — no household action required. Empty/closed copy: “Viaje liquidado” without pushing Pasar a Biko.
 

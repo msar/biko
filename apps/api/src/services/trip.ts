@@ -76,6 +76,10 @@ const householdSelect = {
 
 const expenseInclude = {
   paidByMember: { select: memberSelect },
+  payments: {
+    include: { tripMember: { select: memberSelect } },
+    orderBy: { tripMemberId: 'asc' as const },
+  },
   allocations: {
     include: { tripMember: { select: memberSelect } },
     orderBy: { tripMemberId: 'asc' as const },
@@ -207,6 +211,22 @@ export async function getTripHub(db: Db, tripId: string, userId: string, househo
   });
   if (!trip) throw new TripNotFoundError();
 
+  // Lazy backfill: pre-migration stay costs without linked Alojamiento expense
+  if (
+    trip.accommodation &&
+    trip.accommodation.amount != null &&
+    toNum(trip.accommodation.amount) > 0 &&
+    !trip.accommodation.expenseId &&
+    trip.status !== 'CLOSED'
+  ) {
+    trip.accommodation = await syncAccommodationExpense(
+      db,
+      tripId,
+      trip.accommodation,
+      trip.baseCurrency,
+    );
+  }
+
   const balance = await computeTripBalance(db, tripId);
   const categoryTotals = await computeCategoryTotals(db, tripId);
   const totalSpent = round2(categoryTotals.reduce((s, c) => s + c.total, 0));
@@ -313,6 +333,7 @@ function serializeTrip(trip: {
     checkInTime: string | null;
     checkOutTime: string | null;
     amount: unknown;
+    expenseId: string | null;
     link: string | null;
     notes: string | null;
   } | null;
@@ -347,6 +368,7 @@ function serializeAccommodation(acc: {
   checkInTime: string | null;
   checkOutTime: string | null;
   amount: unknown;
+  expenseId?: string | null;
   link: string | null;
   notes: string | null;
 }) {
@@ -359,6 +381,7 @@ function serializeAccommodation(acc: {
     checkInTime: acc.checkInTime,
     checkOutTime: acc.checkOutTime,
     amount: acc.amount == null ? null : toNum(acc.amount),
+    expenseId: acc.expenseId ?? null,
     link: acc.link,
     notes: acc.notes,
   };
@@ -589,15 +612,16 @@ export async function deleteTripMember(
     throw new TripValidationError('Solo se pueden eliminar viajeros sin reclamar');
   }
 
-  const [paidCount, allocCount, settleCount, assignCount] = await Promise.all([
+  const [paidCount, paymentCount, allocCount, settleCount, assignCount] = await Promise.all([
     db.tripExpense.count({ where: { paidByMemberId: memberId } }),
+    db.tripExpensePayment.count({ where: { tripMemberId: memberId } }),
     db.tripExpenseAllocation.count({ where: { tripMemberId: memberId } }),
     db.tripSettlement.count({
       where: { OR: [{ fromMemberId: memberId }, { toMemberId: memberId }] },
     }),
     db.tripListItem.count({ where: { assigneeMemberId: memberId } }),
   ]);
-  if (paidCount + allocCount + settleCount > 0) {
+  if (paidCount + paymentCount + allocCount + settleCount > 0) {
     throw new TripValidationError('No se puede eliminar: tiene gastos o liquidaciones');
   }
   if (assignCount > 0) {
@@ -738,10 +762,17 @@ export async function deleteTripHousehold(
   await db.tripHousehold.delete({ where: { id: householdId } });
 }
 
+export type TripExpensePaymentInput = {
+  memberId: string;
+  amount: number;
+};
+
 export type TripExpenseInput = {
   amount: number;
   category: TripExpenseCategory;
-  paidByMemberId: string;
+  /** @deprecated Prefer `payments`; kept for single-payer clients. */
+  paidByMemberId?: string;
+  payments?: TripExpensePaymentInput[];
   note?: string | null;
   date: Date;
   currency?: string;
@@ -761,7 +792,99 @@ async function rosterMemberIds(db: Db, tripId: string): Promise<string[]> {
   return members.map((m) => m.id);
 }
 
-function buildTripAllocations(input: TripExpenseInput, memberIds: string[]) {
+async function defaultTripPayerId(db: Db, tripId: string): Promise<string> {
+  const members = await db.tripMember.findMany({
+    where: { tripId, inviteStatus: { in: ['JOINED', 'PENDING'] } },
+    select: { id: true, role: true, createdAt: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  if (members.length === 0) {
+    throw new TripValidationError('El viaje no tiene miembros');
+  }
+  const organizer = members.find((m) => m.role === 'ORGANIZER');
+  return organizer?.id ?? members[0]!.id;
+}
+
+function normalizeExpensePayments(
+  amount: number,
+  memberIds: string[],
+  input: { paidByMemberId?: string; payments?: TripExpensePaymentInput[] | null },
+): { payments: TripExpensePaymentInput[]; paidByMemberId: string } {
+  let payments = (input.payments ?? [])
+    .map((p) => ({ memberId: p.memberId, amount: round2(p.amount) }))
+    .filter((p) => p.amount > 0);
+
+  if (payments.length === 0) {
+    if (!input.paidByMemberId) {
+      throw new TripValidationError('Indicá al menos un pagador');
+    }
+    payments = [{ memberId: input.paidByMemberId, amount: round2(amount) }];
+  }
+
+  const seen = new Set<string>();
+  for (const p of payments) {
+    if (!memberIds.includes(p.memberId)) {
+      throw new TripValidationError('Un pagador no pertenece al viaje');
+    }
+    if (seen.has(p.memberId)) {
+      throw new TripValidationError('Cada miembro puede aparecer una sola vez en los pagadores');
+    }
+    seen.add(p.memberId);
+  }
+
+  const sum = round2(payments.reduce((s, p) => s + p.amount, 0));
+  if (Math.abs(sum - round2(amount)) > 0.01) {
+    throw new TripValidationError('La suma de lo pagado debe coincidir con el monto del gasto');
+  }
+
+  // Fix rounding drift onto the largest payment
+  const drift = round2(round2(amount) - sum);
+  if (drift !== 0) {
+    const idx = payments.reduce(
+      (best, p, i, arr) => (p.amount > arr[best]!.amount ? i : best),
+      0,
+    );
+    payments[idx] = {
+      ...payments[idx]!,
+      amount: round2(payments[idx]!.amount + drift),
+    };
+  }
+
+  const primary = [...payments].sort((a, b) => b.amount - a.amount || a.memberId.localeCompare(b.memberId))[0]!;
+  return { payments, paidByMemberId: primary.memberId };
+}
+
+function scalePaymentsToAmount(
+  payments: TripExpensePaymentInput[],
+  newAmount: number,
+  fallbackMemberId: string,
+): TripExpensePaymentInput[] {
+  const target = round2(newAmount);
+  if (!(target > 0)) return [];
+  const oldTotal = round2(payments.reduce((s, p) => s + p.amount, 0));
+  if (payments.length === 0 || oldTotal <= 0) {
+    return [{ memberId: fallbackMemberId, amount: target }];
+  }
+  const scaled = payments.map((p) => ({
+    memberId: p.memberId,
+    amount: round2((p.amount / oldTotal) * target),
+  }));
+  const sum = round2(scaled.reduce((s, p) => s + p.amount, 0));
+  const drift = round2(target - sum);
+  if (drift !== 0) {
+    const idx = scaled.reduce(
+      (best, p, i, arr) => (p.amount > arr[best]!.amount ? i : best),
+      0,
+    );
+    scaled[idx] = { ...scaled[idx]!, amount: round2(scaled[idx]!.amount + drift) };
+  }
+  return scaled.filter((p) => p.amount > 0);
+}
+
+function buildTripAllocations(
+  input: TripExpenseInput & { paidByMemberId: string },
+  memberIds: string[],
+) {
   const participants =
     input.participantMemberIds && input.participantMemberIds.length > 0
       ? input.participantMemberIds.filter((id) => memberIds.includes(id))
@@ -820,6 +943,12 @@ function serializeExpense(expense: {
     userId: string | null;
     role: TripMemberRole;
   };
+  payments: Array<{
+    id: string;
+    tripMemberId: string;
+    amount: unknown;
+    tripMember: { id: string; displayName: string; userId: string | null };
+  }>;
   allocations: Array<{
     id: string;
     tripMemberId: string;
@@ -845,6 +974,13 @@ function serializeExpense(expense: {
     exportedPurchaseId: expense.exportedPurchaseId,
     createdAt: expense.createdAt,
     updatedAt: expense.updatedAt,
+    payments: expense.payments.map((p) => ({
+      id: p.id,
+      tripMemberId: p.tripMemberId,
+      amount: toNum(p.amount),
+      displayName: p.tripMember.displayName,
+      userId: p.tripMember.userId,
+    })),
     allocations: expense.allocations.map((a) => ({
       id: a.id,
       tripMemberId: a.tripMemberId,
@@ -861,28 +997,27 @@ export async function createTripExpense(db: Db, tripId: string, userId: string, 
 
   if (!(input.amount > 0)) throw new TripValidationError('El monto debe ser mayor a 0');
   const memberIds = await rosterMemberIds(db, tripId);
-  if (!memberIds.includes(input.paidByMemberId)) {
-    throw new TripValidationError('El pagador no pertenece al viaje');
-  }
-
-  const allocations = buildTripAllocations(input, memberIds);
+  const { payments, paidByMemberId } = normalizeExpensePayments(input.amount, memberIds, input);
+  const allocations = buildTripAllocations({ ...input, paidByMemberId }, memberIds);
 
   const expense = await db.tripExpense.create({
     data: {
       tripId,
-      paidByMemberId: input.paidByMemberId,
+      paidByMemberId,
       amount: input.amount,
       category: input.category,
       note: input.note?.trim() || null,
       date: input.date,
       currency: input.currency ?? 'ARS',
       splitMode: input.splitMode ?? 'EQUAL',
+      payments: {
+        create: payments.map((p) => ({ tripMemberId: p.memberId, amount: p.amount })),
+      },
       allocations: { create: allocations },
     },
     include: expenseInclude,
   });
 
-  // Bump to ACTIVE if still planning
   if (me.trip.status === 'PLANNING') {
     await db.trip.update({ where: { id: tripId }, data: { status: 'ACTIVE' } });
   }
@@ -900,14 +1035,47 @@ export async function updateTripExpense(
   const me = await requireTripMember(db, tripId, userId);
   assertTripWritable(me.trip.status);
 
-  const existing = await db.tripExpense.findFirst({ where: { id: expenseId, tripId } });
+  const existing = await db.tripExpense.findFirst({
+    where: { id: expenseId, tripId },
+    include: { payments: true },
+  });
   if (!existing) throw new TripNotFoundError('Gasto no encontrado');
 
   const memberIds = await rosterMemberIds(db, tripId);
-  const merged: TripExpenseInput = {
-    amount: input.amount ?? toNum(existing.amount),
+  const amount = input.amount ?? toNum(existing.amount);
+
+  let paymentSource: { paidByMemberId?: string; payments?: TripExpensePaymentInput[] | null };
+  if (input.payments != null) {
+    paymentSource = { payments: input.payments, paidByMemberId: input.paidByMemberId };
+  } else if (input.paidByMemberId != null && input.payments === undefined) {
+    // Explicit single-payer update without payments array
+    paymentSource = { paidByMemberId: input.paidByMemberId };
+  } else {
+    paymentSource = {
+      payments: existing.payments.map((p) => ({
+        memberId: p.tripMemberId,
+        amount: toNum(p.amount),
+      })),
+      paidByMemberId: existing.paidByMemberId,
+    };
+    if (input.amount != null && round2(input.amount) !== round2(toNum(existing.amount))) {
+      paymentSource = {
+        payments: scalePaymentsToAmount(
+          paymentSource.payments ?? [],
+          amount,
+          existing.paidByMemberId,
+        ),
+      };
+    }
+  }
+
+  const { payments, paidByMemberId } = normalizeExpensePayments(amount, memberIds, paymentSource);
+
+  const merged: TripExpenseInput & { paidByMemberId: string } = {
+    amount,
     category: input.category ?? existing.category,
-    paidByMemberId: input.paidByMemberId ?? existing.paidByMemberId,
+    paidByMemberId,
+    payments,
     note: input.note !== undefined ? input.note : existing.note,
     date: input.date ?? existing.date,
     currency: input.currency ?? existing.currency,
@@ -918,12 +1086,10 @@ export async function updateTripExpense(
   };
 
   if (!(merged.amount > 0)) throw new TripValidationError('El monto debe ser mayor a 0');
-  if (!memberIds.includes(merged.paidByMemberId)) {
-    throw new TripValidationError('El pagador no pertenece al viaje');
-  }
 
   const allocations = buildTripAllocations(merged, memberIds);
 
+  await db.tripExpensePayment.deleteMany({ where: { tripExpenseId: expenseId } });
   await db.tripExpenseAllocation.deleteMany({ where: { tripExpenseId: expenseId } });
   const expense = await db.tripExpense.update({
     where: { id: expenseId },
@@ -935,10 +1101,32 @@ export async function updateTripExpense(
       date: merged.date,
       currency: merged.currency ?? 'ARS',
       splitMode: merged.splitMode ?? 'EQUAL',
+      payments: {
+        create: payments.map((p) => ({ tripMemberId: p.memberId, amount: p.amount })),
+      },
       allocations: { create: allocations },
     },
     include: expenseInclude,
   });
+
+  const linked = await db.tripAccommodation.findFirst({ where: { expenseId, tripId } });
+  if (linked) {
+    if (merged.category !== 'ALOJAMIENTO') {
+      await db.tripAccommodation.update({
+        where: { id: linked.id },
+        data: { expenseId: null, amount: null },
+      });
+    } else {
+      await db.tripAccommodation.update({
+        where: { id: linked.id },
+        data: {
+          amount: merged.amount,
+          ...(input.note !== undefined ? { label: merged.note?.trim() || linked.label } : {}),
+        },
+      });
+    }
+  }
+
   return serializeExpense(expense);
 }
 
@@ -947,6 +1135,14 @@ export async function deleteTripExpense(db: Db, tripId: string, expenseId: strin
   assertTripWritable(me.trip.status);
   const existing = await db.tripExpense.findFirst({ where: { id: expenseId, tripId } });
   if (!existing) throw new TripNotFoundError('Gasto no encontrado');
+
+  const linked = await db.tripAccommodation.findFirst({ where: { expenseId, tripId } });
+  if (linked) {
+    await db.tripAccommodation.update({
+      where: { id: linked.id },
+      data: { expenseId: null, amount: null },
+    });
+  }
   await db.tripExpense.delete({ where: { id: expenseId } });
 }
 
@@ -1030,7 +1226,7 @@ export async function computeTripBalance(db: Db, tripId: string): Promise<TripBa
     }),
     db.tripExpense.findMany({
       where: { tripId },
-      include: { allocations: true },
+      include: { allocations: true, payments: true },
     }),
     db.tripSettlement.findMany({
       where: { tripId },
@@ -1052,8 +1248,12 @@ export async function computeTripBalance(db: Db, tripId: string): Promise<TripBa
   }
 
   for (const expense of expenses) {
-    const amount = toNum(expense.amount);
-    paidBy.set(expense.paidByMemberId, round2((paidBy.get(expense.paidByMemberId) ?? 0) + amount));
+    for (const payment of expense.payments) {
+      paidBy.set(
+        payment.tripMemberId,
+        round2((paidBy.get(payment.tripMemberId) ?? 0) + toNum(payment.amount)),
+      );
+    }
     for (const alloc of expense.allocations) {
       shareBy.set(alloc.tripMemberId, round2((shareBy.get(alloc.tripMemberId) ?? 0) + toNum(alloc.amount)));
     }
@@ -1316,6 +1516,142 @@ export async function deleteTripListItem(db: Db, tripId: string, itemId: string,
 
 // --- Accommodation ---
 
+/**
+ * Keep TripAccommodation.amount in sync with a linked Alojamiento TripExpense.
+ * Creates/updates equal-split expense among PENDING+JOINED; deletes unexported expense when cost cleared.
+ */
+async function syncAccommodationExpense(
+  db: Db,
+  tripId: string,
+  acc: {
+    id: string;
+    expenseId: string | null;
+    amount: unknown;
+    label: string | null;
+    checkIn: Date | null;
+  },
+  tripCurrency: string,
+) {
+  const cost = acc.amount == null ? null : round2(toNum(acc.amount));
+  const note = acc.label?.trim() || 'Alojamiento';
+  const date = acc.checkIn ?? new Date();
+
+  if (cost == null || cost <= 0) {
+    if (acc.expenseId) {
+      const linked = await db.tripExpense.findFirst({ where: { id: acc.expenseId, tripId } });
+      if (linked && !linked.exportedPurchaseId) {
+        await db.tripExpense.delete({ where: { id: linked.id } });
+      } else if (linked?.exportedPurchaseId) {
+        // Keep exported expense; just detach so we don't mutate household history oddly.
+        await db.tripAccommodation.update({
+          where: { id: acc.id },
+          data: { expenseId: null, amount: null },
+        });
+        return db.tripAccommodation.findUniqueOrThrow({ where: { id: acc.id } });
+      }
+    }
+    return db.tripAccommodation.update({
+      where: { id: acc.id },
+      data: { expenseId: null, amount: null },
+    });
+  }
+
+  const memberIds = await rosterMemberIds(db, tripId);
+  const payerId = await defaultTripPayerId(db, tripId);
+  const equalAllocations = buildTripAllocations(
+    {
+      amount: cost,
+      category: 'ALOJAMIENTO',
+      paidByMemberId: payerId,
+      date,
+      splitMode: 'EQUAL',
+      participantMemberIds: memberIds,
+    },
+    memberIds,
+  );
+
+  if (acc.expenseId) {
+    const existing = await db.tripExpense.findFirst({
+      where: { id: acc.expenseId, tripId },
+      include: { payments: true },
+    });
+    if (!existing) {
+      // Stale FK — recreate
+      await db.tripAccommodation.update({ where: { id: acc.id }, data: { expenseId: null } });
+    } else {
+      const scaled = scalePaymentsToAmount(
+        existing.payments.map((p) => ({ memberId: p.tripMemberId, amount: toNum(p.amount) })),
+        cost,
+        existing.paidByMemberId,
+      );
+      const { payments, paidByMemberId } = normalizeExpensePayments(cost, memberIds, {
+        payments: scaled,
+      });
+
+      // Preserve custom split if user edited from Gastos; only rebuild when still EQUAL
+      let allocations = equalAllocations;
+      if (existing.splitMode !== 'EQUAL') {
+        const existingAllocs = await db.tripExpenseAllocation.findMany({
+          where: { tripExpenseId: existing.id },
+        });
+        allocations = scalePaymentsToAmount(
+          existingAllocs.map((a) => ({ memberId: a.tripMemberId, amount: toNum(a.amount) })),
+          cost,
+          payerId,
+        ).map((p) => ({ tripMemberId: p.memberId, amount: p.amount }));
+        if (allocations.length === 0) allocations = equalAllocations;
+      }
+
+      await db.tripExpensePayment.deleteMany({ where: { tripExpenseId: existing.id } });
+      await db.tripExpenseAllocation.deleteMany({ where: { tripExpenseId: existing.id } });
+      await db.tripExpense.update({
+        where: { id: existing.id },
+        data: {
+          paidByMemberId,
+          amount: cost,
+          category: 'ALOJAMIENTO',
+          note,
+          date,
+          currency: existing.currency || tripCurrency,
+          payments: {
+            create: payments.map((p) => ({ tripMemberId: p.memberId, amount: p.amount })),
+          },
+          allocations: { create: allocations },
+        },
+      });
+      return db.tripAccommodation.update({
+        where: { id: acc.id },
+        data: { amount: cost, expenseId: existing.id },
+      });
+    }
+  }
+
+  const expense = await db.tripExpense.create({
+    data: {
+      tripId,
+      paidByMemberId: payerId,
+      amount: cost,
+      category: 'ALOJAMIENTO',
+      note,
+      date,
+      currency: tripCurrency,
+      splitMode: 'EQUAL',
+      payments: { create: [{ tripMemberId: payerId, amount: cost }] },
+      allocations: { create: equalAllocations },
+    },
+  });
+
+  const trip = await db.trip.findUniqueOrThrow({ where: { id: tripId }, select: { status: true } });
+  if (trip.status === 'PLANNING') {
+    await db.trip.update({ where: { id: tripId }, data: { status: 'ACTIVE' } });
+  }
+
+  return db.tripAccommodation.update({
+    where: { id: acc.id },
+    data: { amount: cost, expenseId: expense.id },
+  });
+}
+
 export async function upsertTripAccommodation(
   db: Db,
   tripId: string,
@@ -1346,7 +1682,7 @@ export async function upsertTripAccommodation(
     checkOut: input.checkOut ?? null,
     checkInTime: input.checkInTime?.trim() || null,
     checkOutTime: input.checkOutTime?.trim() || null,
-    amount: input.amount == null ? null : round2(input.amount),
+    amount: input.amount == null || input.amount === 0 ? null : round2(input.amount),
     link: input.link?.trim() || null,
     notes: input.notes?.trim() || null,
   };
@@ -1356,11 +1692,27 @@ export async function upsertTripAccommodation(
     create: { tripId, ...data },
     update: data,
   });
-  return serializeAccommodation(row);
+
+  const synced = await syncAccommodationExpense(db, tripId, row, me.trip.baseCurrency);
+  return serializeAccommodation(synced);
 }
 
 export async function getTripAccommodation(db: Db, tripId: string, userId: string) {
   await requireTripMember(db, tripId, userId);
   const row = await db.tripAccommodation.findUnique({ where: { tripId } });
-  return row ? serializeAccommodation(row) : null;
+  if (!row) return null;
+
+  // Lazy backfill: stay cost without linked expense (pre-migration data)
+  if (row.amount != null && toNum(row.amount) > 0 && !row.expenseId) {
+    const trip = await db.trip.findUniqueOrThrow({
+      where: { id: tripId },
+      select: { baseCurrency: true, status: true },
+    });
+    if (trip.status !== 'CLOSED') {
+      const synced = await syncAccommodationExpense(db, tripId, row, trip.baseCurrency);
+      return serializeAccommodation(synced);
+    }
+  }
+
+  return serializeAccommodation(row);
 }

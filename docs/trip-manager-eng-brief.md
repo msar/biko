@@ -89,15 +89,16 @@ TripExpenseCategory:  // product fixed set; store as enum or string matching PRD
 
 Joining creates/updates `TripMember` only—**never** household membership. Claim path: `POST /trips/join` with `{ claimMemberId }` links `userId` to a PENDING slot.
 
-#### `TripExpense` + `TripExpenseAllocation`
+#### `TripExpense` + `TripExpensePayment` + `TripExpenseAllocation`
 
 | Field | Notes |
 |-------|--------|
-| expense: `tripId`, `paidByMemberId`, `amount`, `category`, `note`, `date`, `currency` | Trip-scoped |
-| allocation: `tripExpenseId`, `tripMemberId`, `amount` | Same mental model as household splits |
+| expense: `tripId`, `paidByMemberId` (primary / denormalized), `amount`, `category`, `note`, `date`, `currency` | Trip-scoped |
+| payment: `tripExpenseId`, `tripMemberId`, `amount` | Who paid; rows must sum to expense amount |
+| allocation: `tripExpenseId`, `tripMemberId`, `amount` | Who owes / share; same mental model as household splits |
 | `exportedPurchaseId` | Optional; set per expense or via batch table after export |
 
-**Not** a subclass of `Purchase`. Split modes invoke shared builders with **trip member ids** (adapter if household helpers assume “hogar” wording—prefer generic member-id APIs or thin wrappers).
+**Not** a subclass of `Purchase`. Split modes invoke shared builders with **trip member ids** (adapter if household helpers assume “hogar” wording—prefer generic member-id APIs or thin wrappers). Balance **paid** = Σ payments; **share** = Σ allocations.
 
 #### `TripSettlement`
 
@@ -121,6 +122,7 @@ Joining creates/updates `TripMember` only—**never** household membership. Clai
 |-------|--------|
 | `tripId` | One primary stay in MVP (1:1 or enforce single row in service) |
 | `label`, `address`, `checkIn`, `checkOut` | |
+| `amount`, `expenseId` | Stay cost synced to linked `TripExpense` (category ALOJAMIENTO); counts in balances |
 | `link`, `notes` | Notes may hold door codes—treat as sensitive in logs/UI |
 
 #### Export link (optional table)
