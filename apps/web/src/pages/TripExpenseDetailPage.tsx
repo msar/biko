@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { IconButton } from '../components/ui';
 import { api, fmtDate, fmtMoney } from '../lib/api';
 import type { TripExpense, TripHub } from '../lib/trip-types';
 import {
@@ -60,14 +61,7 @@ export default function TripExpenseDetailPage() {
     return (
       <div className="page">
         <header className="page-header">
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={() => navigate(`/viajes/${tripId}`)}
-            aria-label="Volver"
-          >
-            ←
-          </button>
+          <IconButton icon="arrow_back" label="Volver" onClick={() => navigate(`/viajes/${tripId}`)} />
           <h1>Gasto</h1>
           <span />
         </header>
@@ -94,14 +88,7 @@ export default function TripExpenseDetailPage() {
   return (
     <div className="page">
       <header className="page-header">
-        <button
-          type="button"
-          className="icon-btn"
-          onClick={() => navigate(`/viajes/${tripId}`)}
-          aria-label="Volver"
-        >
-          ←
-        </button>
+        <IconButton icon="arrow_back" label="Volver" onClick={() => navigate(`/viajes/${tripId}`)} />
         <h1>Detalle</h1>
         <span />
       </header>

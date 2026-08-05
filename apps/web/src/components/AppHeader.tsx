@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import type { AppNotification } from '../lib/types';
 import BrandMark from './BrandLogo';
+import { Button, IconButton, TopAppBar } from './ui';
 
 export default function AppHeader() {
   const navigate = useNavigate();
@@ -49,53 +50,54 @@ export default function AppHeader() {
   const count = unread?.count ?? 0;
 
   return (
-    <header className="app-header">
-      <BrandMark size="sm" showWordmark />
-      <div className="app-header-actions" ref={panelRef}>
-        <button
-          type="button"
-          className="icon-btn notif-bell"
-          aria-label="Notificaciones"
-          onClick={() => setOpen((v) => !v)}
-        >
-          🔔
-          {count > 0 && <span className="notif-badge">{count > 9 ? '9+' : count}</span>}
-        </button>
-        {open && (
-          <div className="notif-panel">
-            <div className="row-between">
-              <strong>Notificaciones</strong>
-              {count > 0 && (
-                <button type="button" className="btn-link" onClick={() => readAllMutation.mutate()}>
-                  Marcar leídas
-                </button>
-              )}
+    <TopAppBar
+      leading={<BrandMark size="sm" showWordmark />}
+      actions={
+        <div ref={panelRef}>
+          <IconButton
+            icon={count > 0 ? 'notifications' : 'notifications_none'}
+            label="Notificaciones"
+            className="notif-bell"
+            onClick={() => setOpen((v) => !v)}
+          >
+            {count > 0 && <span className="notif-badge">{count > 9 ? '9+' : count}</span>}
+          </IconButton>
+          {open && (
+            <div className="notif-panel">
+              <div className="row-between">
+                <strong>Notificaciones</strong>
+                {count > 0 && (
+                  <Button variant="text" size="sm" onClick={() => readAllMutation.mutate()}>
+                    Marcar leídas
+                  </Button>
+                )}
+              </div>
+              <div className="notif-list">
+                {notifications?.length === 0 && <p className="hint">Sin notificaciones.</p>}
+                {notifications?.map((n) => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    className={`notif-item ${n.readAt ? '' : 'unread'}`}
+                    onClick={() => {
+                      if (!n.readAt) readMutation.mutate(n.id);
+                      const url = (n.data?.url as string | undefined) ?? '/recurrentes';
+                      setOpen(false);
+                      navigate(url);
+                    }}
+                  >
+                    <strong>{n.title}</strong>
+                    <span>{n.body}</span>
+                  </button>
+                ))}
+              </div>
+              <Link to="/recurrentes" className="btn-link" onClick={() => setOpen(false)}>
+                Ir a recurrentes →
+              </Link>
             </div>
-            <div className="notif-list">
-              {notifications?.length === 0 && <p className="hint">Sin notificaciones.</p>}
-              {notifications?.map((n) => (
-                <button
-                  key={n.id}
-                  type="button"
-                  className={`notif-item ${n.readAt ? '' : 'unread'}`}
-                  onClick={() => {
-                    if (!n.readAt) readMutation.mutate(n.id);
-                    const url = (n.data?.url as string | undefined) ?? '/recurrentes';
-                    setOpen(false);
-                    navigate(url);
-                  }}
-                >
-                  <strong>{n.title}</strong>
-                  <span>{n.body}</span>
-                </button>
-              ))}
-            </div>
-            <Link to="/recurrentes" className="btn-link" onClick={() => setOpen(false)}>
-              Ir a recurrentes →
-            </Link>
-          </div>
-        )}
-      </div>
-    </header>
+          )}
+        </div>
+      }
+    />
   );
 }

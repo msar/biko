@@ -293,23 +293,33 @@ export default function SettingsPage() {
         <div className="tools-list">
           <Link to="/deudas" className="tools-list-link">
             <span>Deudas</span>
-            <span aria-hidden>→</span>
+            <span className="material-symbols-outlined ms-icon-sm" aria-hidden>
+              chevron_right
+            </span>
           </Link>
           <Link to="/viajes" className="tools-list-link">
             <span>Viajes</span>
-            <span aria-hidden>→</span>
+            <span className="material-symbols-outlined ms-icon-sm" aria-hidden>
+              chevron_right
+            </span>
           </Link>
           <Link to="/juntada" className="tools-list-link">
             <span>Liquidar juntada</span>
-            <span aria-hidden>→</span>
+            <span className="material-symbols-outlined ms-icon-sm" aria-hidden>
+              chevron_right
+            </span>
           </Link>
           <Link to="/importar-resumen" className="tools-list-link">
             <span>Importar resumen</span>
-            <span aria-hidden>→</span>
+            <span className="material-symbols-outlined ms-icon-sm" aria-hidden>
+              chevron_right
+            </span>
           </Link>
           <Link to="/recurrentes" className="tools-list-link">
             <span>Pagos recurrentes</span>
-            <span aria-hidden>→</span>
+            <span className="material-symbols-outlined ms-icon-sm" aria-hidden>
+              chevron_right
+            </span>
           </Link>
         </div>
       </section>
@@ -343,7 +353,7 @@ export default function SettingsPage() {
             </select>
           </label>
           <p className="hint">Sesión: {user?.email}</p>
-          <button className="btn-link" onClick={logout}>
+          <button type="button" className="btn-link" onClick={logout}>
             Cerrar sesión
           </button>
         </div>

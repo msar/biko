@@ -14,7 +14,7 @@ export default defineConfig({
         description: 'Gastos, cuotas y promociones bancarias del hogar',
         lang: 'es-AR',
         theme_color: '#1e305e',
-        background_color: '#f6f4ef',
+        background_color: '#fdfcf8',
         display: 'standalone',
         start_url: '/',
         icons: [

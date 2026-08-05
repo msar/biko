@@ -1,4 +1,5 @@
 import type { DashboardScope } from '../lib/types';
+import { SegmentedButton } from './ui';
 
 const SCOPES: Array<{ id: DashboardScope; label: string }> = [
   { id: 'household', label: 'Hogar' },
@@ -14,19 +15,12 @@ interface ScopeTabsProps {
 
 export default function ScopeTabs({ value, onChange, className }: ScopeTabsProps) {
   return (
-    <div className={`segmented dashboard-scope${className ? ` ${className}` : ''}`} role="tablist" aria-label="Alcance">
-      {SCOPES.map((s) => (
-        <button
-          key={s.id}
-          type="button"
-          role="tab"
-          aria-selected={value === s.id}
-          className={value === s.id ? 'active' : ''}
-          onClick={() => onChange(s.id)}
-        >
-          {s.label}
-        </button>
-      ))}
-    </div>
+    <SegmentedButton
+      options={SCOPES}
+      value={value}
+      onChange={onChange}
+      label="Alcance"
+      className={`dashboard-scope${className ? ` ${className}` : ''}`}
+    />
   );
 }

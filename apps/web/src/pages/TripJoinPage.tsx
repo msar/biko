@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { FormEvent, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Button, IconButton } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type { TripInvitePreview } from '../lib/trip-types';
@@ -67,9 +68,7 @@ export default function TripJoinPage() {
   return (
     <div className="page">
       <header className="page-header">
-        <Link to="/viajes" className="icon-btn" aria-label="Volver">
-          ←
-        </Link>
+        <IconButton icon="arrow_back" label="Volver" to="/viajes" />
         <h1>Unirse al viaje</h1>
         <span />
       </header>
@@ -149,13 +148,14 @@ export default function TripJoinPage() {
           </p>
         )}
         {error && <p className="error">{error}</p>}
-        <button
+        <Button
           type="submit"
-          className="btn-primary"
+          variant="filled"
+          block
           disabled={mutation.isPending || !code || preview.isLoading || preview.isError}
         >
           {mutation.isPending ? 'Entrando…' : 'Entrar al viaje'}
-        </button>
+        </Button>
       </form>
     </div>
   );

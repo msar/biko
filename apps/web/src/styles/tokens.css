@@ -1,0 +1,201 @@
+/**
+ * Material Design 3 system tokens for Biko.
+ * Brand seeds: navy #1e305e (primary), teal #00a8b5 (secondary / tertiary accent).
+ * @see https://m3.material.io/
+ */
+
+:root {
+  /* —— Reference: brand —— */
+  --md-ref-palette-primary-40: #1e305e;
+  --md-ref-palette-primary-20: #152744;
+  --md-ref-palette-primary-80: #b8c4e0;
+  --md-ref-palette-primary-90: #d5dced;
+  --md-ref-palette-primary-95: #e8ecf5;
+  --md-ref-palette-secondary-40: #006972;
+  --md-ref-palette-secondary-80: #4dd0da;
+  --md-ref-palette-secondary-90: #9ee8ee;
+  --md-ref-palette-secondary-95: #cff4f6;
+  --md-ref-palette-tertiary-40: #00a8b5;
+  --md-ref-palette-tertiary-20: #008a94;
+  --md-ref-palette-neutral-0: #ffffff;
+  --md-ref-palette-neutral-10: #1c1b19;
+  --md-ref-palette-neutral-20: #31302e;
+  --md-ref-palette-neutral-40: #605e5a;
+  --md-ref-palette-neutral-50: #797671;
+  --md-ref-palette-neutral-90: #e8e6e0;
+  --md-ref-palette-neutral-95: #f4f2ec;
+  --md-ref-palette-neutral-99: #fdfcf8;
+  --md-ref-palette-neutral-variant-50: #74767a;
+  --md-ref-palette-neutral-variant-80: #c4c6ca;
+  --md-ref-palette-neutral-variant-90: #e0e2e6;
+  --md-ref-palette-error-40: #ba1a1a;
+  --md-ref-palette-error-90: #ffdad6;
+  --md-ref-palette-warning-40: #7a5c00;
+  --md-ref-palette-warning-90: #ffe08a;
+
+  /* —— Color roles (light) —— */
+  --md-sys-color-primary: var(--md-ref-palette-primary-40);
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: var(--md-ref-palette-primary-90);
+  --md-sys-color-on-primary-container: #041433;
+
+  --md-sys-color-secondary: var(--md-ref-palette-secondary-40);
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: var(--md-ref-palette-secondary-90);
+  --md-sys-color-on-secondary-container: #002022;
+
+  --md-sys-color-tertiary: var(--md-ref-palette-tertiary-40);
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: var(--md-ref-palette-secondary-95);
+  --md-sys-color-on-tertiary-container: #002022;
+
+  --md-sys-color-error: var(--md-ref-palette-error-40);
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: var(--md-ref-palette-error-90);
+  --md-sys-color-on-error-container: #410002;
+
+  --md-sys-color-surface: var(--md-ref-palette-neutral-99);
+  --md-sys-color-surface-dim: #dddcd6;
+  --md-sys-color-surface-bright: var(--md-ref-palette-neutral-99);
+  --md-sys-color-surface-container-lowest: #ffffff;
+  --md-sys-color-surface-container-low: #f7f5ef;
+  --md-sys-color-surface-container: var(--md-ref-palette-neutral-95);
+  --md-sys-color-surface-container-high: #eeebe4;
+  --md-sys-color-surface-container-highest: #e8e6e0;
+  --md-sys-color-on-surface: var(--md-ref-palette-neutral-10);
+  --md-sys-color-on-surface-variant: #44474e;
+  --md-sys-color-outline: #74767a;
+  --md-sys-color-outline-variant: var(--md-ref-palette-neutral-variant-80);
+  --md-sys-color-inverse-surface: var(--md-ref-palette-neutral-20);
+  --md-sys-color-inverse-on-surface: #f4f2ec;
+  --md-sys-color-inverse-primary: var(--md-ref-palette-primary-80);
+  --md-sys-color-scrim: #000000;
+  --md-sys-color-shadow: #000000;
+
+  --md-sys-color-warning-container: var(--md-ref-palette-warning-90);
+  --md-sys-color-on-warning-container: var(--md-ref-palette-warning-40);
+
+  /* —— Typography —— */
+  --md-ref-typeface-brand: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --md-ref-typeface-plain: 'Plus Jakarta Sans', system-ui, sans-serif;
+
+  --md-sys-typescale-display-large-size: 3.5625rem;
+  --md-sys-typescale-display-large-line-height: 4rem;
+  --md-sys-typescale-display-large-weight: 700;
+  --md-sys-typescale-display-medium-size: 2.8125rem;
+  --md-sys-typescale-display-medium-line-height: 3.25rem;
+  --md-sys-typescale-display-medium-weight: 700;
+  --md-sys-typescale-display-small-size: 2.25rem;
+  --md-sys-typescale-display-small-line-height: 2.75rem;
+  --md-sys-typescale-display-small-weight: 700;
+
+  --md-sys-typescale-headline-large-size: 2rem;
+  --md-sys-typescale-headline-large-line-height: 2.5rem;
+  --md-sys-typescale-headline-large-weight: 700;
+  --md-sys-typescale-headline-medium-size: 1.75rem;
+  --md-sys-typescale-headline-medium-line-height: 2.25rem;
+  --md-sys-typescale-headline-medium-weight: 700;
+  --md-sys-typescale-headline-small-size: 1.5rem;
+  --md-sys-typescale-headline-small-line-height: 2rem;
+  --md-sys-typescale-headline-small-weight: 700;
+
+  --md-sys-typescale-title-large-size: 1.375rem;
+  --md-sys-typescale-title-large-line-height: 1.75rem;
+  --md-sys-typescale-title-large-weight: 600;
+  --md-sys-typescale-title-medium-size: 1rem;
+  --md-sys-typescale-title-medium-line-height: 1.5rem;
+  --md-sys-typescale-title-medium-weight: 600;
+  --md-sys-typescale-title-small-size: 0.875rem;
+  --md-sys-typescale-title-small-line-height: 1.25rem;
+  --md-sys-typescale-title-small-weight: 600;
+
+  --md-sys-typescale-body-large-size: 1rem;
+  --md-sys-typescale-body-large-line-height: 1.5rem;
+  --md-sys-typescale-body-large-weight: 400;
+  --md-sys-typescale-body-medium-size: 0.875rem;
+  --md-sys-typescale-body-medium-line-height: 1.25rem;
+  --md-sys-typescale-body-medium-weight: 400;
+  --md-sys-typescale-body-small-size: 0.75rem;
+  --md-sys-typescale-body-small-line-height: 1rem;
+  --md-sys-typescale-body-small-weight: 400;
+
+  --md-sys-typescale-label-large-size: 0.875rem;
+  --md-sys-typescale-label-large-line-height: 1.25rem;
+  --md-sys-typescale-label-large-weight: 600;
+  --md-sys-typescale-label-medium-size: 0.75rem;
+  --md-sys-typescale-label-medium-line-height: 1rem;
+  --md-sys-typescale-label-medium-weight: 600;
+  --md-sys-typescale-label-small-size: 0.6875rem;
+  --md-sys-typescale-label-small-line-height: 1rem;
+  --md-sys-typescale-label-small-weight: 600;
+
+  /* —— Shape —— */
+  --md-sys-shape-corner-none: 0;
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large: 16px;
+  --md-sys-shape-corner-extra-large: 28px;
+  --md-sys-shape-corner-full: 999px;
+
+  /* —— Elevation (shadow + tonal preference) —— */
+  --md-sys-elevation-level0: none;
+  --md-sys-elevation-level1: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 3px 1px rgb(0 0 0 / 0.15);
+  --md-sys-elevation-level2: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 2px 6px 2px rgb(0 0 0 / 0.15);
+  --md-sys-elevation-level3: 0 4px 8px 3px rgb(0 0 0 / 0.15), 0 1px 3px 0 rgb(0 0 0 / 0.3);
+  --md-sys-elevation-level4: 0 6px 10px 4px rgb(0 0 0 / 0.15), 0 2px 3px 0 rgb(0 0 0 / 0.3);
+  --md-sys-elevation-level5: 0 8px 12px 6px rgb(0 0 0 / 0.15), 0 4px 4px 0 rgb(0 0 0 / 0.3);
+
+  /* —— State layers —— */
+  --md-sys-state-hover-opacity: 0.08;
+  --md-sys-state-focus-opacity: 0.12;
+  --md-sys-state-pressed-opacity: 0.12;
+  --md-sys-state-dragged-opacity: 0.16;
+
+  /* —— Motion —— */
+  --md-sys-motion-duration-short1: 50ms;
+  --md-sys-motion-duration-short2: 100ms;
+  --md-sys-motion-duration-short3: 150ms;
+  --md-sys-motion-duration-short4: 200ms;
+  --md-sys-motion-duration-medium1: 250ms;
+  --md-sys-motion-duration-medium2: 300ms;
+  --md-sys-motion-duration-medium3: 350ms;
+  --md-sys-motion-duration-medium4: 400ms;
+  --md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+
+  /* —— Legacy aliases (migration bridge) —— */
+  --brand-navy: var(--md-sys-color-primary);
+  --brand-navy-dark: var(--md-ref-palette-primary-20);
+  --brand-teal: var(--md-sys-color-tertiary);
+  --brand-teal-dark: var(--md-ref-palette-tertiary-20);
+  --green: var(--md-sys-color-primary);
+  --green-dark: var(--md-ref-palette-primary-20);
+  --accent: var(--md-sys-color-tertiary);
+  --cream: var(--md-sys-color-surface);
+  --ink: var(--md-sys-color-on-surface);
+  --muted: var(--md-sys-color-on-surface-variant);
+  --card: var(--md-sys-color-surface-container-lowest);
+  --gold: #e8b93c;
+  --red: var(--md-sys-color-error);
+  --radius: var(--md-sys-shape-corner-large);
+  --surface-muted: var(--md-sys-color-surface-container-high);
+  --border: color-mix(in srgb, var(--md-sys-color-outline-variant) 60%, transparent);
+  --font: var(--md-ref-typeface-plain);
+  --text-xs: var(--md-sys-typescale-label-small-size);
+  --text-sm: var(--md-sys-typescale-body-medium-size);
+  --text-md: var(--md-sys-typescale-body-large-size);
+  --text-lg: var(--md-sys-typescale-title-large-size);
+  --text-xl: var(--md-sys-typescale-headline-medium-size);
+  --text-hero: var(--md-sys-typescale-headline-large-size);
+}
+
+/* Dark scheme scaffold (not activated — ready for a future polish pass) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --md-sys-color-primary-dark-scaffold: #b8c4e0;
+    --md-sys-color-surface-dark-scaffold: #131313;
+  }
+}

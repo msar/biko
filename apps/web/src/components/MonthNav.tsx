@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { IconButton } from './ui';
 
 interface MonthNavProps {
   label: string;
@@ -10,17 +11,15 @@ export default function MonthNav({ label, onPrev, onNext }: MonthNavProps) {
   return (
     <div className="month-nav-row">
       <div className="month-nav" aria-label="Mes">
-        <button type="button" onClick={onPrev} aria-label="Mes anterior">
-          ‹
-        </button>
+        <IconButton icon="chevron_left" label="Mes anterior" onClick={onPrev} />
         <span>{label}</span>
-        <button type="button" onClick={onNext} aria-label="Mes siguiente">
-          ›
-        </button>
+        <IconButton icon="chevron_right" label="Mes siguiente" onClick={onNext} />
       </div>
       <Link to="/historico" className="month-nav-long-term">
         Largo plazo
-        <span aria-hidden>›</span>
+        <span className="material-symbols-outlined ms-icon-sm" aria-hidden>
+          chevron_right
+        </span>
       </Link>
     </div>
   );

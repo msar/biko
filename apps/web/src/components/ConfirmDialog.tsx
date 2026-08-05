@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Dialog } from './ui';
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -8,7 +9,7 @@ interface ConfirmDialogProps {
   cancelLabel?: string;
   /** Shown while `loading` is true. Defaults to a label matching the confirm action. */
   loadingLabel?: string;
-  /** `danger` (red, default) for destructive actions; `primary` (green) for constructive ones. */
+  /** `danger` (red, default) for destructive actions; `primary` for constructive ones. */
   variant?: 'danger' | 'primary';
   loading?: boolean;
   onConfirm: () => void;
@@ -27,36 +28,19 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  if (!open) return null;
-
-  const busyLabel =
-    loadingLabel ?? (variant === 'danger' ? 'Eliminando…' : 'Registrando…');
-
   return (
-    <div className="confirm-overlay" role="presentation" onClick={onCancel}>
-      <div
-        className="confirm-dialog card"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="confirm-title"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id="confirm-title">{title}</h2>
-        <div className="confirm-message">{message}</div>
-        <div className="confirm-actions">
-          <button type="button" className="btn-secondary" disabled={loading} onClick={onCancel}>
-            {cancelLabel}
-          </button>
-          <button
-            type="button"
-            className={variant === 'primary' ? 'btn-confirm-primary' : 'btn-danger'}
-            disabled={loading}
-            onClick={onConfirm}
-          >
-            {loading ? busyLabel : confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+    <Dialog
+      open={open}
+      title={title}
+      confirmLabel={confirmLabel}
+      cancelLabel={cancelLabel}
+      loadingLabel={loadingLabel}
+      variant={variant}
+      loading={loading}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    >
+      {message}
+    </Dialog>
   );
 }

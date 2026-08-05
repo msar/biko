@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './lib/auth';
 import { startOutboxSync } from './lib/outbox';
@@ -20,6 +20,7 @@ import AppHeader from './components/AppHeader';
 import BrandMark from './components/BrandLogo';
 import InstallAppBanner from './components/InstallAppBanner';
 import PushEnableBanner from './components/PushEnableBanner';
+import { NavigationBar } from './components/ui';
 import ExpenseDetailPage from './pages/ExpenseDetailPage';
 import TripsPage, { NewTripPage } from './pages/TripsPage';
 import TripHubPage from './pages/TripHubPage';
@@ -41,7 +42,11 @@ function OnlineBanner() {
     };
   }, []);
   if (online) return null;
-  return <div className="offline-banner">Sin conexión — los gastos se guardan y sincronizan después</div>;
+  return (
+    <div className="offline-banner md-banner-warning" role="status">
+      Sin conexión — los gastos se guardan y sincronizan después
+    </div>
+  );
 }
 
 function AdminRoute() {
@@ -112,25 +117,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      {!hideNav && (
-        <nav className="bottom-nav">
-          <NavLink to="/" end>
-            <span className="nav-icon">📊</span>Resumen
-          </NavLink>
-          <NavLink to="/gastos">
-            <span className="nav-icon">🧾</span>Gastos
-          </NavLink>
-          <NavLink to="/nuevo" className="nav-add" aria-label="Nuevo gasto">
-            <span className="nav-add-circle">+</span>
-          </NavLink>
-          <NavLink to="/promos">
-            <span className="nav-icon">📅</span>Promos
-          </NavLink>
-          <NavLink to="/ajustes">
-            <span className="nav-icon">⋯</span>Más
-          </NavLink>
-        </nav>
-      )}
+      {!hideNav && <NavigationBar />}
     </div>
   );
 }

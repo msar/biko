@@ -10,6 +10,8 @@ import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider } from './lib/auth';
 import { ApiError, markServiceWorkerReload } from './lib/api';
+import './styles/tokens.css';
+import './styles/components.css';
 import './styles.css';
 
 // Reload once when a waiting service worker takes control (after deploy).

@@ -1,7 +1,8 @@
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { Button, Icon, IconButton } from '../components/ui';
 import { api, fmtARS, fmtDate, fmtMoneyExact, toArsDisplay } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { expensePayerLabel, expenseSplitLabel } from '../lib/expense-labels';
@@ -85,9 +86,9 @@ export default function ExpensesPage() {
     <div className="page">
       <header className="page-header">
         <h1>Gastos</h1>
-        <Link to="/importar-resumen" className="btn-link">
+        <Button to="/importar-resumen" variant="text" size="sm">
           Importar resumen
-        </Link>
+        </Button>
       </header>
 
       {pending.length > 0 && (
@@ -97,7 +98,7 @@ export default function ExpensesPage() {
             <div key={p.clientId} className="expense-row pending">
               <div>
                 <strong>{p.store}</strong>
-                <small>{fmtDate(p.purchaseDate)} · esperando conexión ⏳</small>
+                <small>{fmtDate(p.purchaseDate)} · esperando conexión</small>
               </div>
               <span>{fmtARS.format(p.grossAmount)}</span>
             </div>
@@ -159,37 +160,42 @@ export default function ExpensesPage() {
                 </small>
               )}
             </div>
-            <button
-              type="button"
+            <IconButton
+              icon="delete"
+              label="Eliminar gasto"
               className="expense-delete-btn"
-              aria-label="Eliminar gasto"
               onClick={(e) => {
                 e.stopPropagation();
                 requestDelete(exp);
               }}
-            >
-              🗑
-            </button>
+            />
           </div>
         );
       })}
 
       {!isLoading && expenses.length === 0 && pending.length === 0 && (
-        <p className="empty-state">Sin gastos todavía.</p>
+        <div className="empty-state md-empty">
+          <Icon name="receipt_long" />
+          <p>Sin gastos todavía.</p>
+          <Button to="/nuevo" variant="filled">
+            Cargar un gasto
+          </Button>
+        </div>
       )}
 
       {hasNextPage && (
-        <button
-          type="button"
-          className="btn-secondary load-more-btn"
+        <Button
+          variant="outlined"
+          block
+          className="load-more-btn"
           disabled={isFetchingNextPage}
           onClick={() => void fetchNextPage()}
         >
           {isFetchingNextPage ? 'Cargando…' : 'Cargar más'}
-        </button>
+        </Button>
       )}
 
-      <p className="hint center">Tocá un gasto para verlo. Mantené presionado o usá 🗑 para eliminar.</p>
+      <p className="hint center">Tocá un gasto para verlo. Mantené presionado o usá eliminar para borrarlo.</p>
 
       <ConfirmDialog
         open={deleteTarget != null}

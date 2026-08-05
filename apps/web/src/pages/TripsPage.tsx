@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Button, Icon, IconButton } from '../components/ui';
 import { api } from '../lib/api';
 import type { TripListItem } from '../lib/trip-types';
 import { TRIP_STATUS_LABEL } from '../lib/trip-utils';
@@ -28,16 +29,22 @@ export default function TripsPage() {
           <h1>Viajes</h1>
           <p className="hint">Gestor de viajes — gastos, listas y liquidación del grupo.</p>
         </div>
-        <Link to="/viajes/nuevo" className="btn-primary" style={{ padding: '8px 14px' }}>
+        <Button to="/viajes/nuevo" variant="filled" size="sm">
           Nuevo
-        </Link>
+        </Button>
       </header>
 
       {isLoading && <p className="hint">Cargando…</p>}
       {error && <p className="error">No se pudieron cargar los viajes</p>}
 
       {!isLoading && trips && trips.length === 0 && (
-        <p className="empty-state">Todavía no hay viajes. Creá el primero e invitá al grupo.</p>
+        <div className="empty-state md-empty">
+          <Icon name="luggage" />
+          <p>Todavía no hay viajes. Creá el primero e invitá al grupo.</p>
+          <Button to="/viajes/nuevo" variant="filled">
+            Crear viaje
+          </Button>
+        </div>
       )}
 
       <div className="trip-list">
@@ -108,9 +115,7 @@ export function NewTripPage() {
   return (
     <div className="page">
       <header className="page-header">
-        <Link to="/viajes" className="icon-btn" aria-label="Volver">
-          ←
-        </Link>
+        <IconButton icon="arrow_back" label="Volver" to="/viajes" />
         <h1>Nuevo viaje</h1>
         <span />
       </header>
@@ -145,9 +150,9 @@ export function NewTripPage() {
           </label>
         </div>
         {error && <p className="error">{error}</p>}
-        <button type="submit" className="btn-primary" disabled={mutation.isPending || !name.trim()}>
+        <Button type="submit" variant="filled" block disabled={mutation.isPending || !name.trim()}>
           {mutation.isPending ? 'Creando…' : 'Crear viaje'}
-        </button>
+        </Button>
       </form>
     </div>
   );

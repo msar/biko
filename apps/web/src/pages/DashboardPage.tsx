@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import MonthNav from '../components/MonthNav';
 import ScopeTabs from '../components/ScopeTabs';
+import { Button, Card, HeroCard } from '../components/ui';
 import { api, fmtARS, fmtDate } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type { DashboardScope, MonthlyDashboard, RecurringOccurrence } from '../lib/types';
@@ -152,12 +153,12 @@ export default function DashboardPage() {
       </header>
 
       {pendingOcc && pendingOcc.length > 0 && (
-        <section className="card">
+        <Card>
           <div className="row-between">
             <h2>Vencimientos</h2>
-            <Link to="/recurrentes" className="btn-link">
+            <Button to="/recurrentes" variant="text" size="sm">
               Ver todos
-            </Link>
+            </Button>
           </div>
           {pendingOcc.slice(0, 5).map((occ) => (
             <div key={occ.id} className="list-row">
@@ -172,26 +173,29 @@ export default function DashboardPage() {
               {occ.amount && <strong>{fmtARS.format(Number(occ.amount))}</strong>}
             </div>
           ))}
-        </section>
+        </Card>
       )}
 
       <ScopeTabs value={scope} onChange={setScope} />
 
-      <section className="hero-card">
-        <span className="hero-label">{SCOPE_LABELS[scope]}</span>
-        <span className="hero-amount">{isLoading && !data ? '…' : fmtARS.format(data?.total ?? 0)}</span>
+      <HeroCard
+        label={SCOPE_LABELS[scope]}
+        amount={isLoading && !data ? '…' : fmtARS.format(data?.total ?? 0)}
+      >
         {data && data.totalSavings > 0 && (
-          <span className="hero-savings">Ahorraste {fmtARS.format(data.totalSavings)} con promos</span>
+          <span className="hero-savings md-hero-accent">
+            Ahorraste {fmtARS.format(data.totalSavings)} con promos
+          </span>
         )}
         {topGroup && monthTotal > 0 && (
           <span className="hero-groups-hint">
             Mayor gasto: {topGroup.icon} {topGroup.name} ({pctOf(topGroup.total, monthTotal)})
           </span>
         )}
-      </section>
+      </HeroCard>
 
       {data && data.byGroup.length > 0 && (
-        <section className="card">
+        <section className="card md-card md-card-outlined">
           <h2>Por grupo</h2>
           {data.byGroup.map((group) => {
             const open = expandedGroups.has(group.groupId);
@@ -276,7 +280,7 @@ export default function DashboardPage() {
       )}
 
       {creditCards.length > 0 && (
-        <section className="card">
+        <section className="card md-card md-card-outlined">
           <h2>Por tarjeta</h2>
           {creditCards.map((pm) => {
             const open = expandedCards.has(pm.paymentMethodId);
@@ -362,7 +366,7 @@ export default function DashboardPage() {
       )}
 
       {showSettle && data && data.byUser.length > 0 && (
-        <section className="card">
+        <section className="card md-card md-card-outlined">
           <h2>Por persona</h2>
           {data.byUser.map((u) => (
             <div key={u.userId} className="person-bar-row">
@@ -388,7 +392,7 @@ export default function DashboardPage() {
         data?.settleUp &&
         data.settleUp.perUser.length > 1 &&
         (data.settleUp.transfers.length > 0 || data.total > 0) && (
-          <section className="card">
+          <section className="card md-card md-card-outlined">
             <h2>Balance del mes</h2>
             {data.settleUp.perUser.map((u) => (
               <div key={u.userId} className="list-row">
@@ -420,7 +424,7 @@ export default function DashboardPage() {
         )}
 
       {upcoming && upcoming.length > 0 && (
-        <section className="card">
+        <section className="card md-card md-card-outlined">
           <h2>Cuotas comprometidas</h2>
           {upcoming.slice(0, 6).map((row) => (
             <div key={row.month} className="list-row">
@@ -432,9 +436,12 @@ export default function DashboardPage() {
       )}
 
       {data && data.total === 0 && (
-        <p className="empty-state">
-          {EMPTY_COPY[scope]} <Link to="/nuevo">Cargá el primero</Link>.
-        </p>
+        <div className="empty-state md-empty">
+          <p>
+            {EMPTY_COPY[scope]}{' '}
+            <Link to="/nuevo">Cargá el primero</Link>.
+          </p>
+        </div>
       )}
     </div>
   );

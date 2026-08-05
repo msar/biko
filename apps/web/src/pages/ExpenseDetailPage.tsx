@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { IconButton } from '../components/ui';
 import { api, fmtARS, fmtDate, fmtMoneyExact, toArsDisplay } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { expensePayerDisplayName, expenseSplitLabel } from '../lib/expense-labels';
@@ -50,9 +51,7 @@ export default function ExpenseDetailPage() {
     return (
       <div className="page">
         <header className="page-header">
-          <button type="button" className="icon-btn" onClick={() => navigate('/gastos')} aria-label="Volver">
-            ←
-          </button>
+          <IconButton icon="arrow_back" label="Volver" onClick={() => navigate('/gastos')} />
           <h1>Gasto</h1>
           <span />
         </header>
@@ -71,9 +70,7 @@ export default function ExpenseDetailPage() {
   return (
     <div className="page">
       <header className="page-header">
-        <button type="button" className="icon-btn" onClick={() => navigate('/gastos')} aria-label="Volver">
-          ←
-        </button>
+        <IconButton icon="arrow_back" label="Volver" onClick={() => navigate('/gastos')} />
         <h1>Detalle</h1>
         <span />
       </header>

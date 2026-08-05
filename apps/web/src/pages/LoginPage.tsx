@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import BrandMark from '../components/BrandLogo';
+import { Button, SegmentedButton } from '../components/ui';
 import { canUsePlatformPasskey, useAuth } from '../lib/auth';
 
 export default function LoginPage() {
@@ -57,9 +58,9 @@ export default function LoginPage() {
         <p className="brand-sub">Gastos, cuotas y promos del hogar</p>
         {mode === 'login' && passkeyAvailable && (
           <>
-            <button type="button" className="btn-primary" disabled={busy} onClick={() => void onPasskeyLogin()}>
+            <Button variant="filled" block disabled={busy} onClick={() => void onPasskeyLogin()}>
               {busy ? '…' : 'Entrar con Face ID / biometría'}
-            </button>
+            </Button>
             <p className="hint login-divider">o con email y contraseña</p>
           </>
         )}
@@ -76,14 +77,15 @@ export default function LoginPage() {
           />
           {mode === 'register' && (
             <>
-              <div className="segmented">
-                <button type="button" className={joinMode === 'new' ? 'active' : ''} onClick={() => setJoinMode('new')}>
-                  Crear hogar
-                </button>
-                <button type="button" className={joinMode === 'join' ? 'active' : ''} onClick={() => setJoinMode('join')}>
-                  Unirme a uno
-                </button>
-              </div>
+              <SegmentedButton
+                options={[
+                  { id: 'new', label: 'Crear hogar' },
+                  { id: 'join', label: 'Unirme a uno' },
+                ]}
+                value={joinMode}
+                onChange={setJoinMode}
+                label="Tipo de registro"
+              />
               {joinMode === 'new' ? (
                 <input name="householdName" placeholder="Nombre del hogar (ej: Casa)" required />
               ) : (
@@ -92,13 +94,13 @@ export default function LoginPage() {
             </>
           )}
           {error && <p className="error">{error}</p>}
-          <button className="btn-primary" disabled={busy}>
+          <Button type="submit" variant="filled" block disabled={busy}>
             {busy ? '…' : mode === 'login' ? 'Entrar' : 'Crear cuenta'}
-          </button>
+          </Button>
         </form>
-        <button className="btn-link" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
+        <Button variant="text" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
           {mode === 'login' ? '¿No tenés cuenta? Registrate' : '¿Ya tenés cuenta? Entrá'}
-        </button>
+        </Button>
       </div>
     </div>
   );

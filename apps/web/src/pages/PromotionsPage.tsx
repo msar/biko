@@ -2,6 +2,7 @@ import { dayOfWeekFromDate, DISCOUNT_KIND_LABEL, filterWeeklyByFavorites, promot
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { IconButton, SegmentedButton } from '../components/ui';
 import { api, DAY_LABEL } from '../lib/api';
 import {
   groupWeeklyPromos,
@@ -450,9 +451,11 @@ export default function PromotionsPage() {
     <div className="page">
       <header className="page-header">
         <h1>Promociones</h1>
-        <button className="icon-btn" onClick={() => setShowForm(!showForm)} aria-label="Agregar promo">
-          {showForm ? '✕' : '＋'}
-        </button>
+        <IconButton
+          icon={showForm ? 'close' : 'add'}
+          label="Agregar promo"
+          onClick={() => setShowForm(!showForm)}
+        />
       </header>
 
       {showForm && entities && categories && (
@@ -468,26 +471,28 @@ export default function PromotionsPage() {
           aria-label="Buscar promociones"
         />
         {trimmedSearch && (
-          <button type="button" className="promo-search-clear" onClick={() => setSearchQuery('')} aria-label="Limpiar búsqueda">
-            ✕
-          </button>
+          <IconButton
+            icon="close"
+            label="Limpiar búsqueda"
+            className="promo-search-clear"
+            onClick={() => setSearchQuery('')}
+          />
         )}
       </div>
 
-      <div className="segmented">
-        <button className={tab === 'hoy' ? 'active' : ''} onClick={() => setTab('hoy')}>
-          Hoy
-        </button>
-        <button className={tab === 'calendar' ? 'active' : ''} onClick={() => setTab('calendar')}>
-          Mi semana
-        </button>
-        <button className={tab === 'when' ? 'active' : ''} onClick={() => setTab('when')}>
-          ¿Cuándo ir?
-        </button>
-        <button className={tab === 'all' ? 'active' : ''} onClick={() => setTab('all')}>
-          Todas
-        </button>
-      </div>
+      <SegmentedButton
+        wrap
+        className="md-segmented-wrap"
+        label="Vista de promociones"
+        value={tab}
+        onChange={setTab}
+        options={[
+          { id: 'hoy' as const, label: 'Hoy' },
+          { id: 'calendar' as const, label: 'Mi semana' },
+          { id: 'when' as const, label: '¿Cuándo ir?' },
+          { id: 'all' as const, label: 'Todas' },
+        ]}
+      />
 
       {tab === 'hoy' && (
         <>

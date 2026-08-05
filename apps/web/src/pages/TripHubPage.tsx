@@ -3,6 +3,7 @@ import { FormEvent, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
 import PieChart from '../components/charts/PieChart';
+import { IconButton, SegmentedButton } from '../components/ui';
 import { api, fmtDate, fmtMoney } from '../lib/api';
 import type {
   TripExpense,
@@ -100,9 +101,7 @@ export default function TripHubPage() {
   return (
     <div className="page">
       <header className="page-header">
-        <Link to="/viajes" className="icon-btn" aria-label="Volver">
-          ←
-        </Link>
+        <IconButton icon="arrow_back" label="Volver" to="/viajes" />
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 style={{ margin: 0 }}>{trip.name}</h1>
           <p className="hint" style={{ margin: 0 }}>
@@ -113,26 +112,22 @@ export default function TripHubPage() {
         <span />
       </header>
 
-      <div className="segmented trip-hub-tabs">
-        {(
+      <SegmentedButton
+        className="trip-hub-tabs md-segmented-wrap"
+        wrap
+        label="Secciones del viaje"
+        value={tab}
+        onChange={setTab}
+        options={
           [
-            ['resumen', 'Resumen'],
-            ['gastos', 'Gastos'],
-            ['listas', 'Listas'],
-            ['alojamiento', 'Alojamiento'],
-            ['personas', 'Personas'],
-          ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            className={tab === key ? 'active' : ''}
-            onClick={() => setTab(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+            { id: 'resumen' as const, label: 'Resumen' },
+            { id: 'gastos' as const, label: 'Gastos' },
+            { id: 'listas' as const, label: 'Listas' },
+            { id: 'alojamiento' as const, label: 'Alojamiento' },
+            { id: 'personas' as const, label: 'Personas' },
+          ]
+        }
+      />
 
       {tab === 'resumen' && (
         <ResumenTab
