@@ -13,6 +13,7 @@ import { ApiError } from './lib/api';
 import './styles.css';
 
 // Reload once when a waiting service worker takes control (after deploy).
+// Workbox only touches Cache Storage — never clear localStorage (biko:token / biko:user).
 let swRefreshing = false;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('controllerchange', () => {

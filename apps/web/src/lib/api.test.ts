@@ -44,7 +44,8 @@ describe('api soft 401 handling', () => {
     expect(getToken()).toBe('existing-token');
   });
 
-  it('clears token when /auth/me returns 401', async () => {
+  it('clears token when /auth/me returns 401 twice (after retry)', async () => {
+    vi.useFakeTimers();
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -53,9 +54,38 @@ describe('api soft 401 handling', () => {
     const cleared = vi.fn();
     onUnauthorized(cleared);
 
-    await expect(api('/auth/me')).rejects.toThrow();
+    const pending = expect(api('/auth/me')).rejects.toThrow('No autorizado');
+    await vi.runAllTimersAsync();
+    await pending;
     expect(getToken()).toBeNull();
     expect(cleared).toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('keeps token when /auth/me 401 then succeeds on retry', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401 });
+      }
+      return new Response(JSON.stringify({ id: 'u1' }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { api, getToken, setToken, onUnauthorized } = await import('./api');
+    setToken('flaky-ok');
+    const cleared = vi.fn();
+    onUnauthorized(cleared);
+
+    const pending = api<{ id: string }>('/auth/me');
+    await vi.runAllTimersAsync();
+    await expect(pending).resolves.toEqual({ id: 'u1' });
+    expect(getToken()).toBe('flaky-ok');
+    expect(cleared).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it('revalidates /auth/me before clearing on other 401s', async () => {

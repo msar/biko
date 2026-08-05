@@ -1,14 +1,18 @@
+import { clearAuthStorage, readAuthToken, writeAuthToken } from './auth-storage';
+
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
 
-let authToken: string | null = localStorage.getItem('biko:token');
+/** Delay before confirming a 401 — covers brief API blips during deploy + PWA reload. */
+const AUTH_ME_RETRY_MS = 1_200;
+
+let authToken: string | null = readAuthToken();
 let unauthorizedHandler: (() => void) | null = null;
 /** Single in-flight /auth/me check so parallel 401s don't stampede. */
 let sessionRevalidate: Promise<boolean> | null = null;
 
 export function setToken(token: string | null) {
   authToken = token;
-  if (token) localStorage.setItem('biko:token', token);
-  else localStorage.removeItem('biko:token');
+  writeAuthToken(token);
 }
 
 export function getToken() {
@@ -58,23 +62,30 @@ async function revalidateSession(): Promise<boolean> {
   return sessionRevalidate;
 }
 
+function clearSessionFromApi(): void {
+  authToken = null;
+  clearAuthStorage();
+  unauthorizedHandler?.();
+}
+
 async function handleUnauthorized(path: string): Promise<void> {
   if (isPublicAuthPath(path)) return;
 
   if (path === '/auth/me') {
-    setToken(null);
-    unauthorizedHandler?.();
+    clearSessionFromApi();
     return;
   }
 
   const stillValid = await revalidateSession();
   if (!stillValid) {
-    setToken(null);
-    unauthorizedHandler?.();
+    clearSessionFromApi();
   }
 }
 
-export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function api<T>(path: string, options: RequestInit = {}, retried = false): Promise<T> {
+  // Storage is source of truth (SW reload, other tabs). Do not fall back to stale memory.
+  authToken = readAuthToken();
+
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
@@ -87,6 +98,11 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
+    // One retry on /auth/me 401 so a PWA reload mid-API-deploy does not wipe the session.
+    if (res.status === 401 && path === '/auth/me' && !retried) {
+      await new Promise((r) => setTimeout(r, AUTH_ME_RETRY_MS));
+      return api(path, options, true);
+    }
     if (res.status === 401) {
       await handleUnauthorized(path);
     }

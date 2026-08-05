@@ -2,6 +2,7 @@ import { isSuperUser } from '@biko/shared';
 import jwt from '@fastify/jwt';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
+import { resolveJwtSecret } from './jwt-secret';
 
 export interface JwtUser {
   userId: string;
@@ -21,17 +22,6 @@ declare module 'fastify' {
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     requireSuperUser: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
-}
-
-const DEV_FALLBACK = 'dev-secret-change-me';
-
-function resolveJwtSecret(): string {
-  const secret = process.env.JWT_SECRET;
-  const isProd = process.env.NODE_ENV === 'production';
-  if (isProd && (!secret || secret === DEV_FALLBACK)) {
-    throw new Error('JWT_SECRET must be set to a non-default value in production');
-  }
-  return secret ?? DEV_FALLBACK;
 }
 
 export default fp(async (app: FastifyInstance) => {

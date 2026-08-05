@@ -25,6 +25,7 @@ export default class ErrorBoundary extends React.Component<
   };
 
   private handleReset = async () => {
+    // Only clear React Query cache — never touch biko:token / biko:user.
     try {
       await del('biko:query-cache');
     } catch (err) {

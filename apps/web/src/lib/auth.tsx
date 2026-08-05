@@ -12,6 +12,11 @@ import type {
   RegistrationResponseJSON,
 } from '@simplewebauthn/browser';
 import { ApiError, api, getToken, onUnauthorized, setToken } from './api';
+import {
+  clearAuthStorage,
+  readCachedAuthUser,
+  writeCachedAuthUser,
+} from './auth-storage';
 import type { SessionUser } from './types';
 
 interface AuthState {
@@ -32,17 +37,14 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
-const USER_KEY = 'biko:user';
-
 function readCachedUser(): SessionUser | null {
-  const cached = localStorage.getItem(USER_KEY);
-  return cached ? (JSON.parse(cached) as SessionUser) : null;
+  return readCachedAuthUser<SessionUser>();
 }
 
 function clearSession(setUser: (u: SessionUser | null) => void) {
   setToken(null);
   setUser(null);
-  localStorage.removeItem(USER_KEY);
+  clearAuthStorage();
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -56,7 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const token = getToken();
     if (!token) {
-      localStorage.removeItem(USER_KEY);
+      writeCachedAuthUser(null);
       setUser(null);
       setLoading(false);
       return;
@@ -79,11 +81,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           isSuperUser: me.isSuperUser ?? isSuperUser(me.email),
         };
         setUser(session);
-        localStorage.setItem(USER_KEY, JSON.stringify(session));
+        writeCachedAuthUser(session);
       })
       .catch((err) => {
         // Solo cerrar sesión si el token es inválido/expiró (401). Ante errores
         // transitorios (offline, timeout, 5xx) mantener la sesión cacheada.
+        // api() already retries /auth/me once before clearing on 401.
         if (err instanceof ApiError && err.status === 401) {
           clearSession(setUser);
         } else {
@@ -96,7 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const applySession = (token: string, sessionUser: SessionUser) => {
     setToken(token);
     setUser(sessionUser);
-    localStorage.setItem(USER_KEY, JSON.stringify(sessionUser));
+    writeCachedAuthUser(sessionUser);
   };
 
   const value: AuthState = {

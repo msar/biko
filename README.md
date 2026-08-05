@@ -81,7 +81,8 @@ El script crea `api`, `web` y `promotions-sync` (si no existen), configura varia
 
 **api**
 - `DATABASE_URL` → `${{Postgres.DATABASE_URL}}`
-- `JWT_SECRET` → generado una sola vez (no rotar; invalida todas las sesiones)
+- `NODE_ENV` → `production` (habilita el guard de `JWT_SECRET`)
+- `JWT_SECRET` → **variable persistente en Railway** (literal fijo). Generarla una sola vez y no rotarla: cada cambio invalida todas las sesiones. **Nunca** uses `${{ secret() }}` — Railway puede regenerarlo al re-aplicar variables y eso desloguea a todos en cada deploy. El API falla al arrancar si falta o es el valor de desarrollo.
 - `CORS_ORIGIN` → `https://${{web.RAILWAY_PUBLIC_DOMAIN}}`
 - `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` → dominio público de `web` (passkeys / Face ID)
 - `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` → Web Push (`npx web-push generate-vapid-keys`)

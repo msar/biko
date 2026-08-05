@@ -45,16 +45,31 @@ for legacy in biko modo-sync mercadopago-sync; do
 done
 
 # Never rotate JWT_SECRET on re-runs — regenerating invalidates every logged-in client.
-EXISTING_JWT="$(railway variable list --service api --json 2>/dev/null | python3 -c 'import json,sys
+# Detect key presence (not only readable value): sealed/unreadable values must not be overwritten.
+# Never use Railway's ${{ secret() }} template — it can regenerate when variables are re-applied.
+JWT_STATUS="$(railway variable list --service api --json 2>/dev/null | python3 -c 'import json,sys
 try:
   raw=json.load(sys.stdin)
-  vars_=raw if isinstance(raw, dict) else {v.get("name"): v.get("value") for v in raw}
-  print(vars_.get("JWT_SECRET") or "")
+  if isinstance(raw, dict):
+    vars_=raw
+  elif isinstance(raw, list):
+    vars_={v.get("name"): v.get("value") for v in raw}
+  else:
+    vars_={}
+  if "JWT_SECRET" not in vars_:
+    print("missing")
+  else:
+    val=str(vars_.get("JWT_SECRET") or "")
+    if "secret(" in val:
+      print("template")
+    else:
+      print("present")
 except Exception:
-  print("")' || true)"
+  print("unknown")' || echo "unknown")"
 
 API_VARS=(
   'DATABASE_URL=${{Postgres.DATABASE_URL}}'
+  'NODE_ENV=production'
   'RAILPACK_BUILD_CMD=npm install && npx prisma generate --schema apps/api/prisma/schema.prisma'
   'RAILPACK_START_CMD=npm run railway:release --workspace @biko/api && npm run start --workspace @biko/api'
   'CORS_ORIGIN=https://${{web.RAILWAY_PUBLIC_DOMAIN}}'
@@ -63,15 +78,27 @@ API_VARS=(
 )
 
 if [[ -n "${JWT_SECRET:-}" ]]; then
+  if [[ "$JWT_SECRET" == *"secret("* ]]; then
+    echo "ERROR: JWT_SECRET must be a fixed string, not a Railway \${{ secret() }} template." >&2
+    exit 1
+  fi
   API_VARS+=("JWT_SECRET=$JWT_SECRET")
-  echo "Using JWT_SECRET from environment"
-elif [[ -n "$EXISTING_JWT" ]]; then
-  echo "Keeping existing JWT_SECRET (not overwriting)"
-else
+  echo "Using JWT_SECRET from environment (explicit override)"
+elif [[ "$JWT_STATUS" == "present" || "$JWT_STATUS" == "unknown" ]]; then
+  # present: keep. unknown: do not invent a new secret (avoids accidental mass logout).
+  echo "Keeping existing JWT_SECRET (status=$JWT_STATUS; not overwriting)"
+elif [[ "$JWT_STATUS" == "template" || "$JWT_STATUS" == "missing" ]]; then
   # Fixed random once; Railway template secret() can regenerate on re-apply.
   GENERATED_JWT="$(openssl rand -base64 48 | tr -d '\n/=+' | head -c 48)"
   API_VARS+=("JWT_SECRET=$GENERATED_JWT")
-  echo "Generated a new stable JWT_SECRET"
+  if [[ "$JWT_STATUS" == "template" ]]; then
+    echo "Replacing Railway \${{ secret() }} JWT_SECRET with a stable literal (was regenerating on re-apply)"
+  else
+    echo "Generated a new stable JWT_SECRET"
+  fi
+else
+  echo "ERROR: unexpected JWT_STATUS=$JWT_STATUS" >&2
+  exit 1
 fi
 
 echo "Setting api variables..."

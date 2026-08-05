@@ -258,7 +258,18 @@ function ResumenTab({
       {slices.length > 0 && (
         <section className="card">
           <h2>Por categoría</h2>
-          <PieChart slices={slices} formatValue={fmtMoney} />
+          <div className="pie-chart-wrap">
+            <PieChart slices={slices} formatValue={fmtMoney} />
+          </div>
+          <div className="chart-legend">
+            {slices.map((s) => (
+              <div key={s.id} className="chart-legend-item">
+                <span className="chart-legend-dot" style={{ background: s.color }} />
+                {s.name}
+                <span className="chart-legend-amount">{fmtMoney(s.value)}</span>
+              </div>
+            ))}
+          </div>
         </section>
       )}
 
@@ -356,7 +367,7 @@ function GastosTab({
       {expenses?.map((e) => (
         <div
           key={e.id}
-          className="card expense-row expense-row-interactive"
+          className="expense-row card expense-row-interactive"
           role="button"
           tabIndex={0}
           onClick={() => navigate(`/viajes/${tripId}/gastos/${e.id}`)}
@@ -367,14 +378,20 @@ function GastosTab({
             }
           }}
         >
-          <div className="row-between">
+          <div
+            className="expense-cat"
+            style={{ background: TRIP_CATEGORY_COLORS[e.category] ?? '#ddd' }}
+          />
+          <div className="expense-main">
             <strong>{TRIP_CATEGORY_LABELS[e.category]}</strong>
-            <strong>{fmtMoney(e.amount)}</strong>
+            <small>
+              {formatTripExpensePayers(e, fmtMoney)} · {fmtDate(e.date)}
+            </small>
+            {e.note && <small>{e.note}</small>}
           </div>
-          <p className="hint">
-            {formatTripExpensePayers(e, fmtMoney)} · {fmtDate(e.date)}
-          </p>
-          {e.note && <p className="hint">{e.note}</p>}
+          <div className="expense-amounts">
+            <span>{fmtMoney(e.amount)}</span>
+          </div>
         </div>
       ))}
     </>
