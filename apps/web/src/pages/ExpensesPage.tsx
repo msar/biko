@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -8,16 +8,40 @@ import { expensePayerLabel, expenseSplitLabel } from '../lib/expense-labels';
 import { getOutbox, onOutboxChange, OutboxExpense } from '../lib/outbox';
 import type { Purchase } from '../lib/types';
 
+/** Matches GET /expenses default; keep in sync with API `listQuerySchema`. */
+const PAGE_SIZE = 50;
+
+function expensesListUrl(offset: number): string {
+  const params = new URLSearchParams({
+    limit: String(PAGE_SIZE),
+    offset: String(offset),
+  });
+  return `/expenses?${params}`;
+}
+
 export default function ExpensesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data: expenses } = useQuery({
-    queryKey: ['expenses'],
-    queryFn: () => api<Purchase[]>('/expenses'),
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = useInfiniteQuery({
+    queryKey: ['expenses', 'list'],
+    queryFn: ({ pageParam }) => api<Purchase[]>(expensesListUrl(pageParam)),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.length < PAGE_SIZE) return undefined;
+      return allPages.reduce((sum, page) => sum + page.length, 0);
+    },
   });
+
+  const expenses = data?.pages.flat() ?? [];
 
   const [pending, setPending] = useState<OutboxExpense[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<Purchase | null>(null);
@@ -81,7 +105,7 @@ export default function ExpensesPage() {
         </section>
       )}
 
-      {expenses?.map((exp) => {
+      {expenses.map((exp) => {
         const badge = user ? expenseSplitLabel(exp, user.id) : null;
         const paidBadge = user ? expensePayerLabel(exp, user.id) : null;
         return (
@@ -150,9 +174,21 @@ export default function ExpensesPage() {
         );
       })}
 
-      {expenses && expenses.length === 0 && pending.length === 0 && (
+      {!isLoading && expenses.length === 0 && pending.length === 0 && (
         <p className="empty-state">Sin gastos todavía.</p>
       )}
+
+      {hasNextPage && (
+        <button
+          type="button"
+          className="btn-secondary load-more-btn"
+          disabled={isFetchingNextPage}
+          onClick={() => void fetchNextPage()}
+        >
+          {isFetchingNextPage ? 'Cargando…' : 'Cargar más'}
+        </button>
+      )}
+
       <p className="hint center">Tocá un gasto para verlo. Mantené presionado o usá 🗑 para eliminar.</p>
 
       <ConfirmDialog

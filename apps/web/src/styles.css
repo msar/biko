@@ -1029,6 +1029,12 @@ label {
   opacity: 0.45;
 }
 
+.load-more-btn {
+  width: 100%;
+  flex: none;
+  margin: 8px 0 4px;
+}
+
 .btn-danger {
   background: var(--red);
   color: #fff;

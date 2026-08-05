@@ -105,6 +105,7 @@ const updateExpenseSchema = expenseFieldsSchema
 const listQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
 });
 
 /** HOUSEHOLD for everyone; PERSONAL only for the creator. */
@@ -169,8 +170,9 @@ export default async function expenseRoutes(app: FastifyInstance) {
     return app.prisma.purchase.findMany({
       where,
       include: purchaseInclude,
-      orderBy: { purchaseDate: 'desc' },
+      orderBy: [{ purchaseDate: 'desc' }, { id: 'desc' }],
       take: query.limit,
+      skip: query.offset,
     });
   });
 
