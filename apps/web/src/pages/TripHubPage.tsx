@@ -335,6 +335,7 @@ function GastosTab({
   closed: boolean;
   onAdd: () => void;
 }) {
+  const navigate = useNavigate();
   const { data: expenses, isLoading } = useQuery({
     queryKey: ['trips', tripId, 'expenses'],
     queryFn: () => api<TripExpense[]>(`/trips/${tripId}/expenses`),
@@ -352,7 +353,19 @@ function GastosTab({
         <p className="empty-state">Todavía no hay gastos</p>
       )}
       {expenses?.map((e) => (
-        <div key={e.id} className="card expense-row">
+        <div
+          key={e.id}
+          className="card expense-row expense-row-interactive"
+          role="button"
+          tabIndex={0}
+          onClick={() => navigate(`/viajes/${tripId}/gastos/${e.id}`)}
+          onKeyDown={(ev) => {
+            if (ev.key === 'Enter' || ev.key === ' ') {
+              ev.preventDefault();
+              navigate(`/viajes/${tripId}/gastos/${e.id}`);
+            }
+          }}
+        >
           <div className="row-between">
             <strong>{TRIP_CATEGORY_LABELS[e.category]}</strong>
             <strong>{fmtMoney(e.amount)}</strong>

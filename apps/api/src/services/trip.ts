@@ -924,6 +924,27 @@ export async function listTripExpenses(db: Db, tripId: string, userId: string) {
   return expenses.map(serializeExpense);
 }
 
+export async function getTripExpense(db: Db, tripId: string, expenseId: string, userId: string) {
+  await requireTripMember(db, tripId, userId);
+  const expense = await db.tripExpense.findFirst({
+    where: { id: expenseId, tripId },
+    include: expenseInclude,
+  });
+  if (!expense) throw new TripNotFoundError('Gasto no encontrado');
+
+  const linked = await db.tripAccommodation.findFirst({
+    where: { expenseId, tripId },
+    select: { id: true, label: true, address: true },
+  });
+
+  return {
+    ...serializeExpense(expense),
+    accommodation: linked
+      ? { id: linked.id, label: linked.label, address: linked.address }
+      : null,
+  };
+}
+
 function serializeExpense(expense: {
   id: string;
   tripId: string;

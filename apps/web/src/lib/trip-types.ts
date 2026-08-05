@@ -170,6 +170,12 @@ export interface TripExpense {
     displayName: string;
     userId: string | null;
   }>;
+  /** Present on get-by-id when this expense is linked to trip accommodation. */
+  accommodation?: {
+    id: string;
+    label: string | null;
+    address: string | null;
+  } | null;
 }
 
 export interface TripListItemRow {

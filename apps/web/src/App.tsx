@@ -24,6 +24,8 @@ import ExpenseDetailPage from './pages/ExpenseDetailPage';
 import TripsPage, { NewTripPage } from './pages/TripsPage';
 import TripHubPage from './pages/TripHubPage';
 import NewTripExpensePage from './pages/NewTripExpensePage';
+import TripExpenseDetailPage from './pages/TripExpenseDetailPage';
+import EditTripExpensePage from './pages/EditTripExpensePage';
 import TripJoinPage from './pages/TripJoinPage';
 
 function OnlineBanner() {
@@ -103,6 +105,8 @@ export default function App() {
           <Route path="/viajes/nuevo" element={<NewTripPage />} />
           <Route path="/viajes/invitar/:code" element={<TripJoinPage />} />
           <Route path="/viajes/:id/gastos/nuevo" element={<NewTripExpensePage />} />
+          <Route path="/viajes/:id/gastos/:expenseId/editar" element={<EditTripExpensePage />} />
+          <Route path="/viajes/:id/gastos/:expenseId" element={<TripExpenseDetailPage />} />
           <Route path="/viajes/:id" element={<TripHubPage />} />
           <Route path="/admin" element={<AdminRoute />} />
           <Route path="*" element={<Navigate to="/" replace />} />

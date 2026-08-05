@@ -87,3 +87,15 @@ export function formatTripExpensePayers(
   }
   return `Pagaron ${payments.map((p) => `${p.displayName} (${fmtMoney(p.amount)})`).join(', ')}`;
 }
+
+const TRIP_SPLIT_MODE_LABEL: Record<string, string> = {
+  EQUAL: 'Igual entre todos',
+  ASSIGN: 'Asignado a uno',
+  AMOUNT: 'Por montos',
+  SHARES: 'Por partes',
+  PERCENTAGE: 'Por porcentaje',
+};
+
+export function tripExpenseSplitModeLabel(splitMode: string): string {
+  return TRIP_SPLIT_MODE_LABEL[splitMode] ?? splitMode;
+}

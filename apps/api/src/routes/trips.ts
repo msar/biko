@@ -13,6 +13,7 @@ import {
   deleteTripListItem,
   deleteTripMember,
   getTripAccommodation,
+  getTripExpense,
   getTripHub,
   getTripInvitePreview,
   joinTripByCode,
@@ -381,6 +382,15 @@ export default async function tripRoutes(app: FastifyInstance) {
     const { tripId } = tripIdParams.parse(request.params);
     try {
       return await listTripExpenses(app.prisma, tripId, request.user.userId);
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.get('/trips/:tripId/expenses/:expenseId', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId, expenseId } = expenseIdParams.parse(request.params);
+    try {
+      return await getTripExpense(app.prisma, tripId, expenseId, request.user.userId);
     } catch (error) {
       return mapTripError(error, reply);
     }
