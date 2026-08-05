@@ -150,7 +150,23 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       { categoryId: string; name: string; icon: string | null; color: string | null; total: number }
     >();
     const byUser = new Map<string, { userId: string; name: string; total: number }>();
-    const byPaymentMethod = new Map<string, { paymentMethodId: string; name: string; total: number }>();
+    type PmCategoryEntry = {
+      categoryId: string;
+      name: string;
+      icon: string | null;
+      color: string | null;
+      total: number;
+    };
+    const byPaymentMethod = new Map<
+      string,
+      {
+        paymentMethodId: string;
+        name: string;
+        type: string;
+        total: number;
+        categories: Map<string, PmCategoryEntry>;
+      }
+    >();
 
     // Settle-up: only HOUSEHOLD spend creates shared debt (and only when viewing hogar).
     const memberNames = new Map<string, string>();
@@ -178,8 +194,23 @@ export default async function dashboardRoutes(app: FastifyInstance) {
 
       const pm = purchase.paymentMethod;
       const pmName = pm.nickname ?? pm.definition.name;
-      const pmEntry = byPaymentMethod.get(pm.id) ?? { paymentMethodId: pm.id, name: pmName, total: 0 };
+      const pmEntry = byPaymentMethod.get(pm.id) ?? {
+        paymentMethodId: pm.id,
+        name: pmName,
+        type: pm.definition.type,
+        total: 0,
+        categories: new Map(),
+      };
       pmEntry.total += amount;
+      const pmCat = pmEntry.categories.get(cat.id) ?? {
+        categoryId: cat.id,
+        name: cat.name,
+        icon: cat.icon,
+        color: cat.color,
+        total: 0,
+      };
+      pmCat.total += amount;
+      pmEntry.categories.set(cat.id, pmCat);
       byPaymentMethod.set(pm.id, pmEntry);
 
       if (includeSettle && isHousehold) {
@@ -260,7 +291,15 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       })),
       byUser: [...byUser.values()].map((u) => ({ ...u, total: round2(u.total) })).sort((a, b) => b.total - a.total),
       byPaymentMethod: [...byPaymentMethod.values()]
-        .map((p) => ({ ...p, total: round2(p.total) }))
+        .map((p) => ({
+          paymentMethodId: p.paymentMethodId,
+          name: p.name,
+          type: p.type,
+          total: round2(p.total),
+          categories: [...p.categories.values()]
+            .map((c) => ({ ...c, total: round2(c.total) }))
+            .sort((a, b) => b.total - a.total),
+        }))
         .sort((a, b) => b.total - a.total),
       totalSavings: savings._sum.discountAmount?.toNumber() ?? 0,
       settleUp: includeSettle
@@ -282,6 +321,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
           store: i.purchase.store,
           categoryId: i.purchase.categoryId,
           category: i.purchase.category.name,
+          paymentMethodId: i.purchase.paymentMethodId,
           userName: i.purchase.user.name,
           scope: i.purchase.scope,
         };

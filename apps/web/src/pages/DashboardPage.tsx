@@ -47,6 +47,8 @@ export default function DashboardPage() {
   const [scope, setScope] = useState<DashboardScope>('household');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  const [expandedCardCategories, setExpandedCardCategories] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard', 'monthly', month, scope],
@@ -63,7 +65,9 @@ export default function DashboardPage() {
     queryFn: () => api<RecurringOccurrence[]>('/recurring-payments/occurrences?status=PENDING&limit=8'),
   });
 
+  const creditCards = data?.byPaymentMethod.filter((pm) => pm.type === 'CREDIT_CARD') ?? [];
   const maxGroup = Math.max(1, ...(data?.byGroup.map((g) => g.total) ?? []));
+  const maxCard = Math.max(1, ...creditCards.map((c) => c.total));
   const maxUser = Math.max(1, ...(data?.byUser.map((u) => u.total) ?? []));
   const monthTotal = data?.total ?? 0;
   const showSettle = scope === 'household';
@@ -72,6 +76,8 @@ export default function DashboardPage() {
   useEffect(() => {
     setExpandedGroups(new Set());
     setExpandedCategories(new Set());
+    setExpandedCards(new Set());
+    setExpandedCardCategories(new Set());
   }, [month, scope]);
 
   const toggleGroup = (groupId: string) => {
@@ -92,8 +98,31 @@ export default function DashboardPage() {
     });
   };
 
+  const toggleCard = (paymentMethodId: string) => {
+    setExpandedCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(paymentMethodId)) next.delete(paymentMethodId);
+      else next.add(paymentMethodId);
+      return next;
+    });
+  };
+
+  const toggleCardCategory = (key: string) => {
+    setExpandedCardCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const expensesForCategory = (categoryId: string) =>
     (data?.installments ?? []).filter((inst) => inst.categoryId === categoryId);
+
+  const expensesForCardCategory = (paymentMethodId: string, categoryId: string) =>
+    (data?.installments ?? []).filter(
+      (inst) => inst.paymentMethodId === paymentMethodId && inst.categoryId === categoryId,
+    );
 
   return (
     <div className="page">
@@ -190,6 +219,99 @@ export default function DashboardPage() {
                                 style={{
                                   width: `${(cat.total / maxGroup) * 100}%`,
                                   background: cat.color ?? group.color,
+                                }}
+                              />
+                            </div>
+                            <span className="bar-amount-stack">
+                              <span className="bar-amount">{fmtARS.format(cat.total)}</span>
+                              <span className="bar-pct">{pctOf(cat.total, monthTotal)}</span>
+                            </span>
+                          </button>
+                          {catOpen && (
+                            <div className="category-expenses">
+                              {expenses.length === 0 ? (
+                                <p className="category-expenses-empty">Sin detalle disponible</p>
+                              ) : (
+                                expenses.map((inst) => (
+                                  <Link
+                                    key={inst.id}
+                                    to={`/gastos/${inst.purchaseId}`}
+                                    className="category-expense-row"
+                                  >
+                                    <span>
+                                      <strong>{inst.store}</strong>
+                                      <small>
+                                        {' '}
+                                        {fmtDate(inst.dueDate)}
+                                        {inst.totalInstallments > 1
+                                          ? ` · cuota ${inst.number}/${inst.totalInstallments}`
+                                          : ''}
+                                        {` · ${inst.userName}`}
+                                      </small>
+                                    </span>
+                                    <strong>{fmtARS.format(inst.amount)}</strong>
+                                  </Link>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </section>
+      )}
+
+      {creditCards.length > 0 && (
+        <section className="card">
+          <h2>Por tarjeta</h2>
+          {creditCards.map((pm) => {
+            const open = expandedCards.has(pm.paymentMethodId);
+            return (
+              <div key={pm.paymentMethodId} className="group-block">
+                <button type="button" className="group-row" onClick={() => toggleCard(pm.paymentMethodId)}>
+                  <span className="bar-label">
+                    <span className="group-chevron">{open ? '▾' : '▸'}</span>
+                    {pm.name}
+                  </span>
+                  <div className="bar-track">
+                    <div
+                      className="bar-fill"
+                      style={{ width: `${(pm.total / maxCard) * 100}%`, background: 'var(--brand-teal)' }}
+                    />
+                  </div>
+                  <span className="bar-amount-stack">
+                    <span className="bar-amount">{fmtARS.format(pm.total)}</span>
+                    <span className="bar-pct">{pctOf(pm.total, monthTotal)}</span>
+                  </span>
+                </button>
+                {open && (
+                  <div className="group-categories">
+                    {pm.categories.map((cat) => {
+                      const catKey = `${pm.paymentMethodId}:${cat.categoryId}`;
+                      const catOpen = expandedCardCategories.has(catKey);
+                      const expenses = expensesForCardCategory(pm.paymentMethodId, cat.categoryId);
+                      return (
+                        <div key={cat.categoryId} className="category-block">
+                          <button
+                            type="button"
+                            className="group-row bar-row-nested"
+                            onClick={() => toggleCardCategory(catKey)}
+                          >
+                            <span className="bar-label">
+                              <span className="group-chevron">{catOpen ? '▾' : '▸'}</span>
+                              {cat.icon} {cat.name}
+                            </span>
+                            <div className="bar-track">
+                              <div
+                                className="bar-fill"
+                                style={{
+                                  width: `${(cat.total / maxCard) * 100}%`,
+                                  background: cat.color ?? 'var(--brand-teal)',
                                 }}
                               />
                             </div>

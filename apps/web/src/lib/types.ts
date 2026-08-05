@@ -308,6 +308,14 @@ export interface DashboardGroupSpend {
   categories: DashboardCategorySpend[];
 }
 
+export interface DashboardPaymentMethodSpend {
+  paymentMethodId: string;
+  name: string;
+  type: PaymentMethodType;
+  total: number;
+  categories: DashboardCategorySpend[];
+}
+
 export interface MonthlyDashboard {
   month: string;
   scope: DashboardScope;
@@ -316,7 +324,7 @@ export interface MonthlyDashboard {
   byCategory: DashboardCategorySpend[];
   byGroup: DashboardGroupSpend[];
   byUser: Array<{ userId: string; name: string; total: number }>;
-  byPaymentMethod: Array<{ paymentMethodId: string; name: string; total: number }>;
+  byPaymentMethod: DashboardPaymentMethodSpend[];
   settleUp: {
     perUser: Array<{ userId: string; name: string; paid: number; share: number; balance: number }>;
     transfers: Array<{ fromUserId: string; fromName: string; toUserId: string; toName: string; amount: number }>;
@@ -332,6 +340,7 @@ export interface MonthlyDashboard {
     store: string;
     categoryId: string;
     category: string;
+    paymentMethodId: string;
     userName: string;
     scope?: 'HOUSEHOLD' | 'PERSONAL';
   }>;
