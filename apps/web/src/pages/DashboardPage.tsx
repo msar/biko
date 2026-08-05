@@ -29,6 +29,22 @@ function pctOf(part: number, total: number): string {
   return `${Math.round((part / total) * 100)}%`;
 }
 
+function installmentSubtitle(inst: MonthlyDashboard['installments'][number]): string {
+  const parts = [fmtDate(inst.dueDate)];
+  if (inst.totalInstallments > 1) {
+    parts.push(`cuota ${inst.number}/${inst.totalInstallments}`);
+  }
+  parts.push(inst.userName);
+  if (inst.debt) {
+    parts.push(
+      inst.debt.direction === 'I_OWE'
+        ? `deuda con ${inst.debt.contactName}`
+        : `deuda de ${inst.debt.contactName}`,
+    );
+  }
+  return parts.join(' · ');
+}
+
 const SCOPE_LABELS: Record<DashboardScope, string> = {
   household: 'Gasto del hogar',
   personal: 'Gasto personal',
@@ -240,14 +256,7 @@ export default function DashboardPage() {
                                   >
                                     <span>
                                       <strong>{inst.store}</strong>
-                                      <small>
-                                        {' '}
-                                        {fmtDate(inst.dueDate)}
-                                        {inst.totalInstallments > 1
-                                          ? ` · cuota ${inst.number}/${inst.totalInstallments}`
-                                          : ''}
-                                        {` · ${inst.userName}`}
-                                      </small>
+                                      <small> {installmentSubtitle(inst)}</small>
                                     </span>
                                     <strong>{fmtARS.format(inst.amount)}</strong>
                                   </Link>
@@ -333,14 +342,7 @@ export default function DashboardPage() {
                                   >
                                     <span>
                                       <strong>{inst.store}</strong>
-                                      <small>
-                                        {' '}
-                                        {fmtDate(inst.dueDate)}
-                                        {inst.totalInstallments > 1
-                                          ? ` · cuota ${inst.number}/${inst.totalInstallments}`
-                                          : ''}
-                                        {` · ${inst.userName}`}
-                                      </small>
+                                      <small> {installmentSubtitle(inst)}</small>
                                     </span>
                                     <strong>{fmtARS.format(inst.amount)}</strong>
                                   </Link>

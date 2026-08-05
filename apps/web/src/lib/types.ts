@@ -343,6 +343,11 @@ export interface MonthlyDashboard {
     paymentMethodId: string;
     userName: string;
     scope?: 'HOUSEHOLD' | 'PERSONAL';
+    debt?: {
+      id: string;
+      contactName: string;
+      direction: 'OWED_TO_ME' | 'I_OWE';
+    } | null;
   }>;
 }
 

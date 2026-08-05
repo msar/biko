@@ -87,7 +87,9 @@ function purchaseScopeWhere(viewerId: string, dashboardScope: DashboardScope) {
 }
 
 /** Merge dashboard scope with extra purchase predicates (dates, installment count).
- * Expense dashboards exclude purchases linked to an external debt (contact repayment tracking).
+ * By default expense dashboards exclude purchases linked to an external debt
+ * (contact repayment tracking). Pass `{ excludeLinkedDebts: false }` when the
+ * view should reflect bank/card cash-flow (e.g. monthly Resumen / Por tarjeta).
  */
 function purchaseWhere(
   viewerId: string,
@@ -116,15 +118,25 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         householdId,
         OR: [
           {
-            purchase: purchaseWhere(viewerId, dashboardScope, {
-              installmentsCount: 1,
-              purchaseDate: { gte: range.gte, lt: range.lt },
-            }),
+            purchase: purchaseWhere(
+              viewerId,
+              dashboardScope,
+              {
+                installmentsCount: 1,
+                purchaseDate: { gte: range.gte, lt: range.lt },
+              },
+              { excludeLinkedDebts: false },
+            ),
           },
           {
-            purchase: purchaseWhere(viewerId, dashboardScope, {
-              installmentsCount: { gte: 2 },
-            }),
+            purchase: purchaseWhere(
+              viewerId,
+              dashboardScope,
+              {
+                installmentsCount: { gte: 2 },
+              },
+              { excludeLinkedDebts: false },
+            ),
             dueDate: { gte: range.gte, lt: range.lt },
           },
         ],
@@ -139,6 +151,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
               include: { definition: { include: { entity: true } }, owner: { select: { id: true, name: true } } },
             },
             allocations: { include: { user: { select: { id: true, name: true } } } },
+            debt: { select: { id: true, contact: { select: { name: true } }, direction: true } },
           },
         },
       },
@@ -213,7 +226,10 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       pmEntry.categories.set(cat.id, pmCat);
       byPaymentMethod.set(pm.id, pmEntry);
 
-      if (includeSettle && isHousehold) {
+      // Contact-linked debts are card cash-flow, not household settle-up.
+      const hasContactDebt = purchase.debt != null;
+
+      if (includeSettle && isHousehold && !hasContactDebt) {
         const payer = resolvePurchasePayer(purchase);
         memberNames.set(payer.id, payer.name);
         paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + amount);
@@ -235,7 +251,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         userEntry.total += share;
         byUser.set(allocation.userId, userEntry);
 
-        if (includeSettle && isHousehold) {
+        if (includeSettle && isHousehold && !hasContactDebt) {
           memberNames.set(allocation.userId, allocation.user.name);
           shareByUser.set(allocation.userId, (shareByUser.get(allocation.userId) ?? 0) + share);
         }
@@ -270,7 +286,6 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       where: {
         householdId,
         purchaseDate: { gte: range.gte, lt: range.lt },
-        debt: null,
         ...purchaseScopeWhere(viewerId, dashboardScope),
       },
       _sum: { discountAmount: true },
@@ -310,6 +325,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         : { perUser: [], transfers: [] },
       installments: installments.map((i) => {
         const rate = rateToArs(i.purchase.exchangeRateToArs);
+        const debt = i.purchase.debt;
         return {
           id: i.id,
           purchaseId: i.purchaseId,
@@ -324,6 +340,13 @@ export default async function dashboardRoutes(app: FastifyInstance) {
           paymentMethodId: i.purchase.paymentMethodId,
           userName: i.purchase.user.name,
           scope: i.purchase.scope,
+          debt: debt
+            ? {
+                id: debt.id,
+                contactName: debt.contact.name,
+                direction: debt.direction,
+              }
+            : null,
         };
       }),
     };
