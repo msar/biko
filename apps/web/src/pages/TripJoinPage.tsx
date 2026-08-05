@@ -1,15 +1,37 @@
-import { useMutation } from '@tanstack/react-query';
-import { FormEvent, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import type { TripInvitePreview } from '../lib/trip-types';
 
 export default function TripJoinPage() {
   const { code } = useParams<{ code: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [mode, setMode] = useState<'claim' | 'other'>('claim');
+  const [claimMemberId, setClaimMemberId] = useState('');
   const [displayName, setDisplayName] = useState(user?.name ?? '');
   const [error, setError] = useState<string | null>(null);
+
+  const preview = useQuery({
+    queryKey: ['trips', 'invite', code],
+    queryFn: () => api<TripInvitePreview>(`/trips/invite/${code}`),
+    enabled: Boolean(code),
+  });
+
+  const unclaimed = preview.data?.unclaimedMembers ?? [];
+
+  useEffect(() => {
+    if (unclaimed.length === 0) {
+      setMode('other');
+      return;
+    }
+    setMode('claim');
+    if (!claimMemberId || !unclaimed.some((m) => m.id === claimMemberId)) {
+      setClaimMemberId(unclaimed[0]!.id);
+    }
+  }, [unclaimed, claimMemberId]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -17,7 +39,9 @@ export default function TripJoinPage() {
         method: 'POST',
         body: JSON.stringify({
           code: code?.trim(),
-          displayName: displayName.trim() || undefined,
+          ...(mode === 'claim' && claimMemberId
+            ? { claimMemberId }
+            : { displayName: displayName.trim() || undefined }),
         }),
       }),
     onSuccess: (result) => {
@@ -29,6 +53,14 @@ export default function TripJoinPage() {
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (mode === 'claim' && !claimMemberId) {
+      setError('Elegí quién sos de la lista');
+      return;
+    }
+    if (mode === 'other' && !displayName.trim()) {
+      setError('Ingresá tu nombre');
+      return;
+    }
     mutation.mutate();
   };
 
@@ -46,23 +78,82 @@ export default function TripJoinPage() {
         <p className="hint">
           Te sumás solo a este viaje — no entrás al hogar de nadie.
         </p>
-        <label>
-          Tu nombre en el viaje
-          <input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Cómo te ven los demás"
-            required
-            autoFocus
-          />
-        </label>
+
+        {preview.isLoading && <p className="hint">Cargando invitación…</p>}
+        {preview.isError && (
+          <p className="error">
+            {(preview.error as Error)?.message ?? 'Invitación inválida'}
+          </p>
+        )}
+
+        {preview.data && (
+          <>
+            <p>
+              <strong>{preview.data.trip.name}</strong>
+              {preview.data.trip.destination ? ` · ${preview.data.trip.destination}` : ''}
+            </p>
+
+            {unclaimed.length > 0 && (
+              <>
+                <p className="field-label">¿Quién sos?</p>
+                <ul className="list-plain" style={{ marginBottom: 12 }}>
+                  {unclaimed.map((m) => (
+                    <li key={m.id} className="list-row">
+                      <label className="row-between" style={{ width: '100%', cursor: 'pointer' }}>
+                        <span>{m.displayName}</span>
+                        <input
+                          type="radio"
+                          name="claim"
+                          checked={mode === 'claim' && claimMemberId === m.id}
+                          onChange={() => {
+                            setMode('claim');
+                            setClaimMemberId(m.id);
+                          }}
+                        />
+                      </label>
+                    </li>
+                  ))}
+                  <li className="list-row">
+                    <label className="row-between" style={{ width: '100%', cursor: 'pointer' }}>
+                      <span>Otro / no estoy en la lista</span>
+                      <input
+                        type="radio"
+                        name="claim"
+                        checked={mode === 'other'}
+                        onChange={() => setMode('other')}
+                      />
+                    </label>
+                  </li>
+                </ul>
+              </>
+            )}
+
+            {(mode === 'other' || unclaimed.length === 0) && (
+              <label>
+                Tu nombre en el viaje
+                <input
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Cómo te ven los demás"
+                  required
+                  autoFocus
+                />
+              </label>
+            )}
+          </>
+        )}
+
         {code && (
           <p className="hint">
             Código: <code>{code}</code>
           </p>
         )}
         {error && <p className="error">{error}</p>}
-        <button type="submit" className="btn-primary" disabled={mutation.isPending || !code}>
+        <button
+          type="submit"
+          className="btn-primary"
+          disabled={mutation.isPending || !code || preview.isLoading || preview.isError}
+        >
           {mutation.isPending ? 'Entrando…' : 'Entrar al viaje'}
         </button>
       </form>

@@ -68,8 +68,16 @@ TripExpenseCategory:  // product fixed set; store as enum or string matching PRD
 | `tripId`, `userId` | `userId` nullable until claim |
 | `displayName` | Required for guests pre-account |
 | `role` | ORGANIZER \| MEMBER |
-| `inviteStatus` | PENDING \| JOINED \| … |
+| `inviteStatus` | PENDING (pre-created / unclaimed) \| JOINED \| … |
+| `tripHouseholdId` | Optional FK to trip-internal group |
 | unique | `(tripId, userId)` when userId set |
+
+#### `TripHousehold` (trip-internal group)
+
+| Field | Notes |
+|-------|--------|
+| `tripId`, `name` | Named settlement group (e.g. “Los García”) |
+| **Not** | Biko `Household` / hogar — no relation to Pasar a Biko |
 
 #### `TripInvite`
 
@@ -79,7 +87,7 @@ TripExpenseCategory:  // product fixed set; store as enum or string matching PRD
 | `expiresAt` | Optional |
 | `createdByUserId` | Who minted the invite |
 
-Joining creates/updates `TripMember` only—**never** household membership.
+Joining creates/updates `TripMember` only—**never** household membership. Claim path: `POST /trips/join` with `{ claimMemberId }` links `userId` to a PENDING slot.
 
 #### `TripExpense` + `TripExpenseAllocation`
 
@@ -95,7 +103,8 @@ Joining creates/updates `TripMember` only—**never** household membership.
 
 | Field | Notes |
 |-------|--------|
-| `tripId`, `fromMemberId`, `toMemberId`, `amount`, `settledAt` | Within-trip paybacks |
+| `tripId`, `fromMemberId`, `toMemberId`, `amount`, `settledAt` | Within-trip paybacks (rows store representative members) |
+| Balance UI / Liquidar | Aggregate to **settlement units** = `TripHousehold` or solo `TripMember`; minimize transfers between units |
 | Independent of | `HouseholdSettlement` |
 
 #### `TripListItem`
@@ -163,10 +172,15 @@ NestJS module e.g. `trips` (names indicative). Auth: JWT user; guest join may us
 
 | Method | Path | Notes |
 |--------|------|--------|
-| `GET` | `/trips/:tripId/members` | Roster |
+| `GET` | `/trips/:tripId/members` | Roster (joined + pending) |
+| `POST` | `/trips/:tripId/members` | Organizer: pre-create pending traveller `{ displayName, tripHouseholdId? }` |
+| `DELETE` | `/trips/:tripId/members/:memberId` | Organizer: remove unclaimed pending slot |
 | `POST` | `/trips/:tripId/invites` | Mint trip invite (not household) |
-| `POST` | `/trips/join` | Body: `{ code, displayName? }` → trip member only |
-| `PATCH` | `/trips/:tripId/members/:memberId` | Role changes (organizer) |
+| `GET` | `/trips/invite/:code` | Preview trip + unclaimed members for claim picker |
+| `POST` | `/trips/join` | Body: `{ code, displayName?, claimMemberId? }` → claim slot or create member |
+| `PATCH` | `/trips/:tripId/members/:memberId` | Role / name / `tripHouseholdId` (organizer) |
+| `GET/POST` | `/trips/:tripId/households` | List / create trip-internal groups |
+| `PATCH/DELETE` | `/trips/:tripId/households/:id` | Rename / delete group (members ungrouped) |
 
 ### Expenses & settle
 
@@ -217,7 +231,7 @@ Spanish product copy: **Viajes / Gestor de viajes**, **Pasar a Biko**, **Liquida
 - **Gastos** — feed + FAB; patterns may resemble household expense form; must not open household ledger.
 - **Listas** — Hacer / Traer-Comprar toggle.
 - **Alojamiento** — address + maps outbound link.
-- **Personas** — roster + copy invite.
+- **Personas** — roster (claim status), trip-household groups, pre-create travellers, copy invite.
 
 ### Chrome rules
 

@@ -34,7 +34,16 @@ export interface TripMember {
   displayName: string;
   role: TripMemberRole;
   inviteStatus: string;
+  tripHouseholdId: string | null;
   createdAt: string;
+}
+
+export interface TripHousehold {
+  id: string;
+  tripId: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TripAccommodation {
@@ -54,17 +63,32 @@ export interface TripBalanceMember {
   memberId: string;
   displayName: string;
   userId: string | null;
+  tripHouseholdId: string | null;
+  paid: number;
+  share: number;
+  balance: number;
+}
+
+export interface TripBalanceUnit {
+  unitId: string;
+  kind: 'HOUSEHOLD' | 'MEMBER';
+  displayName: string;
+  tripHouseholdId: string | null;
+  memberIds: string[];
+  representativeMemberId: string;
   paid: number;
   share: number;
   balance: number;
 }
 
 export interface TripBalanceTransfer {
-  fromMemberId: string;
+  fromUnitId: string;
   fromName: string;
-  toMemberId: string;
+  toUnitId: string;
   toName: string;
   amount: number;
+  fromMemberId: string;
+  toMemberId: string;
 }
 
 export interface TripSettlement {
@@ -99,6 +123,7 @@ export interface TripHub {
   createdAt: string;
   updatedAt: string;
   members: TripMember[];
+  households: TripHousehold[];
   inviteCode: string | null;
   accommodation: TripAccommodation | null;
   myMember: TripMember;
@@ -108,6 +133,7 @@ export interface TripHub {
   isGuestSession: boolean;
   balance: {
     perMember: TripBalanceMember[];
+    perUnit: TripBalanceUnit[];
     transfers: TripBalanceTransfer[];
     settlements: TripSettlement[];
   };
@@ -166,4 +192,18 @@ export interface TripExportPreview {
     percent: number;
     amount: number;
   }>;
+}
+
+export interface TripInvitePreview {
+  code: string;
+  expiresAt: string | null;
+  trip: {
+    id: string;
+    name: string;
+    destination: string | null;
+    status: TripStatus;
+    startDate: string | null;
+    endDate: string | null;
+  };
+  unclaimedMembers: TripMember[];
 }

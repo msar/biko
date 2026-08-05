@@ -168,7 +168,7 @@ export default function TripHubPage() {
           ) : (
             <ul className="settle-confirm-list">
               {trip.balance.transfers.map((t) => (
-                <li key={`${t.fromMemberId}-${t.toMemberId}`}>
+                <li key={`${t.fromUnitId}-${t.toUnitId}`}>
                   <strong>{t.fromName}</strong> le paga a <strong>{t.toName}</strong>:{' '}
                   {fmtMoney(t.amount)}
                 </li>
@@ -263,16 +263,20 @@ function ResumenTab({
 
       <section className="card">
         <h2>Balances</h2>
-        {trip.balance.perMember.length === 0 ? (
+        <p className="hint">Por grupo del viaje o viajero suelto</p>
+        {(trip.balance.perUnit?.length ?? 0) === 0 ? (
           <p className="empty-state">Todavía no hay gastos</p>
         ) : (
           <ul className="list-plain">
-            {trip.balance.perMember.map((m) => (
-              <li key={m.memberId} className="row-between list-row">
-                <span>{m.displayName}</span>
-                <span className={m.balance >= 0 ? 'balance-pos' : 'balance-neg'}>
-                  {m.balance >= 0 ? '+' : ''}
-                  {fmtMoney(m.balance)}
+            {trip.balance.perUnit.map((u) => (
+              <li key={u.unitId} className="row-between list-row">
+                <span>
+                  {u.displayName}
+                  {u.kind === 'HOUSEHOLD' && <span className="hint"> · grupo</span>}
+                </span>
+                <span className={u.balance >= 0 ? 'balance-pos' : 'balance-neg'}>
+                  {u.balance >= 0 ? '+' : ''}
+                  {fmtMoney(u.balance)}
                 </span>
               </li>
             ))}
@@ -283,7 +287,7 @@ function ResumenTab({
           <div className="settle-transfers" style={{ marginTop: 12 }}>
             <p className="field-label">Quién le paga a quién</p>
             {trip.balance.transfers.map((t) => (
-              <div key={`${t.fromMemberId}-${t.toMemberId}`} className="settle-transfer">
+              <div key={`${t.fromUnitId}-${t.toUnitId}`} className="settle-transfer">
                 <span>
                   <strong>{t.fromName}</strong> → {t.toName}
                 </span>
@@ -716,26 +720,226 @@ function PersonasTab({
   copied: boolean;
   onCopy: () => void;
 }) {
+  const queryClient = useQueryClient();
+  const closed = trip.status === 'CLOSED';
+  const [newName, setNewName] = useState('');
+  const [newGroupName, setNewGroupName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const households = trip.households ?? [];
+  const householdName = (id: string | null) =>
+    id ? households.find((h) => h.id === id)?.name ?? null : null;
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['trips', trip.id] });
+  };
+
+  const addMember = useMutation({
+    mutationFn: (displayName: string) =>
+      api(`/trips/${trip.id}/members`, {
+        method: 'POST',
+        body: JSON.stringify({ displayName }),
+      }),
+    onSuccess: () => {
+      setNewName('');
+      setError(null);
+      invalidate();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo agregar'),
+  });
+
+  const deleteMember = useMutation({
+    mutationFn: (memberId: string) =>
+      api(`/trips/${trip.id}/members/${memberId}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+    onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo eliminar'),
+  });
+
+  const patchMember = useMutation({
+    mutationFn: ({
+      memberId,
+      tripHouseholdId,
+    }: {
+      memberId: string;
+      tripHouseholdId: string | null;
+    }) =>
+      api(`/trips/${trip.id}/members/${memberId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ tripHouseholdId }),
+      }),
+    onSuccess: invalidate,
+    onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo asignar'),
+  });
+
+  const addGroup = useMutation({
+    mutationFn: (name: string) =>
+      api(`/trips/${trip.id}/households`, {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: () => {
+      setNewGroupName('');
+      setError(null);
+      invalidate();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo crear el grupo'),
+  });
+
+  const deleteGroup = useMutation({
+    mutationFn: (householdId: string) =>
+      api(`/trips/${trip.id}/households/${householdId}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+    onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo eliminar'),
+  });
+
   return (
     <>
       <section className="card">
         <h2>Personas</h2>
         <ul className="list-plain">
-          {trip.members.map((m) => (
-            <li key={m.id} className="row-between list-row">
-              <span>
-                {m.displayName}
-                {m.role === 'ORGANIZER' && <span className="hint"> · Organizador</span>}
-              </span>
-            </li>
-          ))}
+          {trip.members.map((m) => {
+            const group = householdName(m.tripHouseholdId);
+            const pending = m.inviteStatus === 'PENDING' && !m.userId;
+            return (
+              <li key={m.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+                <div className="row-between">
+                  <span>
+                    {m.displayName}
+                    {m.role === 'ORGANIZER' && <span className="hint"> · Organizador</span>}
+                    {pending && <span className="hint"> · Sin reclamar</span>}
+                    {!pending && m.inviteStatus === 'JOINED' && m.role !== 'ORGANIZER' && (
+                      <span className="hint"> · Unido</span>
+                    )}
+                  </span>
+                  {trip.isOrganizer && !closed && pending && (
+                    <button
+                      type="button"
+                      className="btn-link"
+                      onClick={() => deleteMember.mutate(m.id)}
+                      disabled={deleteMember.isPending}
+                    >
+                      Quitar
+                    </button>
+                  )}
+                </div>
+                {group && <span className="hint">Grupo: {group}</span>}
+                {trip.isOrganizer && !closed && (
+                  <label className="hint" style={{ display: 'block' }}>
+                    Asignar a grupo
+                    <select
+                      value={m.tripHouseholdId ?? ''}
+                      onChange={(e) =>
+                        patchMember.mutate({
+                          memberId: m.id,
+                          tripHouseholdId: e.target.value || null,
+                        })
+                      }
+                      disabled={patchMember.isPending}
+                    >
+                      <option value="">Sin grupo</option>
+                      {households.map((h) => (
+                        <option key={h.id} value={h.id}>
+                          {h.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </li>
+            );
+          })}
         </ul>
       </section>
 
-      {inviteLink && trip.isOrganizer && trip.status !== 'CLOSED' && (
+      {trip.isOrganizer && !closed && (
+        <section className="card">
+          <h2>Agregar viajero</h2>
+          <p className="hint">Creá un lugar con nombre. Pueden reclamarlo con el link de invitación.</p>
+          <form
+            className="promo-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = newName.trim();
+              if (!name) return;
+              addMember.mutate(name);
+            }}
+          >
+            <label>
+              Nombre
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="Ej. Ana"
+                required
+              />
+            </label>
+            <button type="submit" className="btn-secondary" disabled={addMember.isPending}>
+              {addMember.isPending ? 'Agregando…' : 'Agregar'}
+            </button>
+          </form>
+        </section>
+      )}
+
+      {trip.isOrganizer && !closed && (
+        <section className="card">
+          <h2>Grupos del viaje</h2>
+          <p className="hint">
+            Agrupá viajeros para liquidar por grupo (no es el hogar de Biko).
+          </p>
+          {households.length > 0 && (
+            <ul className="list-plain" style={{ marginBottom: 12 }}>
+              {households.map((h) => {
+                const count = trip.members.filter((m) => m.tripHouseholdId === h.id).length;
+                return (
+                  <li key={h.id} className="row-between list-row">
+                    <span>
+                      {h.name}
+                      <span className="hint"> · {count} persona{count === 1 ? '' : 's'}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="btn-link"
+                      onClick={() => deleteGroup.mutate(h.id)}
+                      disabled={deleteGroup.isPending}
+                    >
+                      Eliminar
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <form
+            className="promo-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = newGroupName.trim();
+              if (!name) return;
+              addGroup.mutate(name);
+            }}
+          >
+            <label>
+              Nombre del grupo
+              <input
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                placeholder='Ej. "Los García"'
+                required
+              />
+            </label>
+            <button type="submit" className="btn-secondary" disabled={addGroup.isPending}>
+              {addGroup.isPending ? 'Creando…' : 'Crear grupo'}
+            </button>
+          </form>
+        </section>
+      )}
+
+      {inviteLink && trip.isOrganizer && !closed && (
         <section className="card">
           <h2>Invitar</h2>
-          <p className="hint">Compartí el link. Quien entre se suma al viaje, no al hogar.</p>
+          <p className="hint">
+            Compartí el link. Quien entre puede elegir su nombre de la lista o sumarse como otro.
+          </p>
           <code className="trip-invite-code">{inviteLink}</code>
           <button type="button" className="btn-secondary" onClick={onCopy}>
             {copied ? '¡Copiado!' : 'Copiar link'}
@@ -746,6 +950,8 @@ function PersonasTab({
       {!inviteLink && trip.members.length < 2 && (
         <p className="empty-state">Invitá al grupo con el link</p>
       )}
+
+      {error && <p className="error">{error}</p>}
     </>
   );
 }

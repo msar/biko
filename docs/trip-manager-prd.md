@@ -184,11 +184,14 @@ They **do** see: trip Resumen, Gastos (trip-scoped), Listas, Alojamiento, Person
 - Separate sections or type flag: **Traer** vs **Comprar** (same list UX, filter by type).
 - Templates later (playa, montaña, camping)—backlog.
 
-### 4. Guest list and join
+### 4. Guest list, claim, and trip-household groups
 
 - Trip has a **guest list** of participants (any trip members—not “household + guests” as hierarchy).
-- Shareable **invite code/link** (trip invite, not household invite).
-- Joining adds the person to the trip roster only; they see expenses, lists, accommodation—**never** household Gastos/promos/balance.
+- Organizer can **pre-create travellers** (named slots, `userId` null, pending) before anyone has an account.
+- Shareable **invite code/link** (trip invite, not household invite). On join, the invitee can **claim** an unclaimed slot (“¿Quién sos?”) or add themselves as “Otro / no estoy en la lista”.
+- Joining adds/claims a trip roster seat only; they see expenses, lists, accommodation—**never** household Gastos/promos/balance.
+- **Trip-household groups** (named groups on the trip, e.g. “Los García”) are trip-internal only—not Biko hogar membership. Organizer assigns travellers into groups.
+- **Settlement units:** balances and Liquidar aggregate per trip-household group (paid + share roll up); ungrouped travellers stay individual units. Expense payer remains a person; allocations may stay per-member. Pasar a Biko (Biko hogar) is unchanged when eligible.
 - Roles as above. Guests cannot Pasar a Biko or see household finances.
 
 ### 5. Trip accommodation

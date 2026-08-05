@@ -5,13 +5,19 @@ import {
   closeTrip,
   createTrip,
   createTripExpense,
+  createTripHousehold,
   createTripListItem,
+  createTripMember,
   deleteTripExpense,
+  deleteTripHousehold,
   deleteTripListItem,
+  deleteTripMember,
   getTripAccommodation,
   getTripHub,
+  getTripInvitePreview,
   joinTripByCode,
   listTripExpenses,
+  listTripHouseholds,
   listTripListItems,
   listTripsForUser,
   mintTripInvite,
@@ -22,6 +28,7 @@ import {
   TripValidationError,
   updateTrip,
   updateTripExpense,
+  updateTripHousehold,
   updateTripListItem,
   updateTripMember,
   upsertTripAccommodation,
@@ -32,6 +39,8 @@ const tripIdParams = z.object({ tripId: z.string().min(1) });
 const expenseIdParams = z.object({ tripId: z.string().min(1), expenseId: z.string().min(1) });
 const memberIdParams = z.object({ tripId: z.string().min(1), memberId: z.string().min(1) });
 const itemIdParams = z.object({ tripId: z.string().min(1), itemId: z.string().min(1) });
+const householdIdParams = z.object({ tripId: z.string().min(1), householdId: z.string().min(1) });
+const inviteCodeParams = z.object({ code: z.string().min(1) });
 
 const dateInput = z.coerce.date();
 const optionalDate = z.coerce.date().nullish();
@@ -55,11 +64,27 @@ const updateTripSchema = z.object({
 const joinSchema = z.object({
   code: z.string().min(1),
   displayName: z.string().min(1).max(100).nullish(),
+  claimMemberId: z.string().min(1).nullish(),
+});
+
+const createMemberSchema = z.object({
+  displayName: z.string().min(1).max(100),
+  tripHouseholdId: z.string().min(1).nullish(),
 });
 
 const memberPatchSchema = z.object({
   role: z.enum(['ORGANIZER', 'MEMBER']).optional(),
   displayName: z.string().min(1).max(100).optional(),
+  tripHouseholdId: z.string().min(1).nullish(),
+});
+
+const createHouseholdSchema = z.object({
+  name: z.string().min(1).max(100),
+  memberIds: z.array(z.string().min(1)).optional(),
+});
+
+const householdPatchSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
 });
 
 const tripCategory = z.enum([
@@ -170,6 +195,15 @@ export default async function tripRoutes(app: FastifyInstance) {
     }
   });
 
+  app.get('/trips/invite/:code', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { code } = inviteCodeParams.parse(request.params);
+    try {
+      return await getTripInvitePreview(app.prisma, code);
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
   app.post('/trips/join', { preHandler: [app.authenticate] }, async (request, reply) => {
     const body = joinSchema.parse(request.body ?? {});
     try {
@@ -177,13 +211,10 @@ export default async function tripRoutes(app: FastifyInstance) {
         where: { id: request.user.userId },
         select: { name: true },
       });
-      const member = await joinTripByCode(
-        app.prisma,
-        request.user.userId,
-        user.name,
-        body.code,
-        body.displayName,
-      );
+      const member = await joinTripByCode(app.prisma, request.user.userId, user.name, body.code, {
+        displayName: body.displayName,
+        claimMemberId: body.claimMemberId,
+      });
       return reply.code(201).send({
         memberId: member.id,
         tripId: member.tripId,
@@ -238,6 +269,27 @@ export default async function tripRoutes(app: FastifyInstance) {
     }
   });
 
+  app.post('/trips/:tripId/members', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId } = tripIdParams.parse(request.params);
+    const body = createMemberSchema.parse(request.body ?? {});
+    try {
+      const member = await createTripMember(app.prisma, tripId, request.user.userId, body);
+      return reply.code(201).send(member);
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.delete('/trips/:tripId/members/:memberId', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId, memberId } = memberIdParams.parse(request.params);
+    try {
+      await deleteTripMember(app.prisma, tripId, request.user.userId, memberId);
+      return reply.code(204).send();
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
   app.post('/trips/:tripId/invites', { preHandler: [app.authenticate] }, async (request, reply) => {
     const { tripId } = tripIdParams.parse(request.params);
     try {
@@ -253,6 +305,46 @@ export default async function tripRoutes(app: FastifyInstance) {
     const body = memberPatchSchema.parse(request.body ?? {});
     try {
       return await updateTripMember(app.prisma, tripId, request.user.userId, memberId, body);
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.get('/trips/:tripId/households', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId } = tripIdParams.parse(request.params);
+    try {
+      return await listTripHouseholds(app.prisma, tripId, request.user.userId);
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.post('/trips/:tripId/households', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId } = tripIdParams.parse(request.params);
+    const body = createHouseholdSchema.parse(request.body ?? {});
+    try {
+      const household = await createTripHousehold(app.prisma, tripId, request.user.userId, body);
+      return reply.code(201).send(household);
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.patch('/trips/:tripId/households/:householdId', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId, householdId } = householdIdParams.parse(request.params);
+    const body = householdPatchSchema.parse(request.body ?? {});
+    try {
+      return await updateTripHousehold(app.prisma, tripId, request.user.userId, householdId, body);
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.delete('/trips/:tripId/households/:householdId', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId, householdId } = householdIdParams.parse(request.params);
+    try {
+      await deleteTripHousehold(app.prisma, tripId, request.user.userId, householdId);
+      return reply.code(204).send();
     } catch (error) {
       return mapTripError(error, reply);
     }
@@ -394,8 +486,6 @@ export default async function tripRoutes(app: FastifyInstance) {
   app.get('/trips/:tripId/export/preview', { preHandler: [app.authenticate] }, async (request, reply) => {
     const { tripId } = tripIdParams.parse(request.params);
     try {
-      // Membership check happens inside preview via organizer check;
-      // also ensure the user is at least a member for 403 consistency.
       await getTripHub(app.prisma, tripId, request.user.userId, request.user.householdId);
       return await previewTripExport(
         app.prisma,

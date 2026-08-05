@@ -62,7 +62,16 @@ const memberSelect = {
   displayName: true,
   role: true,
   inviteStatus: true,
+  tripHouseholdId: true,
   createdAt: true,
+} as const;
+
+const householdSelect = {
+  id: true,
+  tripId: true,
+  name: true,
+  createdAt: true,
+  updatedAt: true,
 } as const;
 
 const expenseInclude = {
@@ -187,6 +196,7 @@ export async function getTripHub(db: Db, tripId: string, userId: string, househo
         select: memberSelect,
         orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
       },
+      households: { select: householdSelect, orderBy: { createdAt: 'asc' } },
       invites: { orderBy: { createdAt: 'desc' }, take: 1 },
       accommodation: true,
       exportBatches: {
@@ -215,6 +225,7 @@ export async function getTripHub(db: Db, tripId: string, userId: string, househo
     isGuestSession: false,
     balance: {
       perMember: balance.perMember,
+      perUnit: balance.perUnit,
       transfers: balance.transfers,
       settlements: balance.settlements,
     },
@@ -230,6 +241,7 @@ function serializeMember(m: {
   displayName: string;
   role: TripMemberRole;
   inviteStatus: string;
+  tripHouseholdId?: string | null;
   createdAt: Date;
 }) {
   return {
@@ -239,7 +251,24 @@ function serializeMember(m: {
     displayName: m.displayName,
     role: m.role,
     inviteStatus: m.inviteStatus,
+    tripHouseholdId: m.tripHouseholdId ?? null,
     createdAt: m.createdAt,
+  };
+}
+
+function serializeHousehold(h: {
+  id: string;
+  tripId: string;
+  name: string;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: h.id,
+    tripId: h.tripId,
+    name: h.name,
+    createdAt: h.createdAt,
+    updatedAt: h.updatedAt,
   };
 }
 
@@ -264,7 +293,15 @@ function serializeTrip(trip: {
     displayName: string;
     role: TripMemberRole;
     inviteStatus: string;
+    tripHouseholdId?: string | null;
     createdAt: Date;
+  }>;
+  households?: Array<{
+    id: string;
+    tripId: string;
+    name: string;
+    createdAt: Date;
+    updatedAt: Date;
   }>;
   invites: Array<{ id: string; code: string; expiresAt: Date | null; createdAt: Date }>;
   accommodation: {
@@ -295,6 +332,7 @@ function serializeTrip(trip: {
     createdAt: trip.createdAt,
     updatedAt: trip.updatedAt,
     members: trip.members.map(serializeMember),
+    households: (trip.households ?? []).map(serializeHousehold),
     inviteCode: trip.invites[0]?.code ?? null,
     accommodation: trip.accommodation ? serializeAccommodation(trip.accommodation) : null,
   };
@@ -363,6 +401,7 @@ export async function updateTrip(
     data,
     include: {
       members: { where: { inviteStatus: { not: 'DECLINED' } }, select: memberSelect },
+      households: { select: householdSelect, orderBy: { createdAt: 'asc' } },
       invites: { orderBy: { createdAt: 'desc' }, take: 1 },
       accommodation: true,
     },
@@ -387,12 +426,51 @@ export async function mintTripInvite(db: Db, tripId: string, userId: string) {
   return invite;
 }
 
+export async function getTripInvitePreview(db: Db, code: string) {
+  const invite = await db.tripInvite.findUnique({
+    where: { code: code.trim() },
+    include: {
+      trip: {
+        select: {
+          id: true,
+          name: true,
+          destination: true,
+          status: true,
+          startDate: true,
+          endDate: true,
+        },
+      },
+    },
+  });
+  if (!invite) throw new TripNotFoundError('Código de invitación inválido');
+  if (invite.expiresAt && invite.expiresAt < new Date()) {
+    throw new TripValidationError('La invitación expiró');
+  }
+
+  const unclaimedMembers = await db.tripMember.findMany({
+    where: {
+      tripId: invite.tripId,
+      inviteStatus: 'PENDING',
+      userId: null,
+    },
+    select: memberSelect,
+    orderBy: { createdAt: 'asc' },
+  });
+
+  return {
+    code: invite.code,
+    expiresAt: invite.expiresAt,
+    trip: invite.trip,
+    unclaimedMembers: unclaimedMembers.map(serializeMember),
+  };
+}
+
 export async function joinTripByCode(
   db: Db,
   userId: string,
   userName: string,
   code: string,
-  displayName?: string | null,
+  opts?: { displayName?: string | null; claimMemberId?: string | null },
 ) {
   const invite = await db.tripInvite.findUnique({
     where: { code: code.trim() },
@@ -415,7 +493,7 @@ export async function joinTripByCode(
         where: { id: existing.id },
         data: {
           inviteStatus: 'JOINED',
-          displayName: displayName?.trim() || existing.displayName || userName,
+          displayName: opts?.displayName?.trim() || existing.displayName || userName,
         },
         include: { trip: true },
       });
@@ -423,11 +501,34 @@ export async function joinTripByCode(
     return { ...existing, trip: invite.trip };
   }
 
+  if (opts?.claimMemberId) {
+    const slot = await db.tripMember.findFirst({
+      where: {
+        id: opts.claimMemberId,
+        tripId: invite.tripId,
+        inviteStatus: 'PENDING',
+        userId: null,
+      },
+    });
+    if (!slot) {
+      throw new TripValidationError('Ese lugar ya fue reclamado o no existe');
+    }
+    return db.tripMember.update({
+      where: { id: slot.id },
+      data: {
+        userId,
+        inviteStatus: 'JOINED',
+        displayName: opts.displayName?.trim() || slot.displayName || userName,
+      },
+      include: { trip: true },
+    });
+  }
+
   return db.tripMember.create({
     data: {
       tripId: invite.tripId,
       userId,
-      displayName: displayName?.trim() || userName,
+      displayName: opts?.displayName?.trim() || userName,
       role: 'MEMBER',
       inviteStatus: 'JOINED',
     },
@@ -435,25 +536,206 @@ export async function joinTripByCode(
   });
 }
 
+export async function createTripMember(
+  db: Db,
+  tripId: string,
+  actorUserId: string,
+  input: { displayName: string; tripHouseholdId?: string | null },
+) {
+  await requireTripOrganizer(db, tripId, actorUserId);
+  const trip = await db.trip.findUniqueOrThrow({ where: { id: tripId } });
+  assertTripWritable(trip.status);
+
+  const displayName = input.displayName.trim();
+  if (!displayName) throw new TripValidationError('El nombre es obligatorio');
+
+  let tripHouseholdId: string | null = input.tripHouseholdId ?? null;
+  if (tripHouseholdId) {
+    const household = await db.tripHousehold.findFirst({
+      where: { id: tripHouseholdId, tripId },
+    });
+    if (!household) throw new TripValidationError('Grupo no encontrado');
+  }
+
+  return db.tripMember.create({
+    data: {
+      tripId,
+      displayName,
+      userId: null,
+      role: 'MEMBER',
+      inviteStatus: 'PENDING',
+      tripHouseholdId,
+    },
+    select: memberSelect,
+  });
+}
+
+export async function deleteTripMember(
+  db: Db,
+  tripId: string,
+  actorUserId: string,
+  memberId: string,
+) {
+  await requireTripOrganizer(db, tripId, actorUserId);
+  const trip = await db.trip.findUniqueOrThrow({ where: { id: tripId } });
+  assertTripWritable(trip.status);
+
+  const member = await db.tripMember.findFirst({ where: { id: memberId, tripId } });
+  if (!member) throw new TripNotFoundError('Miembro no encontrado');
+  if (member.role === 'ORGANIZER') {
+    throw new TripValidationError('No se puede eliminar al organizador');
+  }
+  if (member.inviteStatus === 'JOINED' && member.userId) {
+    throw new TripValidationError('Solo se pueden eliminar viajeros sin reclamar');
+  }
+
+  const [paidCount, allocCount, settleCount, assignCount] = await Promise.all([
+    db.tripExpense.count({ where: { paidByMemberId: memberId } }),
+    db.tripExpenseAllocation.count({ where: { tripMemberId: memberId } }),
+    db.tripSettlement.count({
+      where: { OR: [{ fromMemberId: memberId }, { toMemberId: memberId }] },
+    }),
+    db.tripListItem.count({ where: { assigneeMemberId: memberId } }),
+  ]);
+  if (paidCount + allocCount + settleCount > 0) {
+    throw new TripValidationError('No se puede eliminar: tiene gastos o liquidaciones');
+  }
+  if (assignCount > 0) {
+    await db.tripListItem.updateMany({
+      where: { assigneeMemberId: memberId },
+      data: { assigneeMemberId: null },
+    });
+  }
+
+  await db.tripMember.delete({ where: { id: memberId } });
+}
+
 export async function updateTripMember(
   db: Db,
   tripId: string,
   actorUserId: string,
   memberId: string,
-  input: { role?: TripMemberRole; displayName?: string },
+  input: {
+    role?: TripMemberRole;
+    displayName?: string;
+    tripHouseholdId?: string | null;
+  },
 ) {
   await requireTripOrganizer(db, tripId, actorUserId);
   const member = await db.tripMember.findFirst({ where: { id: memberId, tripId } });
   if (!member) throw new TripNotFoundError('Miembro no encontrado');
+
+  if (input.tripHouseholdId !== undefined && input.tripHouseholdId !== null) {
+    const household = await db.tripHousehold.findFirst({
+      where: { id: input.tripHouseholdId, tripId },
+    });
+    if (!household) throw new TripValidationError('Grupo no encontrado');
+  }
 
   return db.tripMember.update({
     where: { id: memberId },
     data: {
       ...(input.role != null ? { role: input.role } : {}),
       ...(input.displayName != null ? { displayName: input.displayName.trim() } : {}),
+      ...(input.tripHouseholdId !== undefined ? { tripHouseholdId: input.tripHouseholdId } : {}),
     },
     select: memberSelect,
   });
+}
+
+export async function listTripHouseholds(db: Db, tripId: string, userId: string) {
+  await requireTripMember(db, tripId, userId);
+  const households = await db.tripHousehold.findMany({
+    where: { tripId },
+    select: householdSelect,
+    orderBy: { createdAt: 'asc' },
+  });
+  return households.map(serializeHousehold);
+}
+
+export async function createTripHousehold(
+  db: Db,
+  tripId: string,
+  userId: string,
+  input: { name: string; memberIds?: string[] },
+) {
+  await requireTripOrganizer(db, tripId, userId);
+  const trip = await db.trip.findUniqueOrThrow({ where: { id: tripId } });
+  assertTripWritable(trip.status);
+
+  const name = input.name.trim();
+  if (!name) throw new TripValidationError('El nombre del grupo es obligatorio');
+
+  const household = await db.tripHousehold.create({
+    data: { tripId, name },
+    select: householdSelect,
+  });
+
+  if (input.memberIds && input.memberIds.length > 0) {
+    const members = await db.tripMember.findMany({
+      where: { tripId, id: { in: input.memberIds }, inviteStatus: { not: 'DECLINED' } },
+      select: { id: true },
+    });
+    if (members.length !== input.memberIds.length) {
+      throw new TripValidationError('Algún viajero no pertenece al viaje');
+    }
+    await db.tripMember.updateMany({
+      where: { id: { in: members.map((m) => m.id) } },
+      data: { tripHouseholdId: household.id },
+    });
+  }
+
+  return serializeHousehold(household);
+}
+
+export async function updateTripHousehold(
+  db: Db,
+  tripId: string,
+  userId: string,
+  householdId: string,
+  input: { name?: string },
+) {
+  await requireTripOrganizer(db, tripId, userId);
+  const trip = await db.trip.findUniqueOrThrow({ where: { id: tripId } });
+  assertTripWritable(trip.status);
+
+  const existing = await db.tripHousehold.findFirst({ where: { id: householdId, tripId } });
+  if (!existing) throw new TripNotFoundError('Grupo no encontrado');
+
+  const data: { name?: string } = {};
+  if (input.name != null) {
+    const name = input.name.trim();
+    if (!name) throw new TripValidationError('El nombre del grupo es obligatorio');
+    data.name = name;
+  }
+
+  return serializeHousehold(
+    await db.tripHousehold.update({
+      where: { id: householdId },
+      data,
+      select: householdSelect,
+    }),
+  );
+}
+
+export async function deleteTripHousehold(
+  db: Db,
+  tripId: string,
+  userId: string,
+  householdId: string,
+) {
+  await requireTripOrganizer(db, tripId, userId);
+  const trip = await db.trip.findUniqueOrThrow({ where: { id: tripId } });
+  assertTripWritable(trip.status);
+
+  const existing = await db.tripHousehold.findFirst({ where: { id: householdId, tripId } });
+  if (!existing) throw new TripNotFoundError('Grupo no encontrado');
+
+  await db.tripMember.updateMany({
+    where: { tripHouseholdId: householdId },
+    data: { tripHouseholdId: null },
+  });
+  await db.tripHousehold.delete({ where: { id: householdId } });
 }
 
 export type TripExpenseInput = {
@@ -469,9 +751,10 @@ export type TripExpenseInput = {
   participantMemberIds?: string[] | null;
 };
 
-async function joinedMemberIds(db: Db, tripId: string): Promise<string[]> {
+/** Roster for expense splits: joined + pending (pre-created) travellers. */
+async function rosterMemberIds(db: Db, tripId: string): Promise<string[]> {
   const members = await db.tripMember.findMany({
-    where: { tripId, inviteStatus: 'JOINED' },
+    where: { tripId, inviteStatus: { in: ['JOINED', 'PENDING'] } },
     select: { id: true },
     orderBy: { id: 'asc' },
   });
@@ -577,7 +860,7 @@ export async function createTripExpense(db: Db, tripId: string, userId: string, 
   assertTripWritable(me.trip.status);
 
   if (!(input.amount > 0)) throw new TripValidationError('El monto debe ser mayor a 0');
-  const memberIds = await joinedMemberIds(db, tripId);
+  const memberIds = await rosterMemberIds(db, tripId);
   if (!memberIds.includes(input.paidByMemberId)) {
     throw new TripValidationError('El pagador no pertenece al viaje');
   }
@@ -620,7 +903,7 @@ export async function updateTripExpense(
   const existing = await db.tripExpense.findFirst({ where: { id: expenseId, tripId } });
   if (!existing) throw new TripNotFoundError('Gasto no encontrado');
 
-  const memberIds = await joinedMemberIds(db, tripId);
+  const memberIds = await rosterMemberIds(db, tripId);
   const merged: TripExpenseInput = {
     amount: input.amount ?? toNum(existing.amount),
     category: input.category ?? existing.category,
@@ -671,17 +954,34 @@ export interface TripBalanceMember {
   memberId: string;
   displayName: string;
   userId: string | null;
+  tripHouseholdId: string | null;
+  paid: number;
+  share: number;
+  balance: number;
+}
+
+export interface TripBalanceUnit {
+  unitId: string;
+  kind: 'HOUSEHOLD' | 'MEMBER';
+  displayName: string;
+  tripHouseholdId: string | null;
+  memberIds: string[];
+  /** Representative member used when recording TripSettlement rows. */
+  representativeMemberId: string;
   paid: number;
   share: number;
   balance: number;
 }
 
 export interface TripBalanceTransfer {
-  fromMemberId: string;
+  fromUnitId: string;
   fromName: string;
-  toMemberId: string;
+  toUnitId: string;
   toName: string;
   amount: number;
+  /** Representative members for persisting TripSettlement. */
+  fromMemberId: string;
+  toMemberId: string;
 }
 
 export interface TripSettlementRow {
@@ -697,15 +997,36 @@ export interface TripSettlementRow {
 
 export interface TripBalanceResult {
   perMember: TripBalanceMember[];
+  perUnit: TripBalanceUnit[];
   transfers: TripBalanceTransfer[];
   settlements: TripSettlementRow[];
 }
 
+function settlementUnitId(member: { id: string; tripHouseholdId: string | null }): string {
+  return member.tripHouseholdId ? `household:${member.tripHouseholdId}` : `member:${member.id}`;
+}
+
+function pickRepresentative(
+  members: Array<{ id: string; inviteStatus: string; createdAt: Date }>,
+): string {
+  const sorted = [...members].sort((a, b) => {
+    const aJoined = a.inviteStatus === 'JOINED' ? 0 : 1;
+    const bJoined = b.inviteStatus === 'JOINED' ? 0 : 1;
+    if (aJoined !== bJoined) return aJoined - bJoined;
+    return a.createdAt.getTime() - b.createdAt.getTime();
+  });
+  return sorted[0]!.id;
+}
+
 export async function computeTripBalance(db: Db, tripId: string): Promise<TripBalanceResult> {
-  const [members, expenses, settlementRows] = await Promise.all([
+  const [members, households, expenses, settlementRows] = await Promise.all([
     db.tripMember.findMany({
-      where: { tripId, inviteStatus: 'JOINED' },
+      where: { tripId, inviteStatus: { in: ['JOINED', 'PENDING'] } },
       select: memberSelect,
+    }),
+    db.tripHousehold.findMany({
+      where: { tripId },
+      select: householdSelect,
     }),
     db.tripExpense.findMany({
       where: { tripId },
@@ -721,8 +1042,7 @@ export async function computeTripBalance(db: Db, tripId: string): Promise<TripBa
     }),
   ]);
 
-  const names = new Map(members.map((m) => [m.id, m.displayName]));
-  const userIds = new Map(members.map((m) => [m.id, m.userId]));
+  const householdNames = new Map(households.map((h) => [h.id, h.name]));
   const paidBy = new Map<string, number>();
   const shareBy = new Map<string, number>();
 
@@ -739,47 +1059,100 @@ export async function computeTripBalance(db: Db, tripId: string): Promise<TripBa
     }
   }
 
-  const expensePerMember = members.map((m) => {
+  const expensePerMember: TripBalanceMember[] = members.map((m) => {
     const paid = round2(paidBy.get(m.id) ?? 0);
     const share = round2(shareBy.get(m.id) ?? 0);
     return {
       memberId: m.id,
       displayName: m.displayName,
       userId: m.userId,
+      tripHouseholdId: m.tripHouseholdId,
       paid,
       share,
       balance: round2(paid - share),
     };
   });
 
+  const unitMembers = new Map<string, typeof members>();
+  for (const m of members) {
+    const unitId = settlementUnitId(m);
+    const list = unitMembers.get(unitId) ?? [];
+    list.push(m);
+    unitMembers.set(unitId, list);
+  }
+
+  const units: TripBalanceUnit[] = [];
+  for (const [unitId, unitMemberList] of unitMembers) {
+    const first = unitMemberList[0]!;
+    const isHousehold = Boolean(first.tripHouseholdId);
+    const paid = round2(unitMemberList.reduce((s, m) => s + (paidBy.get(m.id) ?? 0), 0));
+    const share = round2(unitMemberList.reduce((s, m) => s + (shareBy.get(m.id) ?? 0), 0));
+    units.push({
+      unitId,
+      kind: isHousehold ? 'HOUSEHOLD' : 'MEMBER',
+      displayName: isHousehold
+        ? (householdNames.get(first.tripHouseholdId!) ?? 'Grupo')
+        : first.displayName,
+      tripHouseholdId: first.tripHouseholdId,
+      memberIds: unitMemberList.map((m) => m.id),
+      representativeMemberId: pickRepresentative(unitMemberList),
+      paid,
+      share,
+      balance: round2(paid - share),
+    });
+  }
+
+  const memberToUnit = new Map<string, string>();
+  for (const unit of units) {
+    for (const mid of unit.memberIds) memberToUnit.set(mid, unit.unitId);
+  }
+  for (const s of settlementRows) {
+    if (!memberToUnit.has(s.fromMemberId) && s.fromMember) {
+      memberToUnit.set(s.fromMemberId, settlementUnitId(s.fromMember));
+    }
+    if (!memberToUnit.has(s.toMemberId) && s.toMember) {
+      memberToUnit.set(s.toMemberId, settlementUnitId(s.toMember));
+    }
+  }
+
   const offsets = settlementRows.map((s) => ({
-    fromUserId: s.fromMemberId,
-    toUserId: s.toMemberId,
+    fromUserId: memberToUnit.get(s.fromMemberId) ?? settlementUnitId(s.fromMember),
+    toUserId: memberToUnit.get(s.toMemberId) ?? settlementUnitId(s.toMember),
     amount: toNum(s.amount),
   }));
 
   const adjusted = applySettlementOffsets(
-    expensePerMember.map((u) => ({ userId: u.memberId, balance: u.balance })),
+    units.map((u) => ({ userId: u.unitId, balance: u.balance })),
     offsets,
   );
-  const balanceBy = new Map(adjusted.map((b) => [b.userId, b.balance]));
+  const balanceByUnit = new Map(adjusted.map((b) => [b.userId, b.balance]));
 
-  const perMember = expensePerMember
+  const perUnit = units
     .map((u) => ({
       ...u,
-      balance: round2(balanceBy.get(u.memberId) ?? u.balance),
+      balance: round2(balanceByUnit.get(u.unitId) ?? u.balance),
     }))
     .sort((a, b) => b.balance - a.balance);
 
+  const unitById = new Map(perUnit.map((u) => [u.unitId, u]));
+
   const transfers = computeSettleTransfers(
-    perMember.map((u) => ({ userId: u.memberId, balance: u.balance })),
-  ).map((t) => ({
-    fromMemberId: t.fromUserId,
-    fromName: names.get(t.fromUserId) ?? '',
-    toMemberId: t.toUserId,
-    toName: names.get(t.toUserId) ?? '',
-    amount: t.amount,
-  }));
+    perUnit.map((u) => ({ userId: u.unitId, balance: u.balance })),
+  ).map((t) => {
+    const from = unitById.get(t.fromUserId)!;
+    const to = unitById.get(t.toUserId)!;
+    return {
+      fromUnitId: from.unitId,
+      fromName: from.displayName,
+      toUnitId: to.unitId,
+      toName: to.displayName,
+      amount: t.amount,
+      fromMemberId: from.representativeMemberId,
+      toMemberId: to.representativeMemberId,
+    };
+  });
+
+  const perMember = expensePerMember.sort((a, b) => b.balance - a.balance);
 
   const settlements: TripSettlementRow[] = settlementRows.map((s) => ({
     id: s.id,
@@ -792,10 +1165,7 @@ export async function computeTripBalance(db: Db, tripId: string): Promise<TripBa
     settledAt: s.settledAt,
   }));
 
-  // Keep userIds map referenced for type safety / future export
-  void userIds;
-
-  return { perMember, transfers, settlements };
+  return { perMember, perUnit, transfers, settlements };
 }
 
 export async function computeCategoryTotals(db: Db, tripId: string) {
