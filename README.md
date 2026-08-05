@@ -82,7 +82,7 @@ El script crea `api`, `web` y `promotions-sync` (si no existen), configura varia
 **api**
 - `DATABASE_URL` → `${{Postgres.DATABASE_URL}}`
 - `NODE_ENV` → `production` (habilita el guard de `JWT_SECRET`)
-- `JWT_SECRET` → **variable persistente en Railway** (literal fijo). Generarla una sola vez y no rotarla: cada cambio invalida todas las sesiones. **Nunca** uses `${{ secret() }}` — Railway puede regenerarlo al re-aplicar variables y eso desloguea a todos en cada deploy. El API falla al arrancar si falta o es el valor de desarrollo.
+- `JWT_SECRET` → **variable persistente en Railway** (literal fijo). Generarla una sola vez y no rotarla: cada cambio invalida todas las sesiones. **Nunca** uses `${{ secret() }}` — Railway puede regenerarlo al re-aplicar variables y eso desloguea a todos en cada deploy. El API falla al arrancar si falta, es el valor de desarrollo, o parece un template `secret()`. Para rotar sin mass-logout: poné el valor actual en `JWT_SECRET_PREVIOUS`, el nuevo en `JWT_SECRET`, redeploy, y borrá `JWT_SECRET_PREVIOUS` después.
 - `CORS_ORIGIN` → `https://${{web.RAILWAY_PUBLIC_DOMAIN}}`
 - `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` → dominio público de `web` (passkeys / Face ID)
 - `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` → Web Push (`npx web-push generate-vapid-keys`)

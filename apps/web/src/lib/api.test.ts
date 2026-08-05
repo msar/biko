@@ -17,6 +17,7 @@ function installMemoryStorage() {
     key: (i: number) => [...store.keys()][i] ?? null,
   };
   vi.stubGlobal('localStorage', storage);
+  vi.stubGlobal('sessionStorage', storage);
   return storage;
 }
 
@@ -28,6 +29,7 @@ describe('api soft 401 handling', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.resetModules();
+    vi.useRealTimers();
   });
 
   it('does not clear token on login 401', async () => {
@@ -44,7 +46,7 @@ describe('api soft 401 handling', () => {
     expect(getToken()).toBe('existing-token');
   });
 
-  it('clears token when /auth/me returns 401 twice (after retry)', async () => {
+  it('clears token when /auth/me stays 401 across confirm attempts', async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -59,11 +61,11 @@ describe('api soft 401 handling', () => {
     await pending;
     expect(getToken()).toBeNull();
     expect(cleared).toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
+    // Initial request + confirm attempts (4 with /auth/me extra patience)
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('keeps token when /auth/me 401 then succeeds on retry', async () => {
+  it('keeps token and returns data when /auth/me 401 then succeeds on confirm', async () => {
     vi.useFakeTimers();
     let calls = 0;
     const fetchMock = vi.fn(async () => {
@@ -85,16 +87,22 @@ describe('api soft 401 handling', () => {
     await expect(pending).resolves.toEqual({ id: 'u1' });
     expect(getToken()).toBe('flaky-ok');
     expect(cleared).not.toHaveBeenCalled();
-    vi.useRealTimers();
   });
 
-  it('revalidates /auth/me before clearing on other 401s', async () => {
+  it('revalidates /auth/me with retries before clearing on other 401s', async () => {
+    vi.useFakeTimers();
+    let meCalls = 0;
     const fetchMock = vi.fn(async (input: RequestInfo) => {
       const url = String(input);
       if (url.endsWith('/expenses')) {
         return new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401 });
       }
       if (url.endsWith('/auth/me')) {
+        meCalls += 1;
+        // Fail first confirm probe, succeed on next — must not clear.
+        if (meCalls === 1) {
+          return new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401 });
+        }
         return new Response(JSON.stringify({ id: 'u1' }), { status: 200 });
       }
       return new Response('{}', { status: 500 });
@@ -106,9 +114,54 @@ describe('api soft 401 handling', () => {
     const cleared = vi.fn();
     onUnauthorized(cleared);
 
-    await expect(api('/expenses')).rejects.toThrow();
+    let rejected: unknown;
+    const pending = api('/expenses').then(
+      () => {
+        throw new Error('expected rejection');
+      },
+      (err) => {
+        rejected = err;
+      },
+    );
+    await vi.runAllTimersAsync();
+    await pending;
+    // After confirm succeeds, original /expenses is retried — still 401, but session kept.
+    expect(rejected).toBeInstanceOf(Error);
     expect(getToken()).toBe('maybe-ok');
     expect(cleared).not.toHaveBeenCalled();
-    expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/auth/me'))).toBe(true);
+    expect(meCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps token when session confirm hits a network error', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(JSON.stringify({ error: 'No autorizado' }), { status: 401 });
+      }
+      throw new TypeError('Failed to fetch');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { api, getToken, setToken, onUnauthorized } = await import('./api');
+    setToken('net-blip');
+    const cleared = vi.fn();
+    onUnauthorized(cleared);
+
+    let rejected: unknown;
+    const pending = api('/expenses').then(
+      () => {
+        throw new Error('expected rejection');
+      },
+      (err) => {
+        rejected = err;
+      },
+    );
+    await vi.runAllTimersAsync();
+    await pending;
+    expect(rejected).toBeInstanceOf(Error);
+    expect(getToken()).toBe('net-blip');
+    expect(cleared).not.toHaveBeenCalled();
   });
 });

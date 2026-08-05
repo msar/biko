@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { DEV_JWT_FALLBACK, requiresPersistentJwtSecret, resolveJwtSecret } from './jwt-secret';
+import {
+  DEV_JWT_FALLBACK,
+  looksLikeRailwaySecretTemplate,
+  requiresPersistentJwtSecret,
+  resolveJwtSecret,
+  resolveJwtSecrets,
+} from './jwt-secret';
 
 describe('resolveJwtSecret', () => {
   it('uses dev fallback when unset outside production', () => {
@@ -30,5 +36,26 @@ describe('resolveJwtSecret', () => {
       JWT_SECRET: 'stable-production-secret-value',
     } as NodeJS.ProcessEnv;
     expect(resolveJwtSecret(env)).toBe('stable-production-secret-value');
+  });
+
+  it('rejects unresolved Railway secret() templates', () => {
+    const env = {
+      NODE_ENV: 'production',
+      JWT_SECRET: '${{ secret(32, "abcdefghijklmnopqrstuvwxyz012345") }}',
+    } as NodeJS.ProcessEnv;
+    expect(looksLikeRailwaySecretTemplate(env.JWT_SECRET!)).toBe(true);
+    expect(() => resolveJwtSecret(env)).toThrow(/secret\(\)/);
+  });
+
+  it('exposes JWT_SECRET_PREVIOUS for rotation', () => {
+    const env = {
+      NODE_ENV: 'production',
+      JWT_SECRET: 'new-stable-secret-value-here',
+      JWT_SECRET_PREVIOUS: 'old-stable-secret-value-here',
+    } as NodeJS.ProcessEnv;
+    expect(resolveJwtSecrets(env)).toEqual({
+      primary: 'new-stable-secret-value-here',
+      previous: 'old-stable-secret-value-here',
+    });
   });
 });

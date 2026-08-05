@@ -9,7 +9,7 @@ import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider } from './lib/auth';
-import { ApiError } from './lib/api';
+import { ApiError, markServiceWorkerReload } from './lib/api';
 import './styles.css';
 
 // Reload once when a waiting service worker takes control (after deploy).
@@ -19,6 +19,8 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (swRefreshing) return;
     swRefreshing = true;
+    // Next /auth/me uses a longer confirm window so an API roll mid-reload doesn't wipe the session.
+    markServiceWorkerReload();
     window.location.reload();
   });
 }

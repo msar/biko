@@ -1,8 +1,8 @@
 import { isSuperUser } from '@biko/shared';
-import jwt from '@fastify/jwt';
+import fjwt from '@fastify/jwt';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
-import { resolveJwtSecret } from './jwt-secret';
+import { resolveJwtSecrets } from './jwt-secret';
 
 export interface JwtUser {
   userId: string;
@@ -25,17 +25,42 @@ declare module 'fastify' {
 }
 
 export default fp(async (app: FastifyInstance) => {
-  await app.register(jwt, {
-    secret: resolveJwtSecret(),
+  const { primary, previous } = resolveJwtSecrets();
+
+  await app.register(fjwt, {
+    secret: primary,
     sign: { expiresIn: '180d' },
   });
+
+  // Optional previous secret so rotating JWT_SECRET does not mass-logout clients.
+  if (previous) {
+    await app.register(fjwt, {
+      namespace: 'prev',
+      secret: previous,
+    });
+  }
 
   app.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       await request.jwtVerify();
+      return;
     } catch {
-      return reply.code(401).send({ error: 'No autorizado' });
+      // try previous signer below
     }
+
+    if (previous) {
+      try {
+        // namespace "prev" → request.prevJwtVerify (see @fastify/jwt)
+        await (
+          request as FastifyRequest & { prevJwtVerify: () => Promise<unknown> }
+        ).prevJwtVerify();
+        return;
+      } catch {
+        // both secrets rejected the token
+      }
+    }
+
+    return reply.code(401).send({ error: 'No autorizado', code: 'AUTH_INVALID' });
   });
 
   app.decorate('requireSuperUser', async (request: FastifyRequest, reply: FastifyReply) => {

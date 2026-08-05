@@ -13,13 +13,28 @@ export function requiresPersistentJwtSecret(
   return false;
 }
 
+/** Unresolved Railway `${{ secret() }}` templates must never be used as the signing key. */
+export function looksLikeRailwaySecretTemplate(value: string): boolean {
+  return /\$\{\{\s*secret\s*\(/i.test(value) || /secret\s*\(\s*\d+/i.test(value);
+}
+
+export interface ResolvedJwtSecrets {
+  /** Used to sign new tokens and tried first on verify. */
+  primary: string;
+  /** Optional previous secret for zero-downtime rotation. */
+  previous: string | null;
+}
+
 /**
  * Resolve the signing secret for session JWTs.
  * Missing/default secrets in production log every user out on the next boot —
  * fail loudly instead of silently minting/verifying with a fallback.
+ *
+ * Set JWT_SECRET_PREVIOUS temporarily when rotating so old tokens still verify.
  */
-export function resolveJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
+export function resolveJwtSecrets(env: NodeJS.ProcessEnv = process.env): ResolvedJwtSecrets {
   const secret = env.JWT_SECRET?.trim();
+  const previous = env.JWT_SECRET_PREVIOUS?.trim() || null;
 
   if (requiresPersistentJwtSecret(env)) {
     if (!secret || secret === DEV_JWT_FALLBACK) {
@@ -29,7 +44,23 @@ export function resolveJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
           'Set a stable Railway variable (plain string) and never use ${{ secret() }}.',
       );
     }
+    if (looksLikeRailwaySecretTemplate(secret)) {
+      throw new Error(
+        'JWT_SECRET looks like a Railway ${{ secret() }} template. ' +
+          'Replace it with a fixed literal (openssl rand -base64 48). ' +
+          'Template secrets can regenerate and log everyone out.',
+      );
+    }
   }
 
-  return secret || DEV_JWT_FALLBACK;
+  if (previous && previous === secret) {
+    return { primary: secret || DEV_JWT_FALLBACK, previous: null };
+  }
+
+  return { primary: secret || DEV_JWT_FALLBACK, previous };
+}
+
+/** @deprecated Prefer resolveJwtSecrets — kept for tests and simple callers. */
+export function resolveJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
+  return resolveJwtSecrets(env).primary;
 }

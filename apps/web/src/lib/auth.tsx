@@ -11,9 +11,11 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from '@simplewebauthn/browser';
-import { ApiError, api, getToken, onUnauthorized, setToken } from './api';
+import { api, getToken, onUnauthorized, setToken } from './api';
 import {
+  AUTH_TOKEN_KEY,
   clearAuthStorage,
+  readAuthToken,
   readCachedAuthUser,
   writeCachedAuthUser,
 } from './auth-storage';
@@ -55,24 +57,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     onUnauthorized(() => clearSession(setUser));
   }, []);
 
+  // Cross-tab: another tab logged out (or in) — mirror without a full reload.
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
-      writeCachedAuthUser(null);
-      setUser(null);
-      setLoading(false);
-      return;
-    }
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== AUTH_TOKEN_KEY) return;
+      if (!e.newValue) {
+        setUser(null);
+        writeCachedAuthUser(null);
+        return;
+      }
+      // Token replaced in another tab — adopt cached user or wait for next /auth/me.
+      const cached = readCachedUser();
+      if (cached) setUser(cached);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
-    // Offline: usar usuario cacheado sin revalidar (PWA).
-    if (!navigator.onLine) {
-      setUser(readCachedUser());
-      setLoading(false);
-      return;
-    }
+  useEffect(() => {
+    let cancelled = false;
 
-    api<{ id: string; name: string; email: string; isSuperUser: boolean; household: { id: string } }>('/auth/me')
-      .then((me) => {
+    const bootstrap = async () => {
+      const token = getToken() ?? readAuthToken();
+      if (!token) {
+        writeCachedAuthUser(null);
+        if (!cancelled) {
+          setUser(null);
+          setLoading(false);
+        }
+        return;
+      }
+
+      // Offline: usar usuario cacheado sin revalidar (PWA).
+      if (!navigator.onLine) {
+        if (!cancelled) {
+          setUser(readCachedUser());
+          setLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const me = await api<{
+          id: string;
+          name: string;
+          email: string;
+          isSuperUser: boolean;
+          household: { id: string };
+        }>('/auth/me');
+        if (cancelled) return;
         const session = {
           id: me.id,
           name: me.name,
@@ -82,18 +115,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
         setUser(session);
         writeCachedAuthUser(session);
-      })
-      .catch((err) => {
-        // Solo cerrar sesión si el token es inválido/expiró (401). Ante errores
-        // transitorios (offline, timeout, 5xx) mantener la sesión cacheada.
-        // api() already retries /auth/me once before clearing on 401.
-        if (err instanceof ApiError && err.status === 401) {
-          clearSession(setUser);
+      } catch {
+        if (cancelled) return;
+        // api() only clears the token after confirmed /auth/me 401s.
+        if (!readAuthToken()) {
+          setUser(null);
         } else {
           setUser(readCachedUser());
         }
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const applySession = (token: string, sessionUser: SessionUser) => {
