@@ -262,6 +262,14 @@ body {
 }
 
 /* --- dashboard --- */
+.month-nav-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .month-nav {
   display: inline-flex;
   align-items: center;
@@ -302,46 +310,30 @@ body {
   background: #e0ddd4;
 }
 
-.quick-actions {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 8px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-  padding: 2px 0 4px;
-  margin: 0 -2px;
-}
-
-.quick-actions::-webkit-scrollbar {
-  display: none;
-}
-
-.action-chip {
-  flex: 0 0 auto;
+.month-nav-long-term {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-radius: 999px;
+  gap: 4px;
+  height: 42px;
+  padding: 0 12px;
+  border-radius: 12px;
   background: var(--card);
   border: 1px solid var(--border);
   color: var(--brand-navy);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   font-weight: 600;
   text-decoration: none;
   white-space: nowrap;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
 }
 
-.action-chip:hover {
-  border-color: rgba(0, 168, 181, 0.35);
-  color: var(--brand-teal-dark);
-}
-
-.action-chip-arrow {
+.month-nav-long-term span {
   color: var(--brand-teal);
   font-weight: 700;
+}
+
+.month-nav-long-term:hover {
+  border-color: rgba(0, 168, 181, 0.35);
+  color: var(--brand-teal-dark);
 }
 
 .bar-row {

@@ -2,7 +2,6 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import MonthNav from '../components/MonthNav';
-import QuickActions from '../components/QuickActions';
 import ScopeTabs from '../components/ScopeTabs';
 import { api, fmtARS, fmtDate } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -106,8 +105,6 @@ export default function DashboardPage() {
           onNext={() => setMonth(shiftMonth(month, 1))}
         />
       </header>
-
-      <QuickActions />
 
       {pendingOcc && pendingOcc.length > 0 && (
         <section className="card">
