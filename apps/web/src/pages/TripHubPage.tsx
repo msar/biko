@@ -291,8 +291,9 @@ function ResumenTab({
               <div key={`${t.fromUnitId}-${t.toUnitId}`} className="settle-transfer">
                 <span>
                   <strong>{t.fromName}</strong> → {t.toName}
+                  {' · '}
+                  <strong>{fmtMoney(t.amount)}</strong>
                 </span>
-                <strong>{fmtMoney(t.amount)}</strong>
               </div>
             ))}
           </div>
