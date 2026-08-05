@@ -3,6 +3,7 @@ import {
   groupCategories,
   groupCategoriesByMonth,
   resolveCategoryGroupId,
+  resolveDashboardCategory,
 } from './category-groups';
 
 describe('resolveCategoryGroupId', () => {
@@ -46,6 +47,26 @@ describe('resolveCategoryGroupId', () => {
     expect(resolveCategoryGroupId('Restaurantes viaje')).toBe('viajes');
     expect(resolveCategoryGroupId('Actividades')).toBe('viajes');
     expect(resolveCategoryGroupId('Transporte')).toBe('transporte');
+  });
+  it('maps Deudas to deudas group', () => {
+    expect(resolveCategoryGroupId('Deudas')).toBe('deudas');
+  });
+});
+
+describe('resolveDashboardCategory', () => {
+  it('keeps original category when there is no contact debt', () => {
+    const cat = { categoryId: 'c1', name: 'Supermercado', icon: '🛒', color: '#4f8a5b' };
+    expect(resolveDashboardCategory(cat, false)).toEqual(cat);
+  });
+
+  it('remaps contact-debt purchases to Deudas', () => {
+    const cat = { categoryId: 'c1', name: 'Restaurante', icon: '🍽️', color: '#b5567a' };
+    expect(resolveDashboardCategory(cat, true)).toEqual({
+      categoryId: '__debt__',
+      name: 'Deudas',
+      icon: '🤝',
+      color: '#a67c52',
+    });
   });
 });
 

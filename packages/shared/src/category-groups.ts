@@ -125,6 +125,13 @@ export const CATEGORY_GROUPS: CategoryGroupDef[] = [
     categoryNames: ['Impuestos'],
   },
   {
+    id: 'deudas',
+    name: 'Deudas',
+    icon: '🤝',
+    color: '#a67c52',
+    categoryNames: ['Deudas'],
+  },
+  {
     id: 'otros',
     name: 'Otros',
     icon: '📦',
@@ -132,6 +139,35 @@ export const CATEGORY_GROUPS: CategoryGroupDef[] = [
     categoryNames: ['Otros'],
   },
 ];
+
+/** Synthetic category used on dashboards for purchases linked to a contact debt. */
+export const DASHBOARD_DEBT_CATEGORY = {
+  categoryId: '__debt__',
+  name: 'Deudas',
+  icon: '🤝',
+  color: '#a67c52',
+} as const;
+
+export type DashboardCategoryRef = {
+  categoryId: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+};
+
+/** Remap contact-debt purchases into the Deudas bucket for spend breakdowns. */
+export function resolveDashboardCategory(
+  category: DashboardCategoryRef,
+  hasContactDebt: boolean,
+): DashboardCategoryRef {
+  if (!hasContactDebt) return category;
+  return {
+    categoryId: DASHBOARD_DEBT_CATEGORY.categoryId,
+    name: DASHBOARD_DEBT_CATEGORY.name,
+    icon: DASHBOARD_DEBT_CATEGORY.icon,
+    color: DASHBOARD_DEBT_CATEGORY.color,
+  };
+}
 
 const nameToGroupId = new Map<string, string>();
 for (const group of CATEGORY_GROUPS) {

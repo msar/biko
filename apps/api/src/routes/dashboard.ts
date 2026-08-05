@@ -4,6 +4,7 @@ import {
   computeSettleTransfers,
   groupCategories,
   groupCategoriesByMonth,
+  resolveDashboardCategory,
 } from '@biko/shared';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -193,17 +194,26 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       const amount = inst.amount.toNumber() * rate;
       const netAmount = purchase.netAmount.toNumber();
       const isHousehold = purchase.scope === 'HOUSEHOLD';
+      const hasContactDebt = purchase.debt != null;
+      const cat = resolveDashboardCategory(
+        {
+          categoryId: purchase.category.id,
+          name: purchase.category.name,
+          icon: purchase.category.icon,
+          color: purchase.category.color,
+        },
+        hasContactDebt,
+      );
 
-      const cat = purchase.category;
-      const catEntry = byCategory.get(cat.id) ?? {
-        categoryId: cat.id,
+      const catEntry = byCategory.get(cat.categoryId) ?? {
+        categoryId: cat.categoryId,
         name: cat.name,
         icon: cat.icon,
         color: cat.color,
         total: 0,
       };
       catEntry.total += amount;
-      byCategory.set(cat.id, catEntry);
+      byCategory.set(cat.categoryId, catEntry);
 
       const pm = purchase.paymentMethod;
       const pmName = pm.nickname ?? pm.definition.name;
@@ -215,25 +225,25 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         categories: new Map(),
       };
       pmEntry.total += amount;
-      const pmCat = pmEntry.categories.get(cat.id) ?? {
-        categoryId: cat.id,
+      const pmCat = pmEntry.categories.get(cat.categoryId) ?? {
+        categoryId: cat.categoryId,
         name: cat.name,
         icon: cat.icon,
         color: cat.color,
         total: 0,
       };
       pmCat.total += amount;
-      pmEntry.categories.set(cat.id, pmCat);
+      pmEntry.categories.set(cat.categoryId, pmCat);
       byPaymentMethod.set(pm.id, pmEntry);
 
-      // Contact-linked debts are card cash-flow, not household settle-up.
-      const hasContactDebt = purchase.debt != null;
-
+      // Contact-linked debts are card cash-flow, not household settle-up / por persona.
       if (includeSettle && isHousehold && !hasContactDebt) {
         const payer = resolvePurchasePayer(purchase);
         memberNames.set(payer.id, payer.name);
         paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + amount);
       }
+
+      if (hasContactDebt) continue;
 
       for (const allocation of purchase.allocations) {
         const shareNative = allocationShareForInstallment(
@@ -251,7 +261,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         userEntry.total += share;
         byUser.set(allocation.userId, userEntry);
 
-        if (includeSettle && isHousehold && !hasContactDebt) {
+        if (includeSettle && isHousehold) {
           memberNames.set(allocation.userId, allocation.user.name);
           shareByUser.set(allocation.userId, (shareByUser.get(allocation.userId) ?? 0) + share);
         }
@@ -326,6 +336,15 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       installments: installments.map((i) => {
         const rate = rateToArs(i.purchase.exchangeRateToArs);
         const debt = i.purchase.debt;
+        const cat = resolveDashboardCategory(
+          {
+            categoryId: i.purchase.category.id,
+            name: i.purchase.category.name,
+            icon: i.purchase.category.icon,
+            color: i.purchase.category.color,
+          },
+          debt != null,
+        );
         return {
           id: i.id,
           purchaseId: i.purchaseId,
@@ -335,8 +354,8 @@ export default async function dashboardRoutes(app: FastifyInstance) {
           totalInstallments: i.purchase.installmentsCount,
           paid: i.paid,
           store: i.purchase.store,
-          categoryId: i.purchase.categoryId,
-          category: i.purchase.category.name,
+          categoryId: cat.categoryId,
+          category: cat.name,
           paymentMethodId: i.purchase.paymentMethodId,
           userName: i.purchase.user.name,
           scope: i.purchase.scope,
