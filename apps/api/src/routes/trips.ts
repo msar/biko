@@ -58,8 +58,28 @@ const itemIdParams = z.object({ tripId: z.string().min(1), itemId: z.string().mi
 const householdIdParams = z.object({ tripId: z.string().min(1), householdId: z.string().min(1) });
 const inviteCodeParams = z.object({ code: z.string().min(1) });
 
-const dateInput = z.coerce.date();
-const optionalDate = z.coerce.date().nullish();
+/** Calendar dates as YYYY-MM-DD at noon UTC — avoids off-by-one in AR/timezone. */
+function parseCalendarDate(value: string | Date): Date {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) throw new Error('Fecha inválida');
+    return new Date(
+      Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate(), 12, 0, 0),
+    );
+  }
+  const m = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) throw new Error('Fecha inválida');
+  return new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00.000Z`);
+}
+
+const dateInput = z.union([z.string().min(1), z.date()]).transform(parseCalendarDate);
+const optionalDate = z
+  .union([z.string(), z.date(), z.null()])
+  .nullish()
+  .transform((v) => {
+    if (v === undefined) return undefined;
+    if (v === null || v === '') return null;
+    return parseCalendarDate(v);
+  });
 
 const createTripSchema = z.object({
   name: z.string().min(1).max(200),

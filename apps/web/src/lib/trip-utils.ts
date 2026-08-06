@@ -38,11 +38,14 @@ export function tripInviteUrl(code: string): string {
   return `${origin}/viajes/invitar/${code}`;
 }
 
+/** YYYY-MM-DD for `<input type="date">` — uses calendar prefix to avoid TZ shift. */
 export function dateInputValue(iso: string | null | undefined): string {
   if (!iso) return '';
+  const m = String(iso).match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1]!;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
 /** Normalize stored HH:mm (or HH:mm:ss from browsers) for `<input type="time">`. */

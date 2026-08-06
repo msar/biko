@@ -187,8 +187,14 @@ export function fmtMoneyExact(amount: number, currency: 'ARS' | 'USD' = 'ARS'): 
 export function toArsDisplay(amount: number, exchangeRateToArs = 1): number {
   return Math.round(amount * exchangeRateToArs * 100) / 100;
 }
+/** Format a calendar date without timezone day-shift (prefers YYYY-MM-DD prefix). */
 export function fmtDate(date: string | Date): string {
-  return new Date(date).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
+  const raw = typeof date === 'string' ? date : date.toISOString();
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const d = m
+    ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12)
+    : new Date(date);
+  return d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
 }
 
 export const DAY_LABEL: Record<string, string> = {

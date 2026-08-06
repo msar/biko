@@ -9,8 +9,13 @@ import { TRIP_STATUS_LABEL } from '../lib/trip-utils';
 
 function fmtRange(start: string | null, end: string | null): string | null {
   if (!start && !end) return null;
-  const fmt = (iso: string) =>
-    new Date(iso).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
+  const fmt = (iso: string) => {
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const d = m
+      ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12)
+      : new Date(iso);
+    return d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
+  };
   if (start && end) return `${fmt(start)} – ${fmt(end)}`;
   if (start) return `Desde ${fmt(start)}`;
   return `Hasta ${fmt(end!)}`;

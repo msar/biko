@@ -471,6 +471,12 @@ export async function updateTrip(
   if (input.endDate !== undefined) data.endDate = input.endDate;
   if (input.status != null) data.status = input.status;
 
+  const nextStart = input.startDate !== undefined ? input.startDate : me.trip.startDate;
+  const nextEnd = input.endDate !== undefined ? input.endDate : me.trip.endDate;
+  if (nextStart && nextEnd && nextEnd.getTime() < nextStart.getTime()) {
+    throw new TripValidationError('La fecha de fin debe ser posterior al inicio');
+  }
+
   return db.trip.update({
     where: { id: tripId },
     data,

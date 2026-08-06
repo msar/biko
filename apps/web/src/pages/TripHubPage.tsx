@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
 import PieChart from '../components/charts/PieChart';
+import { WeatherIcon } from '../components/WeatherIcon';
 import { Button, IconButton, Chip, ListItem } from '../components/ui';
 import { ApiError, api, fmtDate, fmtMoney } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -384,6 +385,14 @@ function forecastErrorMessage(error: unknown): string {
   return 'No se pudo cargar el pronóstico';
 }
 
+function weekdayShort(isoDate: string): string {
+  const m = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const d = m
+    ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12)
+    : new Date(isoDate);
+  return d.toLocaleDateString('es-AR', { weekday: 'short' }).replace(/\.$/, '');
+}
+
 function TripForecastCard({ trip }: { trip: TripHub }) {
   const canFetch = Boolean(trip.destination?.trim() && trip.startDate && trip.endDate);
   const forecastQuery = useTripForecast(trip);
@@ -423,16 +432,30 @@ function TripForecastCard({ trip }: { trip: TripHub }) {
 
   const forecast = forecastQuery.data;
   const place = [forecast.location.name, forecast.location.country].filter(Boolean).join(', ');
+  const summaryCode =
+    forecast.daily.find((d) => d.weatherCode != null)?.weatherCode ??
+    forecast.daily[0]?.weatherCode ??
+    0;
 
   return (
-    <section className="card">
-      <div className="row-between">
-        <h2 style={{ margin: 0 }}>Clima</h2>
-        <span className="hint">{place}</span>
+    <section className="card trip-forecast-card">
+      <div className="row-between" style={{ alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', minWidth: 0 }}>
+          <WeatherIcon code={summaryCode} size={48} title={forecast.summary.label} />
+          <div style={{ minWidth: 0 }}>
+            <h2 style={{ margin: 0 }}>Clima</h2>
+            <p className="hint" style={{ margin: '2px 0 0' }}>
+              {place}
+            </p>
+          </div>
+        </div>
+        <p className="trip-forecast-summary-temps">
+          {Math.round(forecast.summary.tMax)}°{' '}
+          <span className="hint">{Math.round(forecast.summary.tMin)}°</span>
+        </p>
       </div>
       <p style={{ margin: '8px 0 0' }}>
-        {forecast.summary.label} · {Math.round(forecast.summary.tMin)}° /{' '}
-        {Math.round(forecast.summary.tMax)}°
+        {forecast.summary.label}
         {forecast.summary.rainyDays > 0
           ? ` · ${forecast.summary.rainyDays} día${forecast.summary.rainyDays === 1 ? '' : 's'} con lluvia`
           : ''}
@@ -442,14 +465,159 @@ function TripForecastCard({ trip }: { trip: TripHub }) {
           Pronóstico parcial (hasta 16 días desde hoy)
         </p>
       )}
-      <div className="chip-row" style={{ marginTop: 12 }}>
-        {forecast.daily.map((day) => (
-          <Chip key={day.date}>
-            {fmtDate(day.date)} · {Math.round(day.tMin)}°/{Math.round(day.tMax)}°
-            {day.precipProb > 40 ? ` · ${Math.round(day.precipProb)}%` : ''}
-          </Chip>
+      <div className="trip-forecast-strip" role="list">
+        {forecast.daily.map((day, index) => (
+          <div
+            key={day.date}
+            className={`trip-forecast-day${index === 0 ? ' is-active' : ''}`}
+            role="listitem"
+          >
+            <span className="trip-forecast-weekday">{weekdayShort(day.date)}</span>
+            <WeatherIcon code={day.weatherCode} size={36} />
+            <span className="trip-forecast-temps">
+              {Math.round(day.tMax)}°{' '}
+              <span className="hint">{Math.round(day.tMin)}°</span>
+            </span>
+            {day.precipProb > 40 && (
+              <span className="trip-forecast-precip">{Math.round(day.precipProb)}%</span>
+            )}
+          </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+function TripDetailsCard({ trip, closed }: { trip: TripHub; closed: boolean }) {
+  const queryClient = useQueryClient();
+  const canEdit = trip.isOrganizer && !closed;
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(trip.name);
+  const [destination, setDestination] = useState(trip.destination ?? '');
+  const [startDate, setStartDate] = useState(dateInputValue(trip.startDate));
+  const [endDate, setEndDate] = useState(dateInputValue(trip.endDate));
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (editing) return;
+    setName(trip.name);
+    setDestination(trip.destination ?? '');
+    setStartDate(dateInputValue(trip.startDate));
+    setEndDate(dateInputValue(trip.endDate));
+  }, [trip.name, trip.destination, trip.startDate, trip.endDate, editing]);
+
+  const saveMutation = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api(`/trips/${trip.id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['trips', trip.id] });
+      void queryClient.invalidateQueries({ queryKey: ['trips'] });
+      void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'forecast'] });
+      setEditing(false);
+      setError(null);
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo guardar'),
+  });
+
+  const onSave = (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setError('El nombre es obligatorio');
+      return;
+    }
+    if (startDate && endDate && startDate > endDate) {
+      setError('La fecha de fin debe ser posterior al inicio');
+      return;
+    }
+    saveMutation.mutate({
+      name: trimmed,
+      destination: destination.trim() || null,
+      startDate: startDate || null,
+      endDate: endDate || null,
+    });
+  };
+
+  if (!editing) {
+    return (
+      <section className="card">
+        <div className="row-between">
+          <h2 style={{ margin: 0 }}>Datos del viaje</h2>
+          {canEdit && (
+            <button type="button" className="btn-link" onClick={() => setEditing(true)}>
+              Editar
+            </button>
+          )}
+        </div>
+        <p style={{ margin: '8px 0 0' }}>
+          <strong>{trip.name}</strong>
+        </p>
+        {trip.destination && (
+          <p className="hint" style={{ margin: '4px 0 0' }}>
+            {trip.destination}
+          </p>
+        )}
+        {(trip.startDate || trip.endDate) && (
+          <p className="hint" style={{ margin: '4px 0 0' }}>
+            {trip.startDate ? fmtDate(trip.startDate) : '—'}
+            {' → '}
+            {trip.endDate ? fmtDate(trip.endDate) : '—'}
+          </p>
+        )}
+        {!trip.destination && !trip.startDate && !trip.endDate && (
+          <p className="hint" style={{ margin: '8px 0 0' }}>
+            {canEdit ? 'Tocá Editar para cargar destino y fechas' : 'Sin destino ni fechas'}
+          </p>
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <section className="card">
+      <h2 style={{ marginTop: 0 }}>Datos del viaje</h2>
+      <form className="promo-form" onSubmit={onSave}>
+        <label>
+          Nombre
+          <input value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+        </label>
+        <label>
+          Destino
+          <input
+            value={destination}
+            onChange={(e) => setDestination(e.target.value)}
+            placeholder="Ciudad o lugar"
+          />
+        </label>
+        <div className="form-row-2">
+          <label>
+            Desde
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          </label>
+          <label>
+            Hasta
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          </label>
+        </div>
+        {error && <p className="error">{error}</p>}
+        <div className="row-between" style={{ gap: 8 }}>
+          <Button
+            type="button"
+            variant="text"
+            onClick={() => {
+              setEditing(false);
+              setError(null);
+            }}
+            disabled={saveMutation.isPending}
+          >
+            Cancelar
+          </Button>
+          <Button type="submit" variant="filled" disabled={saveMutation.isPending}>
+            {saveMutation.isPending ? 'Guardando…' : 'Guardar'}
+          </Button>
+        </div>
+      </form>
     </section>
   );
 }
@@ -495,6 +663,8 @@ function ResumenTab({
           </p>
         )}
       </section>
+
+      <TripDetailsCard trip={trip} closed={closed} />
 
       <TripForecastCard trip={trip} />
 
