@@ -9,7 +9,13 @@ import {
   type JwtPayload,
   type JwtUserPayload,
 } from '../plugins/auth.js';
-import { exportTripToHousehold, previewTripExport } from '../services/trip-export.js';import {
+import { exportTripToHousehold, previewTripExport } from '../services/trip-export.js';
+import {
+  applyPackingSuggestions,
+  getTripForecast,
+  TripForecastError,
+} from '../services/trip-forecast.js';
+import {
   closeTrip,
   computeTripBalance,
   createTrip,
@@ -220,11 +226,19 @@ const accommodationSchema = z.object({
 function mapTripError(error: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
   if (error instanceof TripNotFoundError) return reply.code(404).send({ error: error.message });
   if (error instanceof TripForbiddenError) return reply.code(403).send({ error: error.message });
-  if (error instanceof TripValidationError || error instanceof TripClosedError) {
+  if (
+    error instanceof TripValidationError ||
+    error instanceof TripClosedError ||
+    error instanceof TripForecastError
+  ) {
     return reply.code(400).send({ error: error.message });
   }
   throw error;
 }
+
+const applyPackingSchema = z.object({
+  titles: z.array(z.string().min(1).max(300)).optional(),
+});
 
 function requireUserId(user: JwtPayload): string {
   if (isTripGuestPayload(user)) {
@@ -599,6 +613,32 @@ export default async function tripRoutes(app: FastifyInstance) {
       return mapTripError(error, reply);
     }
   });
+
+  app.get('/trips/:tripId/forecast', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId } = tripIdParams.parse(request.params);
+    const { actor } = tripActorFromRequest(request);
+    try {
+      return await getTripForecast(app.prisma, tripId, actor);
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.post(
+    '/trips/:tripId/packing-suggestions/apply',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const { tripId } = tripIdParams.parse(request.params);
+      const body = applyPackingSchema.parse(request.body ?? {});
+      const { actor } = tripActorFromRequest(request);
+      try {
+        const created = await applyPackingSuggestions(app.prisma, tripId, actor, body.titles);
+        return reply.code(201).send(created);
+      } catch (error) {
+        return mapTripError(error, reply);
+      }
+    },
+  );
 
   app.get('/trips/:tripId/list-items', { preHandler: [app.authenticate] }, async (request, reply) => {
     const { tripId } = tripIdParams.parse(request.params);

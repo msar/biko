@@ -225,3 +225,29 @@ export interface TripInvitePreview {
   };
   unclaimedMembers: TripMember[];
 }
+
+export interface TripPackingSuggestion {
+  title: string;
+  reason: string;
+}
+
+export interface TripForecastDaily {
+  date: string;
+  tMax: number;
+  tMin: number;
+  precipProb: number;
+  weatherCode: number;
+}
+
+export interface TripForecast {
+  location: {
+    name: string;
+    country?: string;
+    latitude: number;
+    longitude: number;
+  };
+  range: { start: string; end: string; truncated: boolean };
+  daily: TripForecastDaily[];
+  summary: { tMin: number; tMax: number; rainyDays: number; label: string };
+  packingSuggestions: TripPackingSuggestion[];
+}

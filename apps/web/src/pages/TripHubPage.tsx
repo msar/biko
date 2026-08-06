@@ -4,11 +4,12 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import ConfirmDialog from '../components/ConfirmDialog';
 import PieChart from '../components/charts/PieChart';
 import { Button, IconButton, Chip, ListItem } from '../components/ui';
-import { api, fmtDate, fmtMoney } from '../lib/api';
+import { ApiError, api, fmtDate, fmtMoney } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type {
   TripExpense,
   TripExportPreview,
+  TripForecast,
   TripHub,
   TripListItemRow,
   TripMember,
@@ -366,6 +367,93 @@ function LinkAccountForm({
   );
 }
 
+function useTripForecast(trip: TripHub) {
+  const canFetch = Boolean(trip.destination?.trim() && trip.startDate && trip.endDate);
+  return useQuery({
+    queryKey: ['trips', trip.id, 'forecast'],
+    queryFn: () => api<TripForecast>(`/trips/${trip.id}/forecast`),
+    enabled: canFetch,
+    staleTime: 30 * 60 * 1000,
+    retry: false,
+  });
+}
+
+function forecastErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return 'No se pudo cargar el pronóstico';
+}
+
+function TripForecastCard({ trip }: { trip: TripHub }) {
+  const canFetch = Boolean(trip.destination?.trim() && trip.startDate && trip.endDate);
+  const forecastQuery = useTripForecast(trip);
+
+  if (!canFetch) {
+    return (
+      <section className="card">
+        <h2 style={{ margin: 0 }}>Clima</h2>
+        <p className="hint" style={{ margin: '8px 0 0' }}>
+          Falta destino o fechas para ver el pronóstico
+        </p>
+      </section>
+    );
+  }
+
+  if (forecastQuery.isLoading) {
+    return (
+      <section className="card">
+        <h2 style={{ margin: 0 }}>Clima</h2>
+        <p className="hint" style={{ margin: '8px 0 0' }}>
+          Buscando pronóstico…
+        </p>
+      </section>
+    );
+  }
+
+  if (forecastQuery.isError || !forecastQuery.data) {
+    return (
+      <section className="card">
+        <h2 style={{ margin: 0 }}>Clima</h2>
+        <p className="hint" style={{ margin: '8px 0 0' }}>
+          {forecastErrorMessage(forecastQuery.error) || 'No hay pronóstico disponible aún'}
+        </p>
+      </section>
+    );
+  }
+
+  const forecast = forecastQuery.data;
+  const place = [forecast.location.name, forecast.location.country].filter(Boolean).join(', ');
+
+  return (
+    <section className="card">
+      <div className="row-between">
+        <h2 style={{ margin: 0 }}>Clima</h2>
+        <span className="hint">{place}</span>
+      </div>
+      <p style={{ margin: '8px 0 0' }}>
+        {forecast.summary.label} · {Math.round(forecast.summary.tMin)}° /{' '}
+        {Math.round(forecast.summary.tMax)}°
+        {forecast.summary.rainyDays > 0
+          ? ` · ${forecast.summary.rainyDays} día${forecast.summary.rainyDays === 1 ? '' : 's'} con lluvia`
+          : ''}
+      </p>
+      {forecast.range.truncated && (
+        <p className="hint" style={{ margin: '4px 0 0' }}>
+          Pronóstico parcial (hasta 16 días desde hoy)
+        </p>
+      )}
+      <div className="chip-row" style={{ marginTop: 12 }}>
+        {forecast.daily.map((day) => (
+          <Chip key={day.date}>
+            {fmtDate(day.date)} · {Math.round(day.tMin)}°/{Math.round(day.tMax)}°
+            {day.precipProb > 40 ? ` · ${Math.round(day.precipProb)}%` : ''}
+          </Chip>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ResumenTab({
   trip,
   closed,
@@ -407,6 +495,8 @@ function ResumenTab({
           </p>
         )}
       </section>
+
+      <TripForecastCard trip={trip} />
 
       <section
         className="card trip-accommodation-entry"
@@ -624,6 +714,15 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     queryFn: () => api<TripListItemRow[]>(`/trips/${trip.id}/list-items`),
   });
 
+  const forecastQuery = useTripForecast(trip);
+
+  const pendingSuggestions = useMemo(() => {
+    const suggestions = forecastQuery.data?.packingSuggestions ?? [];
+    if (suggestions.length === 0) return [];
+    const existing = new Set((items ?? []).map((i) => i.title.trim().toLowerCase()));
+    return suggestions.filter((s) => !existing.has(s.title.toLowerCase()));
+  }, [forecastQuery.data, items]);
+
   const filtered = useMemo(() => {
     const all = items ?? [];
     if (mode === 'MINE') {
@@ -693,6 +792,18 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     },
   });
 
+  const applyPackingMutation = useMutation({
+    mutationFn: (titles: string[]) =>
+      api<TripListItemRow[]>(`/trips/${trip.id}/packing-suggestions/apply`, {
+        method: 'POST',
+        body: JSON.stringify({ titles }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
+      setMode('PACK_BUY');
+    },
+  });
+
   const toggleAssignee = (memberId: string) => {
     setAssignToAll(false);
     setAssigneeIds((prev) =>
@@ -728,6 +839,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const showForm = !closed && (editingId != null || mode !== 'MINE');
   const formBusy = createMutation.isPending || updateMutation.isPending;
   const showTypePicker = editingId != null || mode === 'PACK_BUY';
+  const showPackingSuggestions = !closed && pendingSuggestions.length > 0;
 
   return (
     <>
@@ -763,6 +875,41 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           Mis tareas
         </button>
       </div>
+
+      {showPackingSuggestions && (
+        <section className="card">
+          <div className="row-between" style={{ gap: 8, alignItems: 'flex-start' }}>
+            <div>
+              <h2 style={{ margin: 0 }}>Según el clima</h2>
+              <p className="hint" style={{ margin: '4px 0 0' }}>
+                Sugerencias para armar la lista de traer
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={applyPackingMutation.isPending}
+              onClick={() =>
+                applyPackingMutation.mutate(pendingSuggestions.map((s) => s.title))
+              }
+            >
+              {applyPackingMutation.isPending ? 'Agregando…' : 'Agregar a la lista'}
+            </button>
+          </div>
+          <div className="chip-row" style={{ marginTop: 12 }}>
+            {pendingSuggestions.map((s) => (
+              <Chip key={s.title} title={s.reason}>
+                {s.title}
+              </Chip>
+            ))}
+          </div>
+          {applyPackingMutation.isError && (
+            <p className="error" style={{ marginTop: 8 }}>
+              {forecastErrorMessage(applyPackingMutation.error)}
+            </p>
+          )}
+        </section>
+      )}
 
       {showForm && (
         <form className="card promo-form" onSubmit={onSubmit}>
