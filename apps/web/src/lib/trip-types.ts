@@ -16,6 +16,7 @@ export interface TripListItem {
   id: string;
   name: string;
   destination: string | null;
+  destinationTimezone?: string | null;
   startDate: string | null;
   endDate: string | null;
   status: TripStatus;
@@ -115,6 +116,7 @@ export interface TripHub {
   name: string;
   shareSlug: string;
   destination: string | null;
+  destinationTimezone?: string | null;
   startDate: string | null;
   endDate: string | null;
   status: TripStatus;
@@ -219,6 +221,7 @@ export interface TripInvitePreview {
     name: string;
     shareSlug?: string;
     destination: string | null;
+    destinationTimezone?: string | null;
     status: TripStatus;
     startDate: string | null;
     endDate: string | null;

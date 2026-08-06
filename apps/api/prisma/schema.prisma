@@ -831,6 +831,8 @@ model Trip {
   /// Human-readable invite path segment (`/viajes/invitar/{shareSlug}`). Stable after create.
   shareSlug         String     @unique
   destination       String?
+  /// IANA timezone for the destination (from geocode); calendar dates are stored in this zone.
+  destinationTimezone String?
   startDate         DateTime?
   endDate           DateTime?
   status            TripStatus @default(PLANNING)

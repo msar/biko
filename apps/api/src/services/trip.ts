@@ -12,9 +12,43 @@ import type {
   TripMemberRole,
   TripStatus,
 } from '@prisma/client';
+import {
+  calendarDateToUtc,
+  serializeCalendarDate,
+  todayYmdInTimeZone,
+  tripTimeZone,
+  ymdInTimeZone,
+} from '../lib/calendar-date.js';
+import { resolveDestinationTimezone } from './trip-location.js';
 import { allocateUniqueShareSlug } from './trip-slug.js';
 
 type Db = PrismaClient | Prisma.TransactionClient;
+
+/** YYYY-MM-DD calendar date in the trip destination timezone. */
+export type TripCalendarDate = string;
+
+function encodeCalendarDate(
+  ymd: TripCalendarDate | null | undefined,
+  timeZone: string,
+): Date | null | undefined {
+  if (ymd === undefined) return undefined;
+  if (ymd === null) return null;
+  try {
+    return calendarDateToUtc(ymd, timeZone);
+  } catch {
+    throw new TripValidationError('Fecha inválida');
+  }
+}
+
+function reanchorCalendarDate(
+  date: Date | null,
+  fromTimeZone: string,
+  toTimeZone: string,
+): Date | null {
+  if (!date) return null;
+  if (fromTimeZone === toTimeZone) return date;
+  return calendarDateToUtc(ymdInTimeZone(date, fromTimeZone), toTimeZone);
+}
 
 export class TripNotFoundError extends Error {
   constructor(message = 'Viaje no encontrado') {
@@ -157,8 +191,9 @@ export async function listTripsForUser(db: Db, userId: string) {
       id: t.id,
       name: t.name,
       destination: t.destination,
-      startDate: t.startDate,
-      endDate: t.endDate,
+      destinationTimezone: t.destinationTimezone,
+      startDate: serializeCalendarDate(t.startDate, t.destinationTimezone),
+      endDate: serializeCalendarDate(t.endDate, t.destinationTimezone),
       status: t.status,
       baseCurrency: t.baseCurrency,
       memberCount: t.members.length,
@@ -175,8 +210,8 @@ export async function createTrip(
   input: {
     name: string;
     destination?: string | null;
-    startDate?: Date | null;
-    endDate?: Date | null;
+    startDate?: TripCalendarDate | null;
+    endDate?: TripCalendarDate | null;
     baseCurrency?: string;
   },
   userName: string,
@@ -184,10 +219,20 @@ export async function createTrip(
   const name = input.name.trim();
   if (!name) throw new TripValidationError('El nombre es obligatorio');
 
+  const destination = input.destination?.trim() || null;
+  const destinationTimezone = await resolveDestinationTimezone(destination);
+  const tz = tripTimeZone(destinationTimezone);
+  const startDate = encodeCalendarDate(input.startDate ?? null, tz) ?? null;
+  const endDate = encodeCalendarDate(input.endDate ?? null, tz) ?? null;
+
+  if (startDate && endDate && endDate.getTime() < startDate.getTime()) {
+    throw new TripValidationError('La fecha de fin debe ser posterior al inicio');
+  }
+
   const shareSlug = await allocateUniqueShareSlug(
     async (slug) => Boolean(await db.trip.findUnique({ where: { shareSlug: slug }, select: { id: true } })),
     name,
-    input.startDate ?? null,
+    startDate,
   );
 
   return db.trip.create({
@@ -195,9 +240,10 @@ export async function createTrip(
       createdByUserId: userId,
       name,
       shareSlug,
-      destination: input.destination?.trim() || null,
-      startDate: input.startDate ?? null,
-      endDate: input.endDate ?? null,
+      destination,
+      destinationTimezone,
+      startDate,
+      endDate,
       baseCurrency: input.baseCurrency ?? 'ARS',
       status: 'ACTIVE',
       members: {
@@ -344,6 +390,7 @@ function serializeTrip(trip: {
   name: string;
   shareSlug: string;
   destination: string | null;
+  destinationTimezone?: string | null;
   startDate: Date | null;
   endDate: Date | null;
   status: TripStatus;
@@ -385,14 +432,16 @@ function serializeTrip(trip: {
     notes: string | null;
   } | null;
 }) {
+  const tz = trip.destinationTimezone ?? null;
   return {
     id: trip.id,
     createdByUserId: trip.createdByUserId,
     name: trip.name,
     shareSlug: trip.shareSlug,
     destination: trip.destination,
-    startDate: trip.startDate,
-    endDate: trip.endDate,
+    destinationTimezone: tz,
+    startDate: serializeCalendarDate(trip.startDate, tz),
+    endDate: serializeCalendarDate(trip.endDate, tz),
     status: trip.status,
     baseCurrency: trip.baseCurrency,
     exportHouseholdId: trip.exportHouseholdId,
@@ -407,29 +456,32 @@ function serializeTrip(trip: {
       .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }))
       .map(serializeHousehold),
     inviteCode: trip.shareSlug,
-    accommodation: trip.accommodation ? serializeAccommodation(trip.accommodation) : null,
+    accommodation: trip.accommodation ? serializeAccommodation(trip.accommodation, tz) : null,
   };
 }
 
-function serializeAccommodation(acc: {
-  id: string;
-  label: string | null;
-  address: string | null;
-  checkIn: Date | null;
-  checkOut: Date | null;
-  checkInTime: string | null;
-  checkOutTime: string | null;
-  amount: unknown;
-  expenseId?: string | null;
-  link: string | null;
-  notes: string | null;
-}) {
+function serializeAccommodation(
+  acc: {
+    id: string;
+    label: string | null;
+    address: string | null;
+    checkIn: Date | null;
+    checkOut: Date | null;
+    checkInTime: string | null;
+    checkOutTime: string | null;
+    amount: unknown;
+    expenseId?: string | null;
+    link: string | null;
+    notes: string | null;
+  },
+  destinationTimezone: string | null = null,
+) {
   return {
     id: acc.id,
     label: acc.label,
     address: acc.address,
-    checkIn: acc.checkIn,
-    checkOut: acc.checkOut,
+    checkIn: serializeCalendarDate(acc.checkIn, destinationTimezone),
+    checkOut: serializeCalendarDate(acc.checkOut, destinationTimezone),
     checkInTime: acc.checkInTime,
     checkOutTime: acc.checkOutTime,
     amount: acc.amount == null ? null : toNum(acc.amount),
@@ -446,8 +498,8 @@ export async function updateTrip(
   input: {
     name?: string;
     destination?: string | null;
-    startDate?: Date | null;
-    endDate?: Date | null;
+    startDate?: TripCalendarDate | null;
+    endDate?: TripCalendarDate | null;
     status?: TripStatus;
   },
 ) {
@@ -460,21 +512,70 @@ export async function updateTrip(
     assertTripWritable(me.trip.status);
   }
 
+  const oldTz = tripTimeZone(me.trip.destinationTimezone);
+  let nextTimezone = me.trip.destinationTimezone ?? null;
+  let tzChanged = false;
+
+  if (input.destination !== undefined) {
+    const destination = input.destination?.trim() || null;
+    nextTimezone = await resolveDestinationTimezone(destination);
+    tzChanged = tripTimeZone(nextTimezone) !== oldTz;
+  }
+
+  const tz = tripTimeZone(nextTimezone);
   const data: Prisma.TripUpdateInput = {};
   if (input.name != null) {
     const name = input.name.trim();
     if (!name) throw new TripValidationError('El nombre es obligatorio');
     data.name = name;
   }
-  if (input.destination !== undefined) data.destination = input.destination?.trim() || null;
-  if (input.startDate !== undefined) data.startDate = input.startDate;
-  if (input.endDate !== undefined) data.endDate = input.endDate;
+  if (input.destination !== undefined) {
+    data.destination = input.destination?.trim() || null;
+    data.destinationTimezone = nextTimezone;
+  }
+
+  if (input.startDate !== undefined) {
+    data.startDate = encodeCalendarDate(input.startDate, tz) ?? null;
+  } else if (tzChanged) {
+    data.startDate = reanchorCalendarDate(me.trip.startDate, oldTz, tz);
+  }
+
+  if (input.endDate !== undefined) {
+    data.endDate = encodeCalendarDate(input.endDate, tz) ?? null;
+  } else if (tzChanged) {
+    data.endDate = reanchorCalendarDate(me.trip.endDate, oldTz, tz);
+  }
+
   if (input.status != null) data.status = input.status;
 
-  const nextStart = input.startDate !== undefined ? input.startDate : me.trip.startDate;
-  const nextEnd = input.endDate !== undefined ? input.endDate : me.trip.endDate;
+  const nextStart =
+    input.startDate !== undefined
+      ? ((data.startDate as Date | null | undefined) ?? null)
+      : tzChanged
+        ? ((data.startDate as Date | null | undefined) ?? me.trip.startDate)
+        : me.trip.startDate;
+  const nextEnd =
+    input.endDate !== undefined
+      ? ((data.endDate as Date | null | undefined) ?? null)
+      : tzChanged
+        ? ((data.endDate as Date | null | undefined) ?? me.trip.endDate)
+        : me.trip.endDate;
   if (nextStart && nextEnd && nextEnd.getTime() < nextStart.getTime()) {
     throw new TripValidationError('La fecha de fin debe ser posterior al inicio');
+  }
+
+  // Re-anchor accommodation check-in/out when destination timezone changes.
+  if (tzChanged) {
+    const acc = await db.tripAccommodation.findUnique({ where: { tripId } });
+    if (acc && (acc.checkIn || acc.checkOut)) {
+      await db.tripAccommodation.update({
+        where: { tripId },
+        data: {
+          checkIn: reanchorCalendarDate(acc.checkIn, oldTz, tz),
+          checkOut: reanchorCalendarDate(acc.checkOut, oldTz, tz),
+        },
+      });
+    }
   }
 
   return db.trip.update({
@@ -559,9 +660,10 @@ export async function getTripInvitePreview(db: Db, code: string) {
       name: invite.trip.name,
       shareSlug: invite.trip.shareSlug,
       destination: invite.trip.destination,
+      destinationTimezone: invite.trip.destinationTimezone,
       status: invite.trip.status,
-      startDate: invite.trip.startDate,
-      endDate: invite.trip.endDate,
+      startDate: serializeCalendarDate(invite.trip.startDate, invite.trip.destinationTimezone),
+      endDate: serializeCalendarDate(invite.trip.endDate, invite.trip.destinationTimezone),
     },
     unclaimedMembers: [...unclaimedMembers]
       .sort((a, b) => a.displayName.localeCompare(b.displayName, 'es', { sensitivity: 'base' }))
@@ -885,7 +987,7 @@ export type TripExpenseInput = {
   paidByMemberId?: string;
   payments?: TripExpensePaymentInput[];
   note?: string | null;
-  date: Date;
+  date: TripCalendarDate;
   currency?: string;
   splitMode?: SplitMode;
   assignToMemberId?: string | null;
@@ -1026,17 +1128,18 @@ function buildTripAllocations(
 }
 
 export async function listTripExpenses(db: Db, tripId: string, actor: TripActor | string) {
-  await requireTripMember(db, tripId, actor);
+  const me = await requireTripMember(db, tripId, actor);
   const expenses = await db.tripExpense.findMany({
     where: { tripId },
     include: expenseInclude,
     orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
   });
-  return expenses.map(serializeExpense);
+  const tz = me.trip.destinationTimezone ?? null;
+  return expenses.map((e) => serializeExpense(e, tz));
 }
 
 export async function getTripExpense(db: Db, tripId: string, expenseId: string, actor: TripActor | string) {
-  await requireTripMember(db, tripId, actor);
+  const me = await requireTripMember(db, tripId, actor);
   const expense = await db.tripExpense.findFirst({
     where: { id: expenseId, tripId },
     include: expenseInclude,
@@ -1049,45 +1152,48 @@ export async function getTripExpense(db: Db, tripId: string, expenseId: string, 
   });
 
   return {
-    ...serializeExpense(expense),
+    ...serializeExpense(expense, me.trip.destinationTimezone ?? null),
     accommodation: linked
       ? { id: linked.id, label: linked.label, address: linked.address }
       : null,
   };
 }
 
-function serializeExpense(expense: {
-  id: string;
-  tripId: string;
-  paidByMemberId: string;
-  amount: unknown;
-  category: TripExpenseCategory;
-  note: string | null;
-  date: Date;
-  currency: string;
-  splitMode: SplitMode;
-  exportedPurchaseId: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  paidByMember: {
+function serializeExpense(
+  expense: {
     id: string;
-    displayName: string;
-    userId: string | null;
-    role: TripMemberRole;
-  };
-  payments: Array<{
-    id: string;
-    tripMemberId: string;
+    tripId: string;
+    paidByMemberId: string;
     amount: unknown;
-    tripMember: { id: string; displayName: string; userId: string | null };
-  }>;
-  allocations: Array<{
-    id: string;
-    tripMemberId: string;
-    amount: unknown;
-    tripMember: { id: string; displayName: string; userId: string | null };
-  }>;
-}) {
+    category: TripExpenseCategory;
+    note: string | null;
+    date: Date;
+    currency: string;
+    splitMode: SplitMode;
+    exportedPurchaseId: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    paidByMember: {
+      id: string;
+      displayName: string;
+      userId: string | null;
+      role: TripMemberRole;
+    };
+    payments: Array<{
+      id: string;
+      tripMemberId: string;
+      amount: unknown;
+      tripMember: { id: string; displayName: string; userId: string | null };
+    }>;
+    allocations: Array<{
+      id: string;
+      tripMemberId: string;
+      amount: unknown;
+      tripMember: { id: string; displayName: string; userId: string | null };
+    }>;
+  },
+  destinationTimezone: string | null = null,
+) {
   return {
     id: expense.id,
     tripId: expense.tripId,
@@ -1100,7 +1206,7 @@ function serializeExpense(expense: {
     amount: toNum(expense.amount),
     category: expense.category,
     note: expense.note,
-    date: expense.date,
+    date: serializeCalendarDate(expense.date, destinationTimezone) ?? ymdInTimeZone(expense.date, 'UTC'),
     currency: expense.currency,
     splitMode: expense.splitMode,
     exportedPurchaseId: expense.exportedPurchaseId,
@@ -1131,6 +1237,9 @@ export async function createTripExpense(db: Db, tripId: string, actor: TripActor
   const memberIds = await rosterMemberIds(db, tripId);
   const { payments, paidByMemberId } = normalizeExpensePayments(input.amount, memberIds, input);
   const allocations = buildTripAllocations({ ...input, paidByMemberId }, memberIds);
+  const tz = tripTimeZone(me.trip.destinationTimezone);
+  const date = encodeCalendarDate(input.date, tz);
+  if (!date) throw new TripValidationError('La fecha es obligatoria');
 
   const expense = await db.tripExpense.create({
     data: {
@@ -1139,7 +1248,7 @@ export async function createTripExpense(db: Db, tripId: string, actor: TripActor
       amount: input.amount,
       category: input.category,
       note: input.note?.trim() || null,
-      date: input.date,
+      date,
       currency: input.currency ?? 'ARS',
       splitMode: input.splitMode ?? 'EQUAL',
       payments: {
@@ -1154,7 +1263,7 @@ export async function createTripExpense(db: Db, tripId: string, actor: TripActor
     await db.trip.update({ where: { id: tripId }, data: { status: 'ACTIVE' } });
   }
 
-  return serializeExpense(expense);
+  return serializeExpense(expense, me.trip.destinationTimezone ?? null);
 }
 
 export async function updateTripExpense(
@@ -1203,13 +1312,18 @@ export async function updateTripExpense(
 
   const { payments, paidByMemberId } = normalizeExpensePayments(amount, memberIds, paymentSource);
 
-  const merged: TripExpenseInput & { paidByMemberId: string } = {
+  const tz = tripTimeZone(me.trip.destinationTimezone);
+  const date =
+    input.date !== undefined ? encodeCalendarDate(input.date, tz) ?? existing.date : existing.date;
+
+  const merged: TripExpenseInput & { paidByMemberId: string; dateUtc: Date } = {
     amount,
     category: input.category ?? existing.category,
     paidByMemberId,
     payments,
     note: input.note !== undefined ? input.note : existing.note,
-    date: input.date ?? existing.date,
+    date: serializeCalendarDate(date, me.trip.destinationTimezone) ?? input.date ?? '',
+    dateUtc: date,
     currency: input.currency ?? existing.currency,
     splitMode: input.splitMode ?? (existing.splitMode as SplitMode),
     assignToMemberId: input.assignToMemberId,
@@ -1230,7 +1344,7 @@ export async function updateTripExpense(
       amount: merged.amount,
       category: merged.category,
       note: merged.note?.trim() || null,
-      date: merged.date,
+      date: merged.dateUtc,
       currency: merged.currency ?? 'ARS',
       splitMode: merged.splitMode ?? 'EQUAL',
       payments: {
@@ -1259,7 +1373,7 @@ export async function updateTripExpense(
     }
   }
 
-  return serializeExpense(expense);
+  return serializeExpense(expense, me.trip.destinationTimezone ?? null);
 }
 
 export async function deleteTripExpense(db: Db, tripId: string, expenseId: string, actor: TripActor | string) {
@@ -1562,10 +1676,14 @@ const listItemInclude = {
   },
 } as const;
 
-function serializeListItem<T extends { assignees: Array<{ member: unknown }> }>(item: T) {
-  const { assignees, ...rest } = item;
+function serializeListItem<
+  T extends { assignees: Array<{ member: unknown }>; dayDate?: Date | null },
+>(item: T, destinationTimezone: string | null = null) {
+  const { assignees, dayDate, ...rest } = item;
   return {
     ...rest,
+    dayDate:
+      dayDate == null ? dayDate ?? null : serializeCalendarDate(dayDate, destinationTimezone),
     assignees: assignees.map((a) => a.member),
   };
 }
@@ -1612,13 +1730,14 @@ export async function listTripListItems(
   actor: TripActor | string,
   type?: TripListItemType,
 ) {
-  await requireTripMember(db, tripId, actor);
+  const me = await requireTripMember(db, tripId, actor);
   const items = await db.tripListItem.findMany({
     where: { tripId, ...(type ? { type } : {}) },
     include: listItemInclude,
     orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
   });
-  return items.map(serializeListItem);
+  const tz = me.trip.destinationTimezone ?? null;
+  return items.map((item) => serializeListItem(item, tz));
 }
 
 export async function createTripListItem(
@@ -1633,7 +1752,7 @@ export async function createTripListItem(
     assignToAll?: boolean;
     assigneeMemberIds?: string[];
     assigneeMemberId?: string | null;
-    dayDate?: Date | null;
+    dayDate?: TripCalendarDate | null;
   },
 ) {
   const me = await requireTripMember(db, tripId, actor);
@@ -1642,6 +1761,7 @@ export async function createTripListItem(
   if (!title) throw new TripValidationError('El título es obligatorio');
 
   const { assignToAll, memberIds } = await resolveListAssignees(db, tripId, input);
+  const tz = tripTimeZone(me.trip.destinationTimezone);
 
   const item = await db.tripListItem.create({
     data: {
@@ -1651,14 +1771,14 @@ export async function createTripListItem(
       notes: input.notes?.trim() || null,
       quantity: input.quantity ?? null,
       assignToAll,
-      dayDate: input.dayDate ?? null,
+      dayDate: encodeCalendarDate(input.dayDate ?? null, tz) ?? null,
       ...(memberIds.length > 0
         ? { assignees: { create: memberIds.map((memberId) => ({ memberId })) } }
         : {}),
     },
     include: listItemInclude,
   });
-  return serializeListItem(item);
+  return serializeListItem(item, me.trip.destinationTimezone ?? null);
 }
 
 export async function updateTripListItem(
@@ -1674,7 +1794,7 @@ export async function updateTripListItem(
     assigneeMemberIds?: string[];
     assigneeMemberId?: string | null;
     status?: 'PENDING' | 'DONE';
-    dayDate?: Date | null;
+    dayDate?: TripCalendarDate | null;
     type?: TripListItemType;
   },
 ) {
@@ -1693,6 +1813,7 @@ export async function updateTripListItem(
     assigneeData = await resolveListAssignees(db, tripId, input);
   }
 
+  const tz = tripTimeZone(me.trip.destinationTimezone);
   const item = await db.tripListItem.update({
     where: { id: itemId },
     data: {
@@ -1700,7 +1821,9 @@ export async function updateTripListItem(
       ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
       ...(input.quantity !== undefined ? { quantity: input.quantity } : {}),
       ...(input.status != null ? { status: input.status } : {}),
-      ...(input.dayDate !== undefined ? { dayDate: input.dayDate } : {}),
+      ...(input.dayDate !== undefined
+        ? { dayDate: encodeCalendarDate(input.dayDate, tz) ?? null }
+        : {}),
       ...(input.type != null ? { type: input.type } : {}),
       ...(assigneeData
         ? {
@@ -1719,7 +1842,7 @@ export async function updateTripListItem(
     include: listItemInclude,
   });
 
-  return serializeListItem(item);
+  return serializeListItem(item, me.trip.destinationTimezone ?? null);
 }
 
 export async function deleteTripListItem(db: Db, tripId: string, itemId: string, actor: TripActor | string) {
@@ -1750,7 +1873,15 @@ async function syncAccommodationExpense(
 ) {
   const cost = acc.amount == null ? null : round2(toNum(acc.amount));
   const note = acc.label?.trim() || 'Alojamiento';
-  const date = acc.checkIn ?? new Date();
+  const tripMeta = await db.trip.findUniqueOrThrow({
+    where: { id: tripId },
+    select: { destinationTimezone: true, status: true },
+  });
+  const tz = tripTimeZone(tripMeta.destinationTimezone);
+  const dateYmd = acc.checkIn
+    ? ymdInTimeZone(acc.checkIn, tz)
+    : todayYmdInTimeZone(tz);
+  const dateUtc = calendarDateToUtc(dateYmd, tz);
 
   if (cost == null || cost <= 0) {
     if (acc.expenseId) {
@@ -1779,7 +1910,7 @@ async function syncAccommodationExpense(
       amount: cost,
       category: 'ALOJAMIENTO',
       paidByMemberId: payerId,
-      date,
+      date: dateYmd,
       splitMode: 'EQUAL',
       participantMemberIds: memberIds,
     },
@@ -1827,7 +1958,7 @@ async function syncAccommodationExpense(
           amount: cost,
           category: 'ALOJAMIENTO',
           note,
-          date,
+          date: dateUtc,
           currency: existing.currency || tripCurrency,
           payments: {
             create: payments.map((p) => ({ tripMemberId: p.memberId, amount: p.amount })),
@@ -1849,7 +1980,7 @@ async function syncAccommodationExpense(
       amount: cost,
       category: 'ALOJAMIENTO',
       note,
-      date,
+      date: dateUtc,
       currency: tripCurrency,
       splitMode: 'EQUAL',
       payments: { create: [{ tripMemberId: payerId, amount: cost }] },
@@ -1857,7 +1988,7 @@ async function syncAccommodationExpense(
     },
   });
 
-  const trip = await db.trip.findUniqueOrThrow({ where: { id: tripId }, select: { status: true } });
+  const trip = tripMeta;
   if (trip.status === 'PLANNING') {
     await db.trip.update({ where: { id: tripId }, data: { status: 'ACTIVE' } });
   }
@@ -1875,8 +2006,8 @@ export async function upsertTripAccommodation(
   input: {
     label?: string | null;
     address?: string | null;
-    checkIn?: Date | null;
-    checkOut?: Date | null;
+    checkIn?: TripCalendarDate | null;
+    checkOut?: TripCalendarDate | null;
     checkInTime?: string | null;
     checkOutTime?: string | null;
     amount?: number | null;
@@ -1891,11 +2022,12 @@ export async function upsertTripAccommodation(
     throw new TripValidationError('El costo debe ser mayor o igual a 0');
   }
 
+  const tz = tripTimeZone(me.trip.destinationTimezone);
   const data = {
     label: input.label?.trim() || null,
     address: input.address?.trim() || null,
-    checkIn: input.checkIn ?? null,
-    checkOut: input.checkOut ?? null,
+    checkIn: encodeCalendarDate(input.checkIn ?? null, tz) ?? null,
+    checkOut: encodeCalendarDate(input.checkOut ?? null, tz) ?? null,
     checkInTime: input.checkInTime?.trim() || null,
     checkOutTime: input.checkOutTime?.trim() || null,
     amount: input.amount == null || input.amount === 0 ? null : round2(input.amount),
@@ -1910,13 +2042,14 @@ export async function upsertTripAccommodation(
   });
 
   const synced = await syncAccommodationExpense(db, tripId, row, me.trip.baseCurrency);
-  return serializeAccommodation(synced);
+  return serializeAccommodation(synced, me.trip.destinationTimezone ?? null);
 }
 
 export async function getTripAccommodation(db: Db, tripId: string, actor: TripActor | string) {
-  await requireTripMember(db, tripId, actor);
+  const me = await requireTripMember(db, tripId, actor);
   const row = await db.tripAccommodation.findUnique({ where: { tripId } });
   if (!row) return null;
+  const tz = me.trip.destinationTimezone ?? null;
 
   // Lazy backfill: stay cost without linked expense (pre-migration data)
   if (row.amount != null && toNum(row.amount) > 0 && !row.expenseId) {
@@ -1926,9 +2059,9 @@ export async function getTripAccommodation(db: Db, tripId: string, actor: TripAc
     });
     if (trip.status !== 'CLOSED') {
       const synced = await syncAccommodationExpense(db, tripId, row, trip.baseCurrency);
-      return serializeAccommodation(synced);
+      return serializeAccommodation(synced, tz);
     }
   }
 
-  return serializeAccommodation(row);
+  return serializeAccommodation(row, tz);
 }

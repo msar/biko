@@ -1,14 +1,24 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import {
+  calendarDateToUtc,
+  todayYmdInTimeZone,
+  tripTimeZone,
+  ymdInTimeZone,
+} from '../lib/calendar-date.js';
+import {
   createTripListItem,
   requireTripMember,
   TripValidationError,
   type TripActor,
 } from './trip.js';
+import {
+  geocodeTripDestination,
+  TripDestinationNotFoundError,
+  TripLocationError,
+} from './trip-location.js';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-const GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 /** Open-Meteo free forecast horizon is roughly 16 days from today. */
 const FORECAST_HORIZON_DAYS = 15;
@@ -46,26 +56,26 @@ export type TripForecast = {
   packingSuggestions: PackingSuggestion[];
 };
 
-function ymd(d: Date): string {
-  return d.toISOString().slice(0, 10);
+function ymd(d: Date, timeZone: string): string {
+  return ymdInTimeZone(d, timeZone);
 }
 
-function parseYmd(s: string): Date {
-  return new Date(`${s}T12:00:00.000Z`);
+function parseYmd(s: string, timeZone: string): Date {
+  return calendarDateToUtc(s, timeZone);
 }
 
-function addDays(d: Date, days: number): Date {
-  const next = new Date(d);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
+function addDaysYmd(ymdStr: string, days: number): string {
+  const [y, m, d] = ymdStr.split('-').map(Number) as [number, number, number];
+  const utc = new Date(Date.UTC(y, m - 1, d + days));
+  return `${String(utc.getUTCFullYear()).padStart(4, '0')}-${String(utc.getUTCMonth() + 1).padStart(2, '0')}-${String(utc.getUTCDate()).padStart(2, '0')}`;
 }
 
-function maxDate(a: Date, b: Date): Date {
-  return a.getTime() >= b.getTime() ? a : b;
+function maxYmd(a: string, b: string): string {
+  return a >= b ? a : b;
 }
 
-function minDate(a: Date, b: Date): Date {
-  return a.getTime() <= b.getTime() ? a : b;
+function minYmd(a: string, b: string): string {
+  return a <= b ? a : b;
 }
 
 function weatherLabel(code: number): string {
@@ -104,42 +114,21 @@ type GeoResult = {
   country?: string;
   latitude: number;
   longitude: number;
+  timezone: string;
 };
 
 async function geocodeDestination(destination: string): Promise<GeoResult> {
-  const url = new URL(GEOCODE_URL);
-  url.searchParams.set('name', destination);
-  url.searchParams.set('count', '1');
-  url.searchParams.set('language', 'es');
-
-  let res: Response;
   try {
-    res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
-  } catch {
-    throw new TripForecastError('No se pudo conectar al servicio de ubicación');
+    return await geocodeTripDestination(destination);
+  } catch (error) {
+    if (error instanceof TripDestinationNotFoundError) {
+      throw new TripValidationError(error.message);
+    }
+    if (error instanceof TripLocationError) {
+      throw new TripForecastError(error.message);
+    }
+    throw error;
   }
-  if (!res.ok) {
-    throw new TripForecastError(`No se pudo ubicar el destino (${res.status})`);
-  }
-
-  const body = (await res.json()) as {
-    results?: Array<{
-      name: string;
-      country?: string;
-      latitude: number;
-      longitude: number;
-    }>;
-  };
-  const hit = body.results?.[0];
-  if (!hit) {
-    throw new TripValidationError('No encontramos ese destino. Probá con otra ciudad o país.');
-  }
-  return {
-    name: hit.name,
-    country: hit.country,
-    latitude: hit.latitude,
-    longitude: hit.longitude,
-  };
 }
 
 async function fetchDailyForecast(
@@ -248,42 +237,48 @@ export function buildPackingSuggestions(
   });
 }
 
-function clampForecastRange(startDate: Date, endDate: Date): {
+function clampForecastRange(
+  startDate: Date,
+  endDate: Date,
+  timeZone: string,
+): {
   start: string;
   end: string;
   truncated: boolean;
   tripDayCount: number;
 } {
-  const tripStart = parseYmd(ymd(startDate));
-  const tripEnd = parseYmd(ymd(endDate));
-  if (tripEnd.getTime() < tripStart.getTime()) {
+  const tripStart = ymd(startDate, timeZone);
+  const tripEnd = ymd(endDate, timeZone);
+  if (tripEnd < tripStart) {
     throw new TripValidationError('La fecha de fin debe ser posterior al inicio');
   }
 
-  const today = parseYmd(ymd(new Date()));
-  const horizonEnd = addDays(today, FORECAST_HORIZON_DAYS);
+  const today = todayYmdInTimeZone(timeZone);
+  const horizonEnd = addDaysYmd(today, FORECAST_HORIZON_DAYS);
 
-  if (tripStart.getTime() > horizonEnd.getTime()) {
+  if (tripStart > horizonEnd) {
     throw new TripValidationError(
       'Todavía no hay pronóstico para esas fechas. Volvé a consultar cuando falten menos de 16 días.',
     );
   }
 
-  if (tripEnd.getTime() < today.getTime()) {
+  if (tripEnd < today) {
     throw new TripValidationError('El viaje ya terminó; no hay pronóstico futuro para esas fechas.');
   }
 
-  const clampedStart = maxDate(tripStart, today);
-  const clampedEnd = minDate(tripEnd, horizonEnd);
-  const truncated =
-    ymd(clampedStart) !== ymd(tripStart) || ymd(clampedEnd) !== ymd(tripEnd);
+  const clampedStart = maxYmd(tripStart, today);
+  const clampedEnd = minYmd(tripEnd, horizonEnd);
+  const truncated = clampedStart !== tripStart || clampedEnd !== tripEnd;
 
   const tripDayCount =
-    Math.round((tripEnd.getTime() - tripStart.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+    Math.round(
+      (parseYmd(tripEnd, timeZone).getTime() - parseYmd(tripStart, timeZone).getTime()) /
+        (24 * 60 * 60 * 1000),
+    ) + 1;
 
   return {
-    start: ymd(clampedStart),
-    end: ymd(clampedEnd),
+    start: clampedStart,
+    end: clampedEnd,
     truncated,
     tripDayCount,
   };
@@ -305,8 +300,15 @@ export async function getTripForecast(
     throw new TripValidationError('Faltan las fechas del viaje para el pronóstico');
   }
 
-  const range = clampForecastRange(trip.startDate, trip.endDate);
   const location = await geocodeDestination(destination);
+  const timeZone = trip.destinationTimezone?.trim() || location.timezone || tripTimeZone(null);
+  if (!trip.destinationTimezone && location.timezone) {
+    await db.trip.update({
+      where: { id: tripId },
+      data: { destinationTimezone: location.timezone },
+    });
+  }
+  const range = clampForecastRange(trip.startDate, trip.endDate, timeZone);
   const daily = await fetchDailyForecast(
     location.latitude,
     location.longitude,
