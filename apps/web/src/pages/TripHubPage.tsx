@@ -11,6 +11,8 @@ import type {
   TripExportPreview,
   TripHub,
   TripListItemRow,
+  TripMember,
+  TripMemberRole,
 } from '../lib/trip-types';
 import type { SessionUser } from '../lib/types';
 import {
@@ -610,8 +612,10 @@ function isMyListItem(item: TripListItemRow, myMemberId: string): boolean {
 function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<'TODO' | 'PACK_BUY' | 'MINE'>('TODO');
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
-  const [packType, setPackType] = useState<'PACK' | 'BUY'>('PACK');
+  const [notes, setNotes] = useState('');
+  const [itemType, setItemType] = useState<'TODO' | 'PACK' | 'BUY'>('TODO');
   const [assignToAll, setAssignToAll] = useState(false);
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
 
@@ -630,14 +634,42 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     );
   }, [items, mode, trip.myMember.id]);
 
+  const resetForm = (nextMode: typeof mode = mode) => {
+    setEditingId(null);
+    setTitle('');
+    setNotes('');
+    setItemType(nextMode === 'PACK_BUY' ? 'PACK' : 'TODO');
+    setAssignToAll(false);
+    setAssigneeIds([]);
+  };
+
+  const startEdit = (item: TripListItemRow) => {
+    setEditingId(item.id);
+    setTitle(item.title);
+    setNotes(item.notes ?? '');
+    setItemType(item.type);
+    setAssignToAll(item.assignToAll);
+    setAssigneeIds(item.assignees.map((m) => m.id));
+  };
+
   const createMutation = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       api(`/trips/${trip.id}/list-items`, { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
-      setTitle('');
-      setAssignToAll(false);
-      setAssigneeIds([]);
+      resetForm();
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ itemId, body }: { itemId: string; body: Record<string, unknown> }) =>
+      api(`/trips/${trip.id}/list-items/${itemId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
+      resetForm();
     },
   });
 
@@ -655,8 +687,9 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const deleteMutation = useMutation({
     mutationFn: (itemId: string) =>
       api(`/trips/${trip.id}/list-items/${itemId}`, { method: 'DELETE' }),
-    onSuccess: () => {
+    onSuccess: (_data, itemId) => {
       void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
+      if (editingId === itemId) resetForm();
     },
   });
 
@@ -667,15 +700,22 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     );
   };
 
-  const onAdd = (e: FormEvent) => {
+  const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || closed || mode === 'MINE') return;
-    createMutation.mutate({
-      type: mode === 'TODO' ? 'TODO' : packType,
+    if (!title.trim() || closed) return;
+    const body = {
+      type: itemType,
       title: title.trim(),
+      notes: notes.trim() || null,
       assignToAll,
       assigneeMemberIds: assignToAll ? [] : assigneeIds,
-    });
+    };
+    if (editingId) {
+      updateMutation.mutate({ itemId: editingId, body });
+      return;
+    }
+    if (mode === 'MINE') return;
+    createMutation.mutate(body);
   };
 
   const emptyCopy =
@@ -685,50 +725,88 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
         ? 'Nada que traer todavía'
         : 'No tenés tareas asignadas';
 
+  const showForm = !closed && (editingId != null || mode !== 'MINE');
+  const formBusy = createMutation.isPending || updateMutation.isPending;
+  const showTypePicker = editingId != null || mode === 'PACK_BUY';
+
   return (
     <>
       <div className="segmented segmented-wrap">
-        <button type="button" className={mode === 'TODO' ? 'active' : ''} onClick={() => setMode('TODO')}>
+        <button
+          type="button"
+          className={mode === 'TODO' ? 'active' : ''}
+          onClick={() => {
+            setMode('TODO');
+            if (!editingId) resetForm('TODO');
+          }}
+        >
           Hacer
         </button>
         <button
           type="button"
           className={mode === 'PACK_BUY' ? 'active' : ''}
-          onClick={() => setMode('PACK_BUY')}
+          onClick={() => {
+            setMode('PACK_BUY');
+            if (!editingId) resetForm('PACK_BUY');
+          }}
         >
           Traer / Comprar
         </button>
-        <button type="button" className={mode === 'MINE' ? 'active' : ''} onClick={() => setMode('MINE')}>
+        <button
+          type="button"
+          className={mode === 'MINE' ? 'active' : ''}
+          onClick={() => {
+            setMode('MINE');
+            if (!editingId) resetForm('MINE');
+          }}
+        >
           Mis tareas
         </button>
       </div>
 
-      {!closed && mode !== 'MINE' && (
-        <form className="card promo-form" onSubmit={onAdd}>
-          {mode === 'PACK_BUY' && (
+      {showForm && (
+        <form className="card promo-form" onSubmit={onSubmit}>
+          {showTypePicker && (
             <div className="segmented">
+              {editingId != null && (
+                <button
+                  type="button"
+                  className={itemType === 'TODO' ? 'active' : ''}
+                  onClick={() => setItemType('TODO')}
+                >
+                  Hacer
+                </button>
+              )}
               <button
                 type="button"
-                className={packType === 'PACK' ? 'active' : ''}
-                onClick={() => setPackType('PACK')}
+                className={itemType === 'PACK' ? 'active' : ''}
+                onClick={() => setItemType('PACK')}
               >
                 Traer
               </button>
               <button
                 type="button"
-                className={packType === 'BUY' ? 'active' : ''}
-                onClick={() => setPackType('BUY')}
+                className={itemType === 'BUY' ? 'active' : ''}
+                onClick={() => setItemType('BUY')}
               >
                 Comprar
               </button>
             </div>
           )}
           <label>
-            {mode === 'TODO' ? 'Qué hay que hacer' : 'Ítem'}
+            {itemType === 'TODO' ? 'Qué hay que hacer' : 'Ítem'}
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder={mode === 'TODO' ? 'Reservar auto' : 'Protector solar'}
+              placeholder={itemType === 'TODO' ? 'Reservar auto' : 'Protector solar'}
+            />
+          </label>
+          <label>
+            Notas
+            <input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Opcional"
             />
           </label>
           <div className="listas-assignees">
@@ -757,9 +835,16 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
               <span className="hint">Sin asignar</span>
             )}
           </div>
-          <button type="submit" className="btn-secondary" disabled={!title.trim()}>
-            Agregar
-          </button>
+          <div className="listas-form-actions">
+            <button type="submit" className="btn-secondary" disabled={!title.trim() || formBusy}>
+              {editingId ? 'Guardar' : 'Agregar'}
+            </button>
+            {editingId && (
+              <button type="button" className="btn-link" onClick={() => resetForm()}>
+                Cancelar
+              </button>
+            )}
+          </div>
         </form>
       )}
 
@@ -773,13 +858,19 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
             const assigneeLabel = listItemAssigneeLabel(item);
             const supportParts = [
               mode !== 'TODO' ? typeLabel : null,
-              mode !== 'MINE' ? assigneeLabel : null,
+              assigneeLabel,
+              item.notes ? item.notes : null,
             ].filter(Boolean);
 
             return (
               <ListItem
                 key={item.id}
-                className={item.status === 'DONE' ? 'listas-item-done' : undefined}
+                className={[
+                  item.status === 'DONE' ? 'listas-item-done' : '',
+                  editingId === item.id ? 'listas-item-editing' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ') || undefined}
                 leading={
                   <input
                     type="checkbox"
@@ -798,14 +889,24 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
                 support={supportParts.length > 0 ? supportParts.join(' · ') : undefined}
                 trailing={
                   !closed ? (
-                    <button
-                      type="button"
-                      className="btn-link"
-                      onClick={() => deleteMutation.mutate(item.id)}
-                      aria-label="Eliminar"
-                    >
-                      ✕
-                    </button>
+                    <div className="listas-item-actions">
+                      <button
+                        type="button"
+                        className="btn-link"
+                        onClick={() => startEdit(item)}
+                        aria-label="Editar"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-link"
+                        onClick={() => deleteMutation.mutate(item.id)}
+                        aria-label="Eliminar"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   ) : undefined
                 }
               />
@@ -1007,6 +1108,17 @@ function AlojamientoTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   );
 }
 
+function memberStatusLabel(m: TripMember): string {
+  if (m.role === 'ORGANIZER') return 'Organizador';
+  if (m.inviteStatus === 'PENDING' && !m.userId) return 'Sin reclamar';
+  if (m.inviteStatus === 'JOINED') return 'Unido';
+  return 'Pendiente';
+}
+
+function isPendingSlot(m: TripMember): boolean {
+  return m.inviteStatus === 'PENDING' && !m.userId;
+}
+
 function PersonasTab({
   trip,
   inviteLink,
@@ -1020,16 +1132,37 @@ function PersonasTab({
 }) {
   const queryClient = useQueryClient();
   const closed = trip.status === 'CLOSED';
+  const canEdit = trip.isOrganizer && !closed;
   const [newName, setNewName] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editHouseholdId, setEditHouseholdId] = useState('');
+  const [editRole, setEditRole] = useState<TripMemberRole>('MEMBER');
+  const [memberError, setMemberError] = useState<string | null>(null);
 
   const households = trip.households ?? [];
   const householdName = (id: string | null) =>
     id ? households.find((h) => h.id === id)?.name ?? null : null;
 
+  const selected = selectedId ? trip.members.find((m) => m.id === selectedId) ?? null : null;
+
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['trips', trip.id] });
+  };
+
+  const openMember = (m: TripMember) => {
+    setSelectedId(m.id);
+    setEditName(m.displayName);
+    setEditHouseholdId(m.tripHouseholdId ?? '');
+    setEditRole(m.role);
+    setMemberError(null);
+  };
+
+  const closeMember = () => {
+    setSelectedId(null);
+    setMemberError(null);
   };
 
   const addMember = useMutation({
@@ -1049,24 +1182,36 @@ function PersonasTab({
   const deleteMember = useMutation({
     mutationFn: (memberId: string) =>
       api(`/trips/${trip.id}/members/${memberId}`, { method: 'DELETE' }),
-    onSuccess: invalidate,
-    onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo eliminar'),
+    onSuccess: () => {
+      closeMember();
+      invalidate();
+    },
+    onError: (err) =>
+      setMemberError(err instanceof Error ? err.message : 'No se pudo eliminar'),
   });
 
   const patchMember = useMutation({
     mutationFn: ({
       memberId,
+      displayName,
       tripHouseholdId,
+      role,
     }: {
       memberId: string;
-      tripHouseholdId: string | null;
+      displayName?: string;
+      tripHouseholdId?: string | null;
+      role?: TripMemberRole;
     }) =>
       api(`/trips/${trip.id}/members/${memberId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ tripHouseholdId }),
+        body: JSON.stringify({ displayName, tripHouseholdId, role }),
       }),
-    onSuccess: invalidate,
-    onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo asignar'),
+    onSuccess: () => {
+      closeMember();
+      invalidate();
+    },
+    onError: (err) =>
+      setMemberError(err instanceof Error ? err.message : 'No se pudo guardar'),
   });
 
   const addGroup = useMutation({
@@ -1090,63 +1235,45 @@ function PersonasTab({
     onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo eliminar'),
   });
 
+  const saveMember = () => {
+    if (!selected) return;
+    const name = editName.trim();
+    if (!name) {
+      setMemberError('El nombre es obligatorio');
+      return;
+    }
+    const nextHousehold = editHouseholdId || null;
+    const nameChanged = name !== selected.displayName;
+    const householdChanged = nextHousehold !== (selected.tripHouseholdId ?? null);
+    const roleChanged = !isPendingSlot(selected) && editRole !== selected.role;
+    if (!nameChanged && !householdChanged && !roleChanged) {
+      closeMember();
+      return;
+    }
+    patchMember.mutate({
+      memberId: selected.id,
+      ...(nameChanged ? { displayName: name } : {}),
+      ...(householdChanged ? { tripHouseholdId: nextHousehold } : {}),
+      ...(roleChanged ? { role: editRole } : {}),
+    });
+  };
+
   return (
     <>
-      <section className="card">
+      <section className="card personas-list">
         <h2>Personas</h2>
-        <ul className="list-plain">
-          {trip.members.map((m) => {
-            const group = householdName(m.tripHouseholdId);
-            const pending = m.inviteStatus === 'PENDING' && !m.userId;
-            return (
-              <li key={m.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
-                <div className="row-between">
-                  <span>
-                    {m.displayName}
-                    {m.role === 'ORGANIZER' && <span className="hint"> · Organizador</span>}
-                    {pending && <span className="hint"> · Sin reclamar</span>}
-                    {!pending && m.inviteStatus === 'JOINED' && m.role !== 'ORGANIZER' && (
-                      <span className="hint"> · Unido</span>
-                    )}
-                  </span>
-                  {trip.isOrganizer && !closed && pending && (
-                    <button
-                      type="button"
-                      className="btn-link"
-                      onClick={() => deleteMember.mutate(m.id)}
-                      disabled={deleteMember.isPending}
-                    >
-                      Quitar
-                    </button>
-                  )}
-                </div>
-                {group && <span className="hint">Grupo: {group}</span>}
-                {trip.isOrganizer && !closed && (
-                  <label className="hint" style={{ display: 'block' }}>
-                    Asignar a grupo
-                    <select
-                      value={m.tripHouseholdId ?? ''}
-                      onChange={(e) =>
-                        patchMember.mutate({
-                          memberId: m.id,
-                          tripHouseholdId: e.target.value || null,
-                        })
-                      }
-                      disabled={patchMember.isPending}
-                    >
-                      <option value="">Sin grupo</option>
-                      {households.map((h) => (
-                        <option key={h.id} value={h.id}>
-                          {h.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        {trip.members.map((m) => {
+          const group = householdName(m.tripHouseholdId);
+          return (
+            <ListItem
+              key={m.id}
+              title={m.displayName}
+              support={group ?? undefined}
+              trailing={<span className="personas-status">{memberStatusLabel(m)}</span>}
+              onClick={() => openMember(m)}
+            />
+          );
+        })}
       </section>
 
       {trip.isOrganizer && !closed && (
@@ -1250,6 +1377,111 @@ function PersonasTab({
       )}
 
       {error && <p className="error">{error}</p>}
+
+      {selected && (
+        <div className="md-dialog-overlay" role="presentation" onClick={closeMember}>
+          <div
+            className="md-dialog personas-member-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="personas-member-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="personas-member-title">{canEdit ? 'Editar persona' : selected.displayName}</h2>
+            <div className="md-dialog-body">
+              {canEdit ? (
+                <form
+                  className="promo-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    saveMember();
+                  }}
+                >
+                  <label>
+                    Nombre
+                    <input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      required
+                      autoFocus
+                    />
+                  </label>
+                  <label>
+                    Grupo
+                    <select
+                      value={editHouseholdId}
+                      onChange={(e) => setEditHouseholdId(e.target.value)}
+                    >
+                      <option value="">Sin grupo</option>
+                      {households.map((h) => (
+                        <option key={h.id} value={h.id}>
+                          {h.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {!isPendingSlot(selected) && (
+                    <label>
+                      Rol
+                      <select
+                        value={editRole}
+                        onChange={(e) => setEditRole(e.target.value as TripMemberRole)}
+                      >
+                        <option value="MEMBER">Miembro</option>
+                        <option value="ORGANIZER">Organizador</option>
+                      </select>
+                    </label>
+                  )}
+                  {isPendingSlot(selected) && (
+                    <p className="hint" style={{ margin: 0 }}>
+                      Lugar sin reclamar. Pueden tomarlo con el link de invitación.
+                    </p>
+                  )}
+                </form>
+              ) : (
+                <div className="personas-member-readonly">
+                  <p>
+                    <strong>{selected.displayName}</strong>
+                  </p>
+                  <p className="hint" style={{ margin: 0 }}>
+                    {memberStatusLabel(selected)}
+                    {householdName(selected.tripHouseholdId)
+                      ? ` · ${householdName(selected.tripHouseholdId)}`
+                      : ''}
+                  </p>
+                </div>
+              )}
+              {memberError && <p className="error">{memberError}</p>}
+            </div>
+            <div className="md-dialog-actions personas-member-actions">
+              {canEdit && isPendingSlot(selected) && (
+                <Button
+                  type="button"
+                  variant="danger-text"
+                  disabled={deleteMember.isPending || patchMember.isPending}
+                  onClick={() => deleteMember.mutate(selected.id)}
+                >
+                  {deleteMember.isPending ? 'Quitando…' : 'Quitar'}
+                </Button>
+              )}
+              <span className="personas-member-actions-spacer" />
+              <Button type="button" variant="text" disabled={patchMember.isPending} onClick={closeMember}>
+                {canEdit ? 'Cancelar' : 'Cerrar'}
+              </Button>
+              {canEdit && (
+                <Button
+                  type="button"
+                  variant="tonal"
+                  disabled={patchMember.isPending || deleteMember.isPending}
+                  onClick={saveMember}
+                >
+                  {patchMember.isPending ? 'Guardando…' : 'Guardar'}
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
