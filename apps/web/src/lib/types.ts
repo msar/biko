@@ -316,6 +316,7 @@ export interface DashboardPaymentMethodSpend {
   paymentMethodId: string;
   name: string;
   type: PaymentMethodType;
+  ownerUserId: string | null;
   total: number;
   categories: DashboardCategorySpend[];
 }

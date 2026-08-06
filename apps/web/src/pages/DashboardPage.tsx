@@ -82,7 +82,12 @@ export default function DashboardPage() {
     queryFn: () => api<RecurringOccurrence[]>('/recurring-payments/occurrences?status=PENDING&limit=8'),
   });
 
-  const creditCards = data?.byPaymentMethod.filter((pm) => pm.type === 'CREDIT_CARD') ?? [];
+  const creditCards =
+    scope === 'all'
+      ? (data?.byPaymentMethod.filter(
+          (pm) => pm.type === 'CREDIT_CARD' && pm.ownerUserId != null && pm.ownerUserId === user?.id,
+        ) ?? [])
+      : [];
   const maxGroup = Math.max(1, ...(data?.byGroup.map((g) => g.total) ?? []));
   const maxCard = Math.max(1, ...creditCards.map((c) => c.total));
   const maxUser = Math.max(1, ...(data?.byUser.map((u) => u.total) ?? []));

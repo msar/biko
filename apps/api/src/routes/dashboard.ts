@@ -177,6 +177,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         paymentMethodId: string;
         name: string;
         type: string;
+        ownerUserId: string | null;
         total: number;
         categories: Map<string, PmCategoryEntry>;
       }
@@ -221,6 +222,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         paymentMethodId: pm.id,
         name: pmName,
         type: pm.definition.type,
+        ownerUserId: pm.ownerUserId ?? null,
         total: 0,
         categories: new Map(),
       };
@@ -320,6 +322,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
           paymentMethodId: p.paymentMethodId,
           name: p.name,
           type: p.type,
+          ownerUserId: p.ownerUserId,
           total: round2(p.total),
           categories: [...p.categories.values()]
             .map((c) => ({ ...c, total: round2(c.total) }))
