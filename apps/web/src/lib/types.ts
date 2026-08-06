@@ -4,8 +4,12 @@ export interface SessionUser {
   id: string;
   name: string;
   email: string;
-  householdId: string;
+  householdId: string | null;
   isSuperUser?: boolean;
+  isGuestSession?: boolean;
+  /** Present for trip-guest sessions (no full account). */
+  tripId?: string;
+  tripMemberId?: string;
 }
 
 export interface HouseholdMember {

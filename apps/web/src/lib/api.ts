@@ -72,7 +72,9 @@ function isPublicAuthPath(path: string): boolean {
   return (
     path === '/auth/login' ||
     path === '/auth/register' ||
-    path.startsWith('/auth/webauthn/login/')
+    path.startsWith('/auth/webauthn/login/') ||
+    path.startsWith('/trips/invite/') ||
+    path === '/trips/join'
   );
 }
 

@@ -36,7 +36,7 @@ export function sessionUserPayload(user: {
   id: string;
   name: string;
   email: string;
-  householdId: string;
+  householdId: string | null;
 }) {
   return {
     id: user.id,
@@ -44,6 +44,7 @@ export function sessionUserPayload(user: {
     email: user.email,
     householdId: user.householdId,
     isSuperUser: isSuperUser(user.email),
+    isGuestSession: false,
   };
 }
 

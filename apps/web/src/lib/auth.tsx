@@ -24,6 +24,7 @@ import type { SessionUser } from './types';
 interface AuthState {
   user: SessionUser | null;
   loading: boolean;
+  isGuestSession: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (params: {
     name: string;
@@ -34,6 +35,10 @@ interface AuthState {
   }) => Promise<void>;
   loginWithPasskey: () => Promise<void>;
   registerPasskey: (deviceName?: string) => Promise<void>;
+  /** Persist a trip-guest JWT from invite join. */
+  applyGuestSession: (token: string, session: SessionUser) => void;
+  /** Upgrade guest → linked account. */
+  applySession: (token: string, sessionUser: SessionUser) => void;
   logout: () => void;
 }
 
@@ -66,7 +71,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         writeCachedAuthUser(null);
         return;
       }
-      // Token replaced in another tab — adopt cached user or wait for next /auth/me.
       const cached = readCachedUser();
       if (cached) setUser(cached);
     };
@@ -88,7 +92,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Offline: usar usuario cacheado sin revalidar (PWA).
       if (!navigator.onLine) {
         if (!cancelled) {
           setUser(readCachedUser());
@@ -99,25 +102,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const me = await api<{
-          id: string;
-          name: string;
-          email: string;
-          isSuperUser: boolean;
-          household: { id: string };
+          kind?: string;
+          id?: string;
+          name?: string;
+          email?: string;
+          isSuperUser?: boolean;
+          isGuestSession?: boolean;
+          household?: { id: string } | null;
+          tripId?: string;
+          tripMemberId?: string;
+          displayName?: string;
         }>('/auth/me');
         if (cancelled) return;
-        const session = {
-          id: me.id,
-          name: me.name,
-          email: me.email,
-          householdId: me.household.id,
-          isSuperUser: me.isSuperUser ?? isSuperUser(me.email),
-        };
-        setUser(session);
-        writeCachedAuthUser(session);
+
+        if (me.kind === 'trip_guest' || me.isGuestSession) {
+          const session: SessionUser = {
+            id: me.tripMemberId ?? 'guest',
+            name: me.displayName ?? 'Invitado',
+            email: '',
+            householdId: null,
+            isGuestSession: true,
+            tripId: me.tripId,
+            tripMemberId: me.tripMemberId,
+          };
+          setUser(session);
+          writeCachedAuthUser(session);
+        } else {
+          const session: SessionUser = {
+            id: me.id!,
+            name: me.name!,
+            email: me.email!,
+            householdId: me.household?.id ?? null,
+            isSuperUser: me.isSuperUser ?? isSuperUser(me.email!),
+            isGuestSession: false,
+          };
+          setUser(session);
+          writeCachedAuthUser(session);
+        }
       } catch {
         if (cancelled) return;
-        // api() only clears the token after confirmed /auth/me 401s.
         if (!readAuthToken()) {
           setUser(null);
         } else {
@@ -143,19 +166,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value: AuthState = {
     user,
     loading,
+    isGuestSession: Boolean(user?.isGuestSession),
     login: async (email, password) => {
       const res = await api<{ token: string; user: SessionUser }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
-      applySession(res.token, res.user);
+      applySession(res.token, { ...res.user, isGuestSession: false });
     },
     register: async (params) => {
       const res = await api<{ token: string; user: SessionUser }>('/auth/register', {
         method: 'POST',
         body: JSON.stringify(params),
       });
-      applySession(res.token, res.user);
+      applySession(res.token, { ...res.user, isGuestSession: false });
     },
     loginWithPasskey: async () => {
       const options = await api<PublicKeyCredentialRequestOptionsJSON>('/auth/webauthn/login/options', {
@@ -167,7 +191,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         method: 'POST',
         body: JSON.stringify({ response: assertion }),
       });
-      applySession(res.token, res.user);
+      applySession(res.token, { ...res.user, isGuestSession: false });
     },
     registerPasskey: async (deviceName) => {
       const options = await api<PublicKeyCredentialCreationOptionsJSON>('/auth/webauthn/register/options', {
@@ -183,6 +207,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }),
       });
     },
+    applyGuestSession: (token, session) => {
+      applySession(token, { ...session, isGuestSession: true });
+    },
+    applySession,
     logout: () => clearSession(setUser),
   };
 

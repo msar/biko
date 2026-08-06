@@ -113,6 +113,7 @@ export interface TripHub {
   id: string;
   createdByUserId: string;
   name: string;
+  shareSlug: string;
   destination: string | null;
   startDate: string | null;
   endDate: string | null;
@@ -125,6 +126,7 @@ export interface TripHub {
   updatedAt: string;
   members: TripMember[];
   households: TripHousehold[];
+  /** Share path slug (same as shareSlug); kept for copy-link UX. */
   inviteCode: string | null;
   accommodation: TripAccommodation | null;
   myMember: TripMember;
@@ -210,10 +212,12 @@ export interface TripExportPreview {
 
 export interface TripInvitePreview {
   code: string;
+  inviteToken?: string;
   expiresAt: string | null;
   trip: {
     id: string;
     name: string;
+    shareSlug?: string;
     destination: string | null;
     status: TripStatus;
     startDate: string | null;

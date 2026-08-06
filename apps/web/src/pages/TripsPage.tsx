@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { Button, Icon, IconButton } from '../components/ui';
 import { api } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import type { TripListItem } from '../lib/trip-types';
 import { TRIP_STATUS_LABEL } from '../lib/trip-utils';
 
@@ -17,10 +18,16 @@ function fmtRange(start: string | null, end: string | null): string | null {
 
 export default function TripsPage() {
   const navigate = useNavigate();
+  const { isGuestSession, user } = useAuth();
   const { data: trips, isLoading, error } = useQuery({
     queryKey: ['trips'],
     queryFn: () => api<TripListItem[]>('/trips'),
+    enabled: !isGuestSession,
   });
+
+  if (isGuestSession && user?.tripId) {
+    return <Navigate to={`/viajes/${user.tripId}`} replace />;
+  }
 
   return (
     <div className="page">
@@ -75,9 +82,11 @@ export default function TripsPage() {
         })}
       </div>
 
-      <p className="hint">
-        <Link to="/ajustes">← Volver a Más</Link>
-      </p>
+      {user?.householdId && (
+        <p className="hint">
+          <Link to="/">← Volver a Biko</Link>
+        </p>
+      )}
     </div>
   );
 }

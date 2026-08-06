@@ -12,6 +12,7 @@ import type {
   TripMemberRole,
   TripStatus,
 } from '@prisma/client';
+import { allocateUniqueShareSlug } from './trip-slug.js';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -86,17 +87,41 @@ const expenseInclude = {
   },
 } as const;
 
-export async function requireTripMember(db: Db, tripId: string, userId: string) {
+export type TripActor =
+  | { userId: string }
+  | { tripMemberId: string; guestTripId: string };
+
+function normalizeActor(actor: TripActor | string): TripActor {
+  return typeof actor === 'string' ? { userId: actor } : actor;
+}
+
+export function isGuestActor(actor: TripActor | string): boolean {
+  const a = normalizeActor(actor);
+  return 'tripMemberId' in a;
+}
+
+export async function requireTripMember(db: Db, tripId: string, actor: TripActor | string) {
+  const a = normalizeActor(actor);
+  if ('tripMemberId' in a) {
+    if (a.guestTripId !== tripId) throw new TripForbiddenError();
+    const member = await db.tripMember.findFirst({
+      where: { id: a.tripMemberId, tripId, inviteStatus: 'JOINED' },
+      include: { trip: true },
+    });
+    if (!member) throw new TripForbiddenError();
+    return member;
+  }
+
   const member = await db.tripMember.findFirst({
-    where: { tripId, userId, inviteStatus: 'JOINED' },
+    where: { tripId, userId: a.userId, inviteStatus: 'JOINED' },
     include: { trip: true },
   });
   if (!member) throw new TripForbiddenError();
   return member;
 }
 
-export async function requireTripOrganizer(db: Db, tripId: string, userId: string) {
-  const member = await requireTripMember(db, tripId, userId);
+export async function requireTripOrganizer(db: Db, tripId: string, actor: TripActor | string) {
+  const member = await requireTripMember(db, tripId, actor);
   if (member.role !== 'ORGANIZER') {
     throw new TripForbiddenError('Solo el organizador puede hacer esto');
   }
@@ -159,10 +184,17 @@ export async function createTrip(
   const name = input.name.trim();
   if (!name) throw new TripValidationError('El nombre es obligatorio');
 
+  const shareSlug = await allocateUniqueShareSlug(
+    async (slug) => Boolean(await db.trip.findUnique({ where: { shareSlug: slug }, select: { id: true } })),
+    name,
+    input.startDate ?? null,
+  );
+
   return db.trip.create({
     data: {
       createdByUserId: userId,
       name,
+      shareSlug,
       destination: input.destination?.trim() || null,
       startDate: input.startDate ?? null,
       endDate: input.endDate ?? null,
@@ -190,8 +222,14 @@ export async function createTrip(
   });
 }
 
-export async function getTripHub(db: Db, tripId: string, userId: string, householdId: string) {
-  const me = await requireTripMember(db, tripId, userId);
+export async function getTripHub(
+  db: Db,
+  tripId: string,
+  actor: TripActor | string,
+  householdId: string | null | undefined,
+  opts?: { isGuestSession?: boolean },
+) {
+  const me = await requireTripMember(db, tripId, actor);
   const trip = await db.trip.findUnique({
     where: { id: tripId },
     include: {
@@ -203,10 +241,12 @@ export async function getTripHub(db: Db, tripId: string, userId: string, househo
       households: { select: householdSelect, orderBy: { createdAt: 'asc' } },
       invites: { orderBy: { createdAt: 'desc' }, take: 1 },
       accommodation: true,
-      exportBatches: {
-        where: { householdId },
-        take: 1,
-      },
+      exportBatches: householdId
+        ? {
+            where: { householdId },
+            take: 1,
+          }
+        : false,
     },
   });
   if (!trip) throw new TripNotFoundError();
@@ -232,9 +272,15 @@ export async function getTripHub(db: Db, tripId: string, userId: string, househo
   const totalSpent = round2(categoryTotals.reduce((s, c) => s + c.total, 0));
 
   const isOrganizer = me.role === 'ORGANIZER';
-  const alreadyExported = trip.exportBatches.length > 0 || trip.exportHouseholdId === householdId;
+  const exportBatches = Array.isArray(trip.exportBatches) ? trip.exportBatches : [];
+  const alreadyExported =
+    exportBatches.length > 0 || (householdId != null && trip.exportHouseholdId === householdId);
   const canExport =
-    isOrganizer && trip.status === 'CLOSED' && !alreadyExported && Boolean(householdId);
+    isOrganizer &&
+    trip.status === 'CLOSED' &&
+    !alreadyExported &&
+    Boolean(householdId) &&
+    !opts?.isGuestSession;
 
   return {
     ...serializeTrip(trip),
@@ -242,7 +288,7 @@ export async function getTripHub(db: Db, tripId: string, userId: string, househo
     isOrganizer,
     canExport,
     alreadyExported,
-    isGuestSession: false,
+    isGuestSession: Boolean(opts?.isGuestSession),
     balance: {
       perMember: balance.perMember,
       perUnit: balance.perUnit,
@@ -296,6 +342,7 @@ function serializeTrip(trip: {
   id: string;
   createdByUserId: string;
   name: string;
+  shareSlug: string;
   destination: string | null;
   startDate: Date | null;
   endDate: Date | null;
@@ -342,6 +389,7 @@ function serializeTrip(trip: {
     id: trip.id,
     createdByUserId: trip.createdByUserId,
     name: trip.name,
+    shareSlug: trip.shareSlug,
     destination: trip.destination,
     startDate: trip.startDate,
     endDate: trip.endDate,
@@ -354,7 +402,7 @@ function serializeTrip(trip: {
     updatedAt: trip.updatedAt,
     members: trip.members.map(serializeMember),
     households: (trip.households ?? []).map(serializeHousehold),
-    inviteCode: trip.invites[0]?.code ?? null,
+    inviteCode: trip.shareSlug,
     accommodation: trip.accommodation ? serializeAccommodation(trip.accommodation) : null,
   };
 }
@@ -390,7 +438,7 @@ function serializeAccommodation(acc: {
 export async function updateTrip(
   db: Db,
   tripId: string,
-  userId: string,
+  actor: TripActor | string,
   input: {
     name?: string;
     destination?: string | null;
@@ -399,7 +447,7 @@ export async function updateTrip(
     status?: TripStatus;
   },
 ) {
-  const me = await requireTripMember(db, tripId, userId);
+  const me = await requireTripMember(db, tripId, actor);
   if (input.status === 'CLOSED' || (input.status === 'ACTIVE' && me.trip.status === 'CLOSED')) {
     if (me.role !== 'ORGANIZER') {
       throw new TripForbiddenError('Solo el organizador puede cerrar o reabrir el viaje');
@@ -431,8 +479,8 @@ export async function updateTrip(
   });
 }
 
-export async function closeTrip(db: Db, tripId: string, userId: string) {
-  await requireTripOrganizer(db, tripId, userId);
+export async function closeTrip(db: Db, tripId: string, actor: TripActor | string) {
+  await requireTripOrganizer(db, tripId, actor);
   return db.trip.update({
     where: { id: tripId },
     data: { status: 'CLOSED' },
@@ -446,25 +494,33 @@ export async function mintTripInvite(db: Db, tripId: string, userId: string) {
   const invite = await db.tripInvite.create({
     data: { tripId, createdByUserId: userId },
   });
-  return invite;
+  const trip = await db.trip.findUniqueOrThrow({
+    where: { id: tripId },
+    select: { shareSlug: true },
+  });
+  return { ...invite, shareSlug: trip.shareSlug };
+}
+
+async function findInviteByCodeOrSlug(db: Db, codeOrSlug: string) {
+  const key = codeOrSlug.trim();
+  const byCode = await db.tripInvite.findUnique({
+    where: { code: key },
+    include: { trip: true },
+  });
+  if (byCode) return byCode;
+
+  const trip = await db.trip.findUnique({ where: { shareSlug: key } });
+  if (!trip) return null;
+
+  return db.tripInvite.findFirst({
+    where: { tripId: trip.id },
+    orderBy: { createdAt: 'desc' },
+    include: { trip: true },
+  });
 }
 
 export async function getTripInvitePreview(db: Db, code: string) {
-  const invite = await db.tripInvite.findUnique({
-    where: { code: code.trim() },
-    include: {
-      trip: {
-        select: {
-          id: true,
-          name: true,
-          destination: true,
-          status: true,
-          startDate: true,
-          endDate: true,
-        },
-      },
-    },
-  });
+  const invite = await findInviteByCodeOrSlug(db, code);
   if (!invite) throw new TripNotFoundError('Código de invitación inválido');
   if (invite.expiresAt && invite.expiresAt < new Date()) {
     throw new TripValidationError('La invitación expiró');
@@ -481,24 +537,30 @@ export async function getTripInvitePreview(db: Db, code: string) {
   });
 
   return {
-    code: invite.code,
+    code: invite.trip.shareSlug,
+    inviteToken: invite.code,
     expiresAt: invite.expiresAt,
-    trip: invite.trip,
+    trip: {
+      id: invite.trip.id,
+      name: invite.trip.name,
+      shareSlug: invite.trip.shareSlug,
+      destination: invite.trip.destination,
+      status: invite.trip.status,
+      startDate: invite.trip.startDate,
+      endDate: invite.trip.endDate,
+    },
     unclaimedMembers: unclaimedMembers.map(serializeMember),
   };
 }
 
 export async function joinTripByCode(
   db: Db,
-  userId: string,
+  userId: string | null,
   userName: string,
   code: string,
   opts?: { displayName?: string | null; claimMemberId?: string | null },
 ) {
-  const invite = await db.tripInvite.findUnique({
-    where: { code: code.trim() },
-    include: { trip: true },
-  });
+  const invite = await findInviteByCodeOrSlug(db, code);
   if (!invite) throw new TripNotFoundError('Código de invitación inválido');
   if (invite.expiresAt && invite.expiresAt < new Date()) {
     throw new TripValidationError('La invitación expiró');
@@ -507,21 +569,23 @@ export async function joinTripByCode(
     throw new TripValidationError('El viaje ya está cerrado');
   }
 
-  const existing = await db.tripMember.findFirst({
-    where: { tripId: invite.tripId, userId },
-  });
-  if (existing) {
-    if (existing.inviteStatus !== 'JOINED') {
-      return db.tripMember.update({
-        where: { id: existing.id },
-        data: {
-          inviteStatus: 'JOINED',
-          displayName: opts?.displayName?.trim() || existing.displayName || userName,
-        },
-        include: { trip: true },
-      });
+  if (userId) {
+    const existing = await db.tripMember.findFirst({
+      where: { tripId: invite.tripId, userId },
+    });
+    if (existing) {
+      if (existing.inviteStatus !== 'JOINED') {
+        return db.tripMember.update({
+          where: { id: existing.id },
+          data: {
+            inviteStatus: 'JOINED',
+            displayName: opts?.displayName?.trim() || existing.displayName || userName,
+          },
+          include: { trip: true },
+        });
+      }
+      return { ...existing, trip: invite.trip };
     }
-    return { ...existing, trip: invite.trip };
   }
 
   if (opts?.claimMemberId) {
@@ -539,7 +603,7 @@ export async function joinTripByCode(
     return db.tripMember.update({
       where: { id: slot.id },
       data: {
-        userId,
+        userId: userId ?? null,
         inviteStatus: 'JOINED',
         displayName: opts.displayName?.trim() || slot.displayName || userName,
       },
@@ -547,13 +611,48 @@ export async function joinTripByCode(
     });
   }
 
+  const displayName = opts?.displayName?.trim() || userName;
+  if (!displayName) {
+    throw new TripValidationError('Ingresá tu nombre');
+  }
+
   return db.tripMember.create({
     data: {
       tripId: invite.tripId,
-      userId,
-      displayName: opts?.displayName?.trim() || userName,
+      userId: userId ?? null,
+      displayName,
       role: 'MEMBER',
       inviteStatus: 'JOINED',
+    },
+    include: { trip: true },
+  });
+}
+
+/** Link a guest trip seat to a registered user account. */
+export async function linkTripMemberToUser(
+  db: Db,
+  tripId: string,
+  tripMemberId: string,
+  userId: string,
+  displayName?: string | null,
+) {
+  const member = await db.tripMember.findFirst({
+    where: { id: tripMemberId, tripId, inviteStatus: 'JOINED' },
+  });
+  if (!member) throw new TripForbiddenError();
+
+  const other = await db.tripMember.findFirst({
+    where: { tripId, userId, NOT: { id: tripMemberId } },
+  });
+  if (other) {
+    throw new TripValidationError('Esa cuenta ya está en este viaje');
+  }
+
+  return db.tripMember.update({
+    where: { id: tripMemberId },
+    data: {
+      userId,
+      displayName: displayName?.trim() || member.displayName,
     },
     include: { trip: true },
   });
@@ -661,8 +760,8 @@ export async function updateTripMember(
   });
 }
 
-export async function listTripHouseholds(db: Db, tripId: string, userId: string) {
-  await requireTripMember(db, tripId, userId);
+export async function listTripHouseholds(db: Db, tripId: string, actor: TripActor | string) {
+  await requireTripMember(db, tripId, actor);
   const households = await db.tripHousehold.findMany({
     where: { tripId },
     select: householdSelect,
@@ -908,8 +1007,8 @@ function buildTripAllocations(
   }
 }
 
-export async function listTripExpenses(db: Db, tripId: string, userId: string) {
-  await requireTripMember(db, tripId, userId);
+export async function listTripExpenses(db: Db, tripId: string, actor: TripActor | string) {
+  await requireTripMember(db, tripId, actor);
   const expenses = await db.tripExpense.findMany({
     where: { tripId },
     include: expenseInclude,
@@ -918,8 +1017,8 @@ export async function listTripExpenses(db: Db, tripId: string, userId: string) {
   return expenses.map(serializeExpense);
 }
 
-export async function getTripExpense(db: Db, tripId: string, expenseId: string, userId: string) {
-  await requireTripMember(db, tripId, userId);
+export async function getTripExpense(db: Db, tripId: string, expenseId: string, actor: TripActor | string) {
+  await requireTripMember(db, tripId, actor);
   const expense = await db.tripExpense.findFirst({
     where: { id: expenseId, tripId },
     include: expenseInclude,
@@ -1006,8 +1105,8 @@ function serializeExpense(expense: {
   };
 }
 
-export async function createTripExpense(db: Db, tripId: string, userId: string, input: TripExpenseInput) {
-  const me = await requireTripMember(db, tripId, userId);
+export async function createTripExpense(db: Db, tripId: string, actor: TripActor | string, input: TripExpenseInput) {
+  const me = await requireTripMember(db, tripId, actor);
   assertTripWritable(me.trip.status);
 
   if (!(input.amount > 0)) throw new TripValidationError('El monto debe ser mayor a 0');
@@ -1044,10 +1143,10 @@ export async function updateTripExpense(
   db: Db,
   tripId: string,
   expenseId: string,
-  userId: string,
+  actor: TripActor | string,
   input: Partial<TripExpenseInput>,
 ) {
-  const me = await requireTripMember(db, tripId, userId);
+  const me = await requireTripMember(db, tripId, actor);
   assertTripWritable(me.trip.status);
 
   const existing = await db.tripExpense.findFirst({
@@ -1145,8 +1244,8 @@ export async function updateTripExpense(
   return serializeExpense(expense);
 }
 
-export async function deleteTripExpense(db: Db, tripId: string, expenseId: string, userId: string) {
-  const me = await requireTripMember(db, tripId, userId);
+export async function deleteTripExpense(db: Db, tripId: string, expenseId: string, actor: TripActor | string) {
+  const me = await requireTripMember(db, tripId, actor);
   assertTripWritable(me.trip.status);
   const existing = await db.tripExpense.findFirst({ where: { id: expenseId, tripId } });
   if (!existing) throw new TripNotFoundError('Gasto no encontrado');
@@ -1405,10 +1504,10 @@ export async function computeCategoryTotals(db: Db, tripId: string) {
 export async function settleTrip(
   db: Db,
   tripId: string,
-  userId: string,
+  actor: TripActor | string,
   opts?: { note?: string | null; close?: boolean },
 ) {
-  await requireTripMember(db, tripId, userId);
+  await requireTripMember(db, tripId, actor);
   const trip = await db.trip.findUniqueOrThrow({ where: { id: tripId } });
   assertTripWritable(trip.status);
 
@@ -1492,10 +1591,10 @@ async function resolveListAssignees(
 export async function listTripListItems(
   db: Db,
   tripId: string,
-  userId: string,
+  actor: TripActor | string,
   type?: TripListItemType,
 ) {
-  await requireTripMember(db, tripId, userId);
+  await requireTripMember(db, tripId, actor);
   const items = await db.tripListItem.findMany({
     where: { tripId, ...(type ? { type } : {}) },
     include: listItemInclude,
@@ -1507,7 +1606,7 @@ export async function listTripListItems(
 export async function createTripListItem(
   db: Db,
   tripId: string,
-  userId: string,
+  actor: TripActor | string,
   input: {
     type: TripListItemType;
     title: string;
@@ -1519,7 +1618,7 @@ export async function createTripListItem(
     dayDate?: Date | null;
   },
 ) {
-  const me = await requireTripMember(db, tripId, userId);
+  const me = await requireTripMember(db, tripId, actor);
   assertTripWritable(me.trip.status);
   const title = input.title.trim();
   if (!title) throw new TripValidationError('El título es obligatorio');
@@ -1548,7 +1647,7 @@ export async function updateTripListItem(
   db: Db,
   tripId: string,
   itemId: string,
-  userId: string,
+  actor: TripActor | string,
   input: {
     title?: string;
     notes?: string | null;
@@ -1561,7 +1660,7 @@ export async function updateTripListItem(
     type?: TripListItemType;
   },
 ) {
-  const me = await requireTripMember(db, tripId, userId);
+  const me = await requireTripMember(db, tripId, actor);
   assertTripWritable(me.trip.status);
   const existing = await db.tripListItem.findFirst({ where: { id: itemId, tripId } });
   if (!existing) throw new TripNotFoundError('Ítem no encontrado');
@@ -1605,8 +1704,8 @@ export async function updateTripListItem(
   return serializeListItem(item);
 }
 
-export async function deleteTripListItem(db: Db, tripId: string, itemId: string, userId: string) {
-  const me = await requireTripMember(db, tripId, userId);
+export async function deleteTripListItem(db: Db, tripId: string, itemId: string, actor: TripActor | string) {
+  const me = await requireTripMember(db, tripId, actor);
   assertTripWritable(me.trip.status);
   const existing = await db.tripListItem.findFirst({ where: { id: itemId, tripId } });
   if (!existing) throw new TripNotFoundError('Ítem no encontrado');
@@ -1754,7 +1853,7 @@ async function syncAccommodationExpense(
 export async function upsertTripAccommodation(
   db: Db,
   tripId: string,
-  userId: string,
+  actor: TripActor | string,
   input: {
     label?: string | null;
     address?: string | null;
@@ -1767,7 +1866,7 @@ export async function upsertTripAccommodation(
     notes?: string | null;
   },
 ) {
-  const me = await requireTripMember(db, tripId, userId);
+  const me = await requireTripMember(db, tripId, actor);
   assertTripWritable(me.trip.status);
 
   if (input.amount != null && !(input.amount >= 0)) {
@@ -1796,8 +1895,8 @@ export async function upsertTripAccommodation(
   return serializeAccommodation(synced);
 }
 
-export async function getTripAccommodation(db: Db, tripId: string, userId: string) {
-  await requireTripMember(db, tripId, userId);
+export async function getTripAccommodation(db: Db, tripId: string, actor: TripActor | string) {
+  await requireTripMember(db, tripId, actor);
   const row = await db.tripAccommodation.findUnique({ where: { tripId } });
   if (!row) return null;
 

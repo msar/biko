@@ -228,8 +228,9 @@ model Household {
 
 model User {
   id           String   @id @default(cuid())
-  householdId  String
-  household    Household @relation(fields: [householdId], references: [id])
+  /// Null for trip-only accounts (joined a trip without a Biko household).
+  householdId  String?
+  household    Household? @relation(fields: [householdId], references: [id])
   name         String
   email        String    @unique
   // Null si el usuario se autentica vía un provider externo (ej. Clerk) en vez de password propio.
@@ -827,6 +828,8 @@ model Trip {
   createdByUserId   String
   createdBy         User       @relation("TripCreator", fields: [createdByUserId], references: [id])
   name              String
+  /// Human-readable invite path segment (`/viajes/invitar/{shareSlug}`). Stable after create.
+  shareSlug         String     @unique
   destination       String?
   startDate         DateTime?
   endDate           DateTime?

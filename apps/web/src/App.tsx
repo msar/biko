@@ -20,7 +20,7 @@ import AppHeader from './components/AppHeader';
 import BrandMark from './components/BrandLogo';
 import InstallAppBanner from './components/InstallAppBanner';
 import PushEnableBanner from './components/PushEnableBanner';
-import { NavigationBar } from './components/ui';
+import { NavigationBar, TripNavigationBar } from './components/ui';
 import ExpenseDetailPage from './pages/ExpenseDetailPage';
 import TripsPage, { NewTripPage } from './pages/TripsPage';
 import TripHubPage from './pages/TripHubPage';
@@ -55,18 +55,26 @@ function AdminRoute() {
   return <AdminPage />;
 }
 
+function isTripInvitePath(pathname: string) {
+  return pathname.startsWith('/viajes/invitar/');
+}
+
+function isTripPath(pathname: string) {
+  return pathname === '/viajes' || pathname.startsWith('/viajes/');
+}
+
 export default function App() {
-  const { user, loading } = useAuth();
+  const { user, loading, isGuestSession } = useAuth();
   const location = useLocation();
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isGuestSession) return;
     return startOutboxSync(() => {
       void queryClient.invalidateQueries({ queryKey: ['expenses'] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     });
-  }, [user, queryClient]);
+  }, [user, isGuestSession, queryClient]);
 
   if (loading) {
     return (
@@ -76,21 +84,50 @@ export default function App() {
       </div>
     );
   }
-  if (!user) return <LoginPage />;
+
+  const onInvite = isTripInvitePath(location.pathname);
+  const onTrip = isTripPath(location.pathname);
+  const allowWithoutAccount = onInvite || (isGuestSession && onTrip);
+
+  if (!user && !allowWithoutAccount) {
+    return <LoginPage />;
+  }
+
+  // Guests (and invite preview) stay inside trip routes
+  if (isGuestSession && !onTrip) {
+    const tripId = user?.tripId;
+    return <Navigate to={tripId ? `/viajes/${tripId}` : '/viajes/invitar/'} replace />;
+  }
+
+  if (!user && onInvite) {
+    return (
+      <div className="app">
+        <main className="content">
+          <Routes>
+            <Route path="/viajes/invitar/:code" element={<TripJoinPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </main>
+      </div>
+    );
+  }
 
   const hideNav =
     location.pathname === '/nuevo' ||
     location.pathname.startsWith('/gastos/') ||
     location.pathname.startsWith('/importar-resumen') ||
     location.pathname === '/viajes/nuevo' ||
-    (location.pathname.startsWith('/viajes/') && location.pathname.includes('/gastos/'));
+    (location.pathname.startsWith('/viajes/') && location.pathname.includes('/gastos/')) ||
+    onInvite;
+
+  const useTripNav = onTrip && !hideNav;
 
   return (
     <div className="app">
       <OnlineBanner />
-      <InstallAppBanner />
-      <PushEnableBanner />
-      {!hideNav && <AppHeader />}
+      {!isGuestSession && <InstallAppBanner />}
+      {!isGuestSession && <PushEnableBanner />}
+      {!hideNav && !useTripNav && !isGuestSession && <AppHeader />}
       <main className="content">
         <Routes>
           <Route path="/" element={<DashboardPage />} />
@@ -114,10 +151,13 @@ export default function App() {
           <Route path="/viajes/:id/gastos/:expenseId" element={<TripExpenseDetailPage />} />
           <Route path="/viajes/:id" element={<TripHubPage />} />
           <Route path="/admin" element={<AdminRoute />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route
+            path="*"
+            element={<Navigate to={isGuestSession && user?.tripId ? `/viajes/${user.tripId}` : '/'} replace />}
+          />
         </Routes>
       </main>
-      {!hideNav && <NavigationBar />}
+      {useTripNav ? <TripNavigationBar /> : !hideNav && !isGuestSession ? <NavigationBar /> : null}
     </div>
   );
 }

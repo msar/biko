@@ -27,6 +27,22 @@ Trip data remains source of truth until export. Unexported trips are valid forev
 
 ---
 
+## Auth, guests, and share links (implemented)
+
+| Concern | Contract |
+|---------|----------|
+| **Invite URL** | `/viajes/invitar/{shareSlug}` — `Trip.shareSlug` from trip name (+ year / `-2` on collision). Stable after create. Legacy `TripInvite.code` (cuid) still resolves. |
+| **Guest JWT** | `{ kind: 'trip_guest', tripId, tripMemberId }` after name-only join. No `User` / household required. |
+| **User JWT** | `{ kind: 'user', userId, householdId?, email }`. `householdId` may be null for trip-only accounts linked later. |
+| **Public routes** | `GET /trips/invite/:code`, `POST /trips/join` (optional auth). |
+| **Link account** | `POST /trips/:tripId/link-account` (guest JWT) → register trip-only or login → sets `TripMember.userId`, returns user JWT. |
+| **Hub flag** | `isGuestSession: true` for guest JWT. Guests denied Pasar a Biko / export. |
+| **Trip chrome** | On `/viajes*`, bottom nav is trip-only (Resumen / Gastos / Listas / Personas + trip FAB). Household Resumen/Gastos/Promos/Más are not shown. Exit to Biko only via explicit “Volver a Biko” on the trip list for household users. |
+
+Auth: JWT user **or** trip guest; `authenticateUser` rejects guests for create/list trip and household/export routes.
+
+---
+
 ## Conceptual schema
 
 Names are indicative; Prisma enums/models may match closely. Ownership: **`createdByUserId`**, not household-owned.
@@ -52,6 +68,7 @@ TripExpenseCategory:  // product fixed set; store as enum or string matching PRD
 | `id` | cuid |
 | `createdByUserId` | Organizer / owner — **required** |
 | `name`, `destination` | Free text |
+| `shareSlug` | Unique human invite path; set at create; stable on rename |
 | `startDate`, `endDate` | Trip window |
 | `status` | PLANNING → ACTIVE → CLOSED |
 | `baseCurrency` | Default `ARS` |

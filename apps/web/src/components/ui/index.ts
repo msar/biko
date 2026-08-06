@@ -10,3 +10,4 @@ export { default as SegmentedButton } from './SegmentedButton';
 export { default as Dialog } from './Dialog';
 export { default as TopAppBar } from './TopAppBar';
 export { default as NavigationBar } from './NavigationBar';
+export { default as TripNavigationBar } from './TripNavigationBar';

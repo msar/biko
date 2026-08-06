@@ -1,16 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FormEvent, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
 import PieChart from '../components/charts/PieChart';
-import { IconButton, SegmentedButton, Chip, ListItem } from '../components/ui';
+import { Button, IconButton, SegmentedButton, Chip, ListItem } from '../components/ui';
 import { api, fmtDate, fmtMoney } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import type {
   TripExpense,
   TripExportPreview,
   TripHub,
   TripListItemRow,
 } from '../lib/trip-types';
+import type { SessionUser } from '../lib/types';
 import {
   TRIP_CATEGORY_COLORS,
   TRIP_CATEGORY_LABELS,
@@ -26,14 +28,37 @@ import {
 
 type HubTab = 'resumen' | 'gastos' | 'listas' | 'alojamiento' | 'personas';
 
+const TAB_IDS: HubTab[] = ['resumen', 'gastos', 'listas', 'alojamiento', 'personas'];
+
+function parseTab(value: string | null): HubTab {
+  if (value && TAB_IDS.includes(value as HubTab)) return value as HubTab;
+  return 'resumen';
+}
+
 export default function TripHubPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<HubTab>('resumen');
+  const { isGuestSession, applySession } = useAuth();
+  const [tab, setTab] = useState<HubTab>(() => parseTab(searchParams.get('tab')));
   const [settleOpen, setSettleOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+
+  useEffect(() => {
+    setTab(parseTab(searchParams.get('tab')));
+  }, [searchParams]);
+
+  const changeTab = (next: HubTab) => {
+    setTab(next);
+    if (next === 'resumen') {
+      setSearchParams({}, { replace: true });
+    } else {
+      setSearchParams({ tab: next }, { replace: true });
+    }
+  };
 
   const { data: trip, isLoading, error } = useQuery({
     queryKey: ['trips', id],
@@ -54,7 +79,7 @@ export default function TripHubPage() {
   const exportPreview = useQuery({
     queryKey: ['trips', id, 'export-preview'],
     queryFn: () => api<TripExportPreview>(`/trips/${id}/export/preview`),
-    enabled: Boolean(id) && exportOpen,
+    enabled: Boolean(id) && exportOpen && !isGuestSession,
   });
 
   const exportMutation = useMutation({
@@ -79,13 +104,18 @@ export default function TripHubPage() {
     return (
       <div className="page">
         <p className="error">No se pudo cargar el viaje</p>
-        <Link to="/viajes">← Volver a Viajes</Link>
+        {!isGuestSession && <Link to="/viajes">← Volver a Viajes</Link>}
       </div>
     );
   }
 
   const closed = trip.status === 'CLOSED';
-  const inviteLink = trip.inviteCode ? tripInviteUrl(trip.inviteCode) : null;
+  const inviteLink = trip.shareSlug
+    ? tripInviteUrl(trip.shareSlug)
+    : trip.inviteCode
+      ? tripInviteUrl(trip.inviteCode)
+      : null;
+  const guest = isGuestSession || trip.isGuestSession;
 
   const copyInvite = async () => {
     if (!inviteLink) return;
@@ -101,7 +131,11 @@ export default function TripHubPage() {
   return (
     <div className="page">
       <header className="page-header">
-        <IconButton icon="arrow_back" label="Volver" to="/viajes" />
+        {!guest ? (
+          <IconButton icon="arrow_back" label="Volver" to="/viajes" />
+        ) : (
+          <span />
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 style={{ margin: 0 }}>{trip.name}</h1>
           <p className="hint" style={{ margin: 0 }}>
@@ -112,12 +146,36 @@ export default function TripHubPage() {
         <span />
       </header>
 
+      {guest && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <p style={{ marginTop: 0 }}>
+            Estás en el viaje sin cuenta. Guardá tu acceso para entrar desde otro dispositivo.
+          </p>
+          {!linkOpen ? (
+            <Button type="button" variant="filled" size="sm" onClick={() => setLinkOpen(true)}>
+              Guardá tu acceso
+            </Button>
+          ) : (
+            <LinkAccountForm
+              tripId={trip.id}
+              defaultName={trip.myMember.displayName}
+              onSuccess={(token, sessionUser) => {
+                applySession(token, sessionUser);
+                setLinkOpen(false);
+                void queryClient.invalidateQueries({ queryKey: ['trips', id] });
+              }}
+              onCancel={() => setLinkOpen(false)}
+            />
+          )}
+        </div>
+      )}
+
       <SegmentedButton
         className="trip-hub-tabs md-segmented-wrap"
         wrap
         label="Secciones del viaje"
         value={tab}
-        onChange={setTab}
+        onChange={changeTab}
         options={
           [
             { id: 'resumen' as const, label: 'Resumen' },
@@ -134,7 +192,7 @@ export default function TripHubPage() {
           trip={trip}
           closed={closed}
           onSettle={() => setSettleOpen(true)}
-          onExport={() => setExportOpen(true)}
+          onExport={guest ? undefined : () => setExportOpen(true)}
         />
       )}
       {tab === 'gastos' && (
@@ -176,41 +234,142 @@ export default function TripHubPage() {
         onCancel={() => setSettleOpen(false)}
       />
 
-      <ConfirmDialog
-        open={exportOpen}
-        title="Pasar a Biko"
-        variant="primary"
-        confirmLabel="Pasar a Biko"
-        loadingLabel="Exportando…"
-        loading={exportMutation.isPending}
-        message={
-          exportPreview.isLoading ? (
-            <p>Calculando…</p>
-          ) : exportPreview.data && !exportPreview.data.eligible ? (
-            <p>{exportPreview.data.reason ?? 'No disponible'}</p>
-          ) : (
-            <div>
-              <p>
-                Se va a registrar tu parte del hogar ({fmtMoney(exportPreview.data?.netShare ?? 0)})
-                bajo Viajes, respetando el mix de categorías.
-              </p>
-              <ul className="settle-confirm-list">
-                {exportPreview.data?.categoryMix.map((c) => (
-                  <li key={c.category}>
-                    {c.seedCategoryName}: {fmtMoney(c.amount)} ({c.percent}%)
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )
-        }
-        onConfirm={() => {
-          if (exportPreview.data?.eligible) exportMutation.mutate();
-          else setExportOpen(false);
-        }}
-        onCancel={() => setExportOpen(false)}
-      />
+      {!guest && (
+        <ConfirmDialog
+          open={exportOpen}
+          title="Pasar a Biko"
+          variant="primary"
+          confirmLabel="Pasar a Biko"
+          loadingLabel="Exportando…"
+          loading={exportMutation.isPending}
+          message={
+            exportPreview.isLoading ? (
+              <p>Calculando…</p>
+            ) : exportPreview.data && !exportPreview.data.eligible ? (
+              <p>{exportPreview.data.reason ?? 'No disponible'}</p>
+            ) : (
+              <div>
+                <p>
+                  Se va a registrar tu parte del hogar ({fmtMoney(exportPreview.data?.netShare ?? 0)})
+                  bajo Viajes, respetando el mix de categorías.
+                </p>
+                <ul className="settle-confirm-list">
+                  {exportPreview.data?.categoryMix.map((c) => (
+                    <li key={c.category}>
+                      {c.seedCategoryName}: {fmtMoney(c.amount)} ({c.percent}%)
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          }
+          onConfirm={() => {
+            if (exportPreview.data?.eligible) exportMutation.mutate();
+            else setExportOpen(false);
+          }}
+          onCancel={() => setExportOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+function LinkAccountForm({
+  tripId,
+  defaultName,
+  onSuccess,
+  onCancel,
+}: {
+  tripId: string;
+  defaultName: string;
+  onSuccess: (token: string, user: SessionUser) => void;
+  onCancel: () => void;
+}) {
+  const [mode, setMode] = useState<'register' | 'login'>('register');
+  const [name, setName] = useState(defaultName);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api<{ token: string; user: SessionUser }>(`/trips/${tripId}/link-account`, {
+        method: 'POST',
+        body: JSON.stringify({
+          mode,
+          email: email.trim(),
+          password,
+          name: mode === 'register' ? name.trim() : undefined,
+        }),
+      }),
+    onSuccess: (res) => onSuccess(res.token, { ...res.user, isGuestSession: false }),
+    onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo guardar'),
+  });
+
+  return (
+    <form
+      className="promo-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        setError(null);
+        mutation.mutate();
+      }}
+    >
+      <div className="row-between" style={{ gap: 8, marginBottom: 8 }}>
+        <Button
+          type="button"
+          size="sm"
+          variant={mode === 'register' ? 'filled' : 'outlined'}
+          onClick={() => setMode('register')}
+        >
+          Crear acceso
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={mode === 'login' ? 'filled' : 'outlined'}
+          onClick={() => setMode('login')}
+        >
+          Ya tengo cuenta
+        </Button>
+      </div>
+      {mode === 'register' && (
+        <label>
+          Nombre
+          <input value={name} onChange={(e) => setName(e.target.value)} required />
+        </label>
+      )}
+      <label>
+        Email
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          autoComplete="email"
+        />
+      </label>
+      <label>
+        Contraseña
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          minLength={8}
+          autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+        />
+      </label>
+      {error && <p className="error">{error}</p>}
+      <div className="row-between" style={{ gap: 8 }}>
+        <Button type="button" variant="text" onClick={onCancel}>
+          Cancelar
+        </Button>
+        <Button type="submit" variant="filled" disabled={mutation.isPending}>
+          {mutation.isPending ? 'Guardando…' : 'Guardar'}
+        </Button>
+      </div>
+    </form>
   );
 }
 
@@ -223,7 +382,7 @@ function ResumenTab({
   trip: TripHub;
   closed: boolean;
   onSettle: () => void;
-  onExport: () => void;
+  onExport?: () => void;
 }) {
   const slices = useMemo(
     () =>
@@ -320,7 +479,7 @@ function ResumenTab({
         <p className="hint center">Viaje liquidado</p>
       )}
 
-      {trip.canExport && (
+      {trip.canExport && onExport && (
         <button type="button" className="btn-secondary" onClick={onExport}>
           Pasar a Biko
         </button>

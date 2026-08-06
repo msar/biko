@@ -8,11 +8,13 @@ import type { TripInvitePreview } from '../lib/trip-types';
 
 export default function TripJoinPage() {
   const { code } = useParams<{ code: string }>();
-  const { user } = useAuth();
+  const { user, applyGuestSession, isGuestSession } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState<'claim' | 'other'>('claim');
   const [claimMemberId, setClaimMemberId] = useState('');
-  const [displayName, setDisplayName] = useState(user?.name ?? '');
+  const [displayName, setDisplayName] = useState(
+    user && !user.isGuestSession ? user.name : '',
+  );
   const [error, setError] = useState<string | null>(null);
 
   const preview = useQuery({
@@ -36,7 +38,12 @@ export default function TripJoinPage() {
 
   const mutation = useMutation({
     mutationFn: () =>
-      api<{ tripId: string }>('/trips/join', {
+      api<{
+        tripId: string;
+        memberId: string;
+        guestToken?: string;
+        isGuestSession: boolean;
+      }>('/trips/join', {
         method: 'POST',
         body: JSON.stringify({
           code: code?.trim(),
@@ -46,6 +53,21 @@ export default function TripJoinPage() {
         }),
       }),
     onSuccess: (result) => {
+      if (result.guestToken) {
+        const name =
+          mode === 'claim'
+            ? (unclaimed.find((m) => m.id === claimMemberId)?.displayName ?? displayName.trim())
+            : displayName.trim();
+        applyGuestSession(result.guestToken, {
+          id: result.memberId,
+          name: name || 'Invitado',
+          email: '',
+          householdId: null,
+          isGuestSession: true,
+          tripId: result.tripId,
+          tripMemberId: result.memberId,
+        });
+      }
       navigate(`/viajes/${result.tripId}`, { replace: true });
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo unir al viaje'),
@@ -65,17 +87,19 @@ export default function TripJoinPage() {
     mutation.mutate();
   };
 
+  const backTo = user && !isGuestSession ? '/viajes' : undefined;
+
   return (
     <div className="page">
       <header className="page-header">
-        <IconButton icon="arrow_back" label="Volver" to="/viajes" />
+        {backTo ? <IconButton icon="arrow_back" label="Volver" to={backTo} /> : <span />}
         <h1>Unirse al viaje</h1>
         <span />
       </header>
 
       <form className="card promo-form" onSubmit={onSubmit}>
         <p className="hint">
-          Te sumás solo a este viaje — no entrás al hogar de nadie.
+          Te sumás solo a este viaje — no hace falta crear una cuenta de Biko.
         </p>
 
         {preview.isLoading && <p className="hint">Cargando invitación…</p>}
@@ -142,11 +166,6 @@ export default function TripJoinPage() {
           </>
         )}
 
-        {code && (
-          <p className="hint">
-            Código: <code>{code}</code>
-          </p>
-        )}
         {error && <p className="error">{error}</p>}
         <Button
           type="submit"

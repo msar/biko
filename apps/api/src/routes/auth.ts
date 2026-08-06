@@ -1,7 +1,8 @@
-import bcrypt from 'bcryptjs';
 import { ARGENTINE_PROVINCES, isSuperUser, normalizeBankPrograms } from '@biko/shared';
+import bcrypt from 'bcryptjs';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { jwtHouseholdId } from '../plugins/auth.js';
 import { ensureDefaultPaymentMethods } from '../services/household-defaults.js';
 import {
   createAuthenticationOptions,
@@ -10,7 +11,6 @@ import {
   verifyAndStoreRegistration,
   verifyAuthentication,
 } from '../services/webauthn.js';
-
 const registerSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
@@ -62,7 +62,12 @@ export default async function authRoutes(app: FastifyInstance) {
       },
     });
 
-    const token = app.jwt.sign({ userId: user.id, householdId, email: user.email });
+    const token = app.jwt.sign({
+      kind: 'user',
+      userId: user.id,
+      householdId: jwtHouseholdId(householdId),
+      email: user.email,
+    });
     return reply.code(201).send({
       token,
       user: {
@@ -71,6 +76,7 @@ export default async function authRoutes(app: FastifyInstance) {
         email: user.email,
         householdId,
         isSuperUser: isSuperUser(user.email),
+        isGuestSession: false,
       },
     });
   });
@@ -82,7 +88,12 @@ export default async function authRoutes(app: FastifyInstance) {
     if (!user || !user.passwordHash || !(await bcrypt.compare(body.password, user.passwordHash))) {
       return reply.code(401).send({ error: 'Email o contraseña incorrectos' });
     }
-    const token = app.jwt.sign({ userId: user.id, householdId: user.householdId, email: user.email });
+    const token = app.jwt.sign({
+      kind: 'user',
+      userId: user.id,
+      householdId: jwtHouseholdId(user.householdId),
+      email: user.email,
+    });
     return {
       token,
       user: {
@@ -91,11 +102,12 @@ export default async function authRoutes(app: FastifyInstance) {
         email: user.email,
         householdId: user.householdId,
         isSuperUser: isSuperUser(user.email),
+        isGuestSession: false,
       },
     };
   });
 
-  app.post('/auth/webauthn/register/options', { preHandler: [app.authenticate] }, async (request) => {
+  app.post('/auth/webauthn/register/options', { preHandler: [app.authenticateUser] }, async (request) => {
     const user = await app.prisma.user.findUniqueOrThrow({ where: { id: request.user.userId } });
     return createRegistrationOptions(app.prisma, {
       id: user.id,
@@ -104,7 +116,7 @@ export default async function authRoutes(app: FastifyInstance) {
     });
   });
 
-  app.post('/auth/webauthn/register/verify', { preHandler: [app.authenticate] }, async (request) => {
+  app.post('/auth/webauthn/register/verify', { preHandler: [app.authenticateUser] }, async (request) => {
     const body = z
       .object({
         response: z.record(z.unknown()),
@@ -119,7 +131,6 @@ export default async function authRoutes(app: FastifyInstance) {
     );
     return { credential };
   });
-
   app.post('/auth/webauthn/login/options', async () => {
     return createAuthenticationOptions(app.prisma);
   });
@@ -132,8 +143,9 @@ export default async function authRoutes(app: FastifyInstance) {
         body.response as unknown as Parameters<typeof verifyAuthentication>[1],
       );
       const token = app.jwt.sign({
+        kind: 'user',
         userId: user.id,
-        householdId: user.householdId,
+        householdId: jwtHouseholdId(user.householdId),
         email: user.email,
       });
       return {
@@ -148,7 +160,7 @@ export default async function authRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/auth/webauthn/credentials', { preHandler: [app.authenticate] }, async (request) => {
+  app.get('/auth/webauthn/credentials', { preHandler: [app.authenticateUser] }, async (request) => {
     const credentials = await app.prisma.webAuthnCredential.findMany({
       where: { userId: request.user.userId },
       select: { id: true, deviceName: true, createdAt: true },
@@ -157,7 +169,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return { credentials };
   });
 
-  app.delete('/auth/webauthn/credentials/:id', { preHandler: [app.authenticate] }, async (request, reply) => {
+  app.delete('/auth/webauthn/credentials/:id', { preHandler: [app.authenticateUser] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
     const result = await app.prisma.webAuthnCredential.deleteMany({
       where: { id, userId: request.user.userId },
@@ -166,7 +178,27 @@ export default async function authRoutes(app: FastifyInstance) {
     return reply.code(204).send();
   });
 
-  app.get('/auth/me', { preHandler: [app.authenticate] }, async (request) => {
+  app.get('/auth/me', { preHandler: [app.authenticate] }, async (request, reply) => {
+    if (request.user.kind === 'trip_guest') {
+      const member = await app.prisma.tripMember.findFirst({
+        where: { id: request.user.tripMemberId, tripId: request.user.tripId },
+        include: {
+          trip: { select: { id: true, name: true, shareSlug: true } },
+        },
+      });
+      if (!member) {
+        return reply.code(401).send({ error: 'Sesión de invitado inválida', code: 'AUTH_INVALID' });
+      }
+      return {
+        kind: 'trip_guest',
+        isGuestSession: true,
+        tripId: request.user.tripId,
+        tripMemberId: request.user.tripMemberId,
+        displayName: member.displayName,
+        trip: member.trip,
+      };
+    }
+
     const user = await app.prisma.user.findUniqueOrThrow({
       where: { id: request.user.userId },
       include: {
@@ -183,22 +215,29 @@ export default async function authRoutes(app: FastifyInstance) {
       },
     });
     return {
+      kind: 'user',
       id: user.id,
       name: user.name,
       email: user.email,
       isSuperUser: isSuperUser(user.email),
-      household: {
-        id: user.household.id,
-        name: user.household.name,
-        inviteCode: user.household.inviteCode,
-        province: user.household.province,
-        bankPrograms: user.household.bankPrograms,
-        members: user.household.users,
-      },
+      isGuestSession: false,
+      household: user.household
+        ? {
+            id: user.household.id,
+            name: user.household.name,
+            inviteCode: user.household.inviteCode,
+            province: user.household.province,
+            bankPrograms: user.household.bankPrograms,
+            members: user.household.users,
+          }
+        : null,
     };
   });
 
-  app.patch('/household', { preHandler: [app.authenticate] }, async (request, reply) => {
+  app.patch('/household', { preHandler: [app.authenticateUser] }, async (request, reply) => {
+    if (!request.user.householdId) {
+      return reply.code(400).send({ error: 'No tenés un hogar' });
+    }
     const body = z
       .object({
         province: z.string().nullable().optional(),
