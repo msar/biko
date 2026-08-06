@@ -885,7 +885,7 @@ model TripMember {
   allocations     TripExpenseAllocation[]
   settlementsFrom TripSettlement[]         @relation("TripSettlementFrom")
   settlementsTo   TripSettlement[]         @relation("TripSettlementTo")
-  assignedItems   TripListItem[]           @relation("TripListAssignee")
+  listAssignments TripListItemAssignee[]
 
   @@unique([tripId, userId])
   @@index([tripId, inviteStatus])
@@ -973,21 +973,34 @@ model TripSettlement {
 }
 
 model TripListItem {
-  id               String             @id @default(cuid())
-  tripId           String
-  trip             Trip               @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  type             TripListItemType
-  title            String
-  notes            String?
-  quantity         Int?
-  assigneeMemberId String?
-  assigneeMember   TripMember?        @relation("TripListAssignee", fields: [assigneeMemberId], references: [id], onDelete: SetNull)
-  status           TripListItemStatus @default(PENDING)
-  dayDate          DateTime?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  id          String             @id @default(cuid())
+  tripId      String
+  trip        Trip               @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type        TripListItemType
+  title       String
+  notes       String?
+  quantity    Int?
+  /// When true, the item is assigned to every trip member ("Todos").
+  assignToAll Boolean            @default(false)
+  status      TripListItemStatus @default(PENDING)
+  dayDate     DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  assignees TripListItemAssignee[]
 
   @@index([tripId, type, status])
+}
+
+model TripListItemAssignee {
+  id         String       @id @default(cuid())
+  listItemId String
+  listItem   TripListItem @relation(fields: [listItemId], references: [id], onDelete: Cascade)
+  memberId   String
+  member     TripMember   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([listItemId, memberId])
+  @@index([memberId])
 }
 
 model TripAccommodation {

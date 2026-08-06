@@ -3,7 +3,7 @@ import { FormEvent, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
 import PieChart from '../components/charts/PieChart';
-import { IconButton, SegmentedButton } from '../components/ui';
+import { IconButton, SegmentedButton, Chip, ListItem } from '../components/ui';
 import { api, fmtDate, fmtMoney } from '../lib/api';
 import type {
   TripExpense,
@@ -393,21 +393,45 @@ function GastosTab({
   );
 }
 
+function listItemTypeLabel(type: TripListItemRow['type']): string {
+  if (type === 'PACK') return 'Traer';
+  if (type === 'BUY') return 'Comprar';
+  return 'Hacer';
+}
+
+function listItemAssigneeLabel(item: TripListItemRow): string | null {
+  if (item.assignToAll) return 'Todos';
+  if (item.assignees.length === 0) return null;
+  return item.assignees.map((m) => m.displayName).join(', ');
+}
+
+function isMyListItem(item: TripListItemRow, myMemberId: string): boolean {
+  if (item.assignToAll) return true;
+  return item.assignees.some((m) => m.id === myMemberId);
+}
+
 function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const queryClient = useQueryClient();
-  const [mode, setMode] = useState<'TODO' | 'PACK_BUY'>('TODO');
+  const [mode, setMode] = useState<'TODO' | 'PACK_BUY' | 'MINE'>('TODO');
   const [title, setTitle] = useState('');
   const [packType, setPackType] = useState<'PACK' | 'BUY'>('PACK');
-  const [assigneeId, setAssigneeId] = useState('');
+  const [assignToAll, setAssignToAll] = useState(false);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
 
   const { data: items, isLoading } = useQuery({
     queryKey: ['trips', trip.id, 'list-items'],
     queryFn: () => api<TripListItemRow[]>(`/trips/${trip.id}/list-items`),
   });
 
-  const filtered = (items ?? []).filter((i) =>
-    mode === 'TODO' ? i.type === 'TODO' : i.type === 'PACK' || i.type === 'BUY',
-  );
+  const filtered = useMemo(() => {
+    const all = items ?? [];
+    if (mode === 'MINE') {
+      return all.filter((i) => isMyListItem(i, trip.myMember.id));
+    }
+    return all.filter((i) =>
+      mode === 'TODO' ? i.type === 'TODO' : i.type === 'PACK' || i.type === 'BUY',
+    );
+  }, [items, mode, trip.myMember.id]);
 
   const createMutation = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -415,6 +439,8 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
       setTitle('');
+      setAssignToAll(false);
+      setAssigneeIds([]);
     },
   });
 
@@ -437,19 +463,34 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     },
   });
 
+  const toggleAssignee = (memberId: string) => {
+    setAssignToAll(false);
+    setAssigneeIds((prev) =>
+      prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId],
+    );
+  };
+
   const onAdd = (e: FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || closed) return;
+    if (!title.trim() || closed || mode === 'MINE') return;
     createMutation.mutate({
       type: mode === 'TODO' ? 'TODO' : packType,
       title: title.trim(),
-      assigneeMemberId: assigneeId || null,
+      assignToAll,
+      assigneeMemberIds: assignToAll ? [] : assigneeIds,
     });
   };
 
+  const emptyCopy =
+    mode === 'TODO'
+      ? 'Nada que hacer todavía'
+      : mode === 'PACK_BUY'
+        ? 'Nada que traer todavía'
+        : 'No tenés tareas asignadas';
+
   return (
     <>
-      <div className="segmented">
+      <div className="segmented segmented-wrap">
         <button type="button" className={mode === 'TODO' ? 'active' : ''} onClick={() => setMode('TODO')}>
           Hacer
         </button>
@@ -460,9 +501,12 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
         >
           Traer / Comprar
         </button>
+        <button type="button" className={mode === 'MINE' ? 'active' : ''} onClick={() => setMode('MINE')}>
+          Mis tareas
+        </button>
       </div>
 
-      {!closed && (
+      {!closed && mode !== 'MINE' && (
         <form className="card promo-form" onSubmit={onAdd}>
           {mode === 'PACK_BUY' && (
             <div className="segmented">
@@ -490,19 +534,32 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
               placeholder={mode === 'TODO' ? 'Reservar auto' : 'Protector solar'}
             />
           </label>
-          {mode === 'PACK_BUY' && (
-            <label>
-              Asignar a
-              <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
-                <option value="">Sin asignar</option>
-                {trip.members.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+          <div className="listas-assignees">
+            <span className="listas-assignees-label">Asignar a</span>
+            <div className="chip-row">
+              <Chip
+                selected={assignToAll}
+                onClick={() => {
+                  setAssignToAll(true);
+                  setAssigneeIds([]);
+                }}
+              >
+                Todos
+              </Chip>
+              {trip.members.map((m) => (
+                <Chip
+                  key={m.id}
+                  selected={!assignToAll && assigneeIds.includes(m.id)}
+                  onClick={() => toggleAssignee(m.id)}
+                >
+                  {m.displayName}
+                </Chip>
+              ))}
+            </div>
+            {!assignToAll && assigneeIds.length === 0 && (
+              <span className="hint">Sin asignar</span>
+            )}
+          </div>
           <button type="submit" className="btn-secondary" disabled={!title.trim()}>
             Agregar
           </button>
@@ -510,50 +567,55 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
       )}
 
       {isLoading && <p className="hint">Cargando…</p>}
-      {!isLoading && filtered.length === 0 && (
-        <p className="empty-state">
-          {mode === 'TODO' ? 'Nada que hacer todavía' : 'Nada que traer todavía'}
-        </p>
-      )}
+      {!isLoading && filtered.length === 0 && <p className="empty-state">{emptyCopy}</p>}
 
-      {filtered.map((item) => (
-        <div key={item.id} className="card row-between" style={{ alignItems: 'flex-start' }}>
-          <label style={{ display: 'flex', gap: 10, flex: 1, cursor: closed ? 'default' : 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={item.status === 'DONE'}
-              disabled={closed}
-              onChange={() =>
-                toggleMutation.mutate({
-                  itemId: item.id,
-                  status: item.status === 'DONE' ? 'PENDING' : 'DONE',
-                })
-              }
-            />
-            <span>
-              <span style={{ textDecoration: item.status === 'DONE' ? 'line-through' : undefined }}>
-                {item.title}
-              </span>
-              {(item.type === 'PACK' || item.type === 'BUY') && (
-                <span className="hint"> · {item.type === 'PACK' ? 'Traer' : 'Comprar'}</span>
-              )}
-              {item.assigneeMember && (
-                <span className="hint"> · {item.assigneeMember.displayName}</span>
-              )}
-            </span>
-          </label>
-          {!closed && (
-            <button
-              type="button"
-              className="btn-link"
-              onClick={() => deleteMutation.mutate(item.id)}
-              aria-label="Eliminar"
-            >
-              ✕
-            </button>
-          )}
+      {!isLoading && filtered.length > 0 && (
+        <div className="card listas-list">
+          {filtered.map((item) => {
+            const typeLabel = listItemTypeLabel(item.type);
+            const assigneeLabel = listItemAssigneeLabel(item);
+            const supportParts = [
+              mode !== 'TODO' ? typeLabel : null,
+              mode !== 'MINE' ? assigneeLabel : null,
+            ].filter(Boolean);
+
+            return (
+              <ListItem
+                key={item.id}
+                className={item.status === 'DONE' ? 'listas-item-done' : undefined}
+                leading={
+                  <input
+                    type="checkbox"
+                    checked={item.status === 'DONE'}
+                    disabled={closed}
+                    aria-label={item.status === 'DONE' ? 'Marcar pendiente' : 'Marcar hecho'}
+                    onChange={() =>
+                      toggleMutation.mutate({
+                        itemId: item.id,
+                        status: item.status === 'DONE' ? 'PENDING' : 'DONE',
+                      })
+                    }
+                  />
+                }
+                title={item.title}
+                support={supportParts.length > 0 ? supportParts.join(' · ') : undefined}
+                trailing={
+                  !closed ? (
+                    <button
+                      type="button"
+                      className="btn-link"
+                      onClick={() => deleteMutation.mutate(item.id)}
+                      aria-label="Eliminar"
+                    >
+                      ✕
+                    </button>
+                  ) : undefined
+                }
+              />
+            );
+          })}
         </div>
-      ))}
+      )}
     </>
   );
 }

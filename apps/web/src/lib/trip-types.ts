@@ -185,8 +185,8 @@ export interface TripListItemRow {
   title: string;
   notes: string | null;
   quantity: number | null;
-  assigneeMemberId: string | null;
-  assigneeMember: TripMember | null;
+  assignToAll: boolean;
+  assignees: TripMember[];
   status: TripListItemStatus;
   dayDate: string | null;
   createdAt: string;

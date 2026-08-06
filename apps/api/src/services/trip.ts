@@ -612,25 +612,19 @@ export async function deleteTripMember(
     throw new TripValidationError('Solo se pueden eliminar viajeros sin reclamar');
   }
 
-  const [paidCount, paymentCount, allocCount, settleCount, assignCount] = await Promise.all([
+  const [paidCount, paymentCount, allocCount, settleCount] = await Promise.all([
     db.tripExpense.count({ where: { paidByMemberId: memberId } }),
     db.tripExpensePayment.count({ where: { tripMemberId: memberId } }),
     db.tripExpenseAllocation.count({ where: { tripMemberId: memberId } }),
     db.tripSettlement.count({
       where: { OR: [{ fromMemberId: memberId }, { toMemberId: memberId }] },
     }),
-    db.tripListItem.count({ where: { assigneeMemberId: memberId } }),
   ]);
   if (paidCount + paymentCount + allocCount + settleCount > 0) {
     throw new TripValidationError('No se puede eliminar: tiene gastos o liquidaciones');
   }
-  if (assignCount > 0) {
-    await db.tripListItem.updateMany({
-      where: { assigneeMemberId: memberId },
-      data: { assigneeMemberId: null },
-    });
-  }
 
+  // List-item assignee rows cascade on member delete.
   await db.tripMember.delete({ where: { id: memberId } });
 }
 
@@ -1444,6 +1438,57 @@ export async function settleTrip(
 
 // --- List items ---
 
+const listItemInclude = {
+  assignees: {
+    include: { member: { select: memberSelect } },
+    orderBy: { member: { displayName: 'asc' as const } },
+  },
+} as const;
+
+function serializeListItem<T extends { assignees: Array<{ member: unknown }> }>(item: T) {
+  const { assignees, ...rest } = item;
+  return {
+    ...rest,
+    assignees: assignees.map((a) => a.member),
+  };
+}
+
+async function resolveListAssignees(
+  db: Db,
+  tripId: string,
+  input: {
+    assignToAll?: boolean;
+    assigneeMemberIds?: string[];
+    /** @deprecated single-assignee API; mapped when assigneeMemberIds omitted */
+    assigneeMemberId?: string | null;
+  },
+): Promise<{ assignToAll: boolean; memberIds: string[] }> {
+  if (input.assignToAll) {
+    return { assignToAll: true, memberIds: [] };
+  }
+
+  let memberIds = input.assigneeMemberIds;
+  if (memberIds === undefined && input.assigneeMemberId !== undefined) {
+    memberIds = input.assigneeMemberId ? [input.assigneeMemberId] : [];
+  }
+  if (memberIds === undefined) {
+    return { assignToAll: false, memberIds: [] };
+  }
+
+  const unique = [...new Set(memberIds)];
+  if (unique.length === 0) {
+    return { assignToAll: false, memberIds: [] };
+  }
+
+  const count = await db.tripMember.count({
+    where: { tripId, id: { in: unique } },
+  });
+  if (count !== unique.length) {
+    throw new TripValidationError('Asignación inválida');
+  }
+  return { assignToAll: false, memberIds: unique };
+}
+
 export async function listTripListItems(
   db: Db,
   tripId: string,
@@ -1451,13 +1496,12 @@ export async function listTripListItems(
   type?: TripListItemType,
 ) {
   await requireTripMember(db, tripId, userId);
-  return db.tripListItem.findMany({
+  const items = await db.tripListItem.findMany({
     where: { tripId, ...(type ? { type } : {}) },
-    include: {
-      assigneeMember: { select: memberSelect },
-    },
+    include: listItemInclude,
     orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
   });
+  return items.map(serializeListItem);
 }
 
 export async function createTripListItem(
@@ -1469,6 +1513,8 @@ export async function createTripListItem(
     title: string;
     notes?: string | null;
     quantity?: number | null;
+    assignToAll?: boolean;
+    assigneeMemberIds?: string[];
     assigneeMemberId?: string | null;
     dayDate?: Date | null;
   },
@@ -1478,18 +1524,24 @@ export async function createTripListItem(
   const title = input.title.trim();
   if (!title) throw new TripValidationError('El título es obligatorio');
 
-  return db.tripListItem.create({
+  const { assignToAll, memberIds } = await resolveListAssignees(db, tripId, input);
+
+  const item = await db.tripListItem.create({
     data: {
       tripId,
       type: input.type,
       title,
       notes: input.notes?.trim() || null,
       quantity: input.quantity ?? null,
-      assigneeMemberId: input.assigneeMemberId ?? null,
+      assignToAll,
       dayDate: input.dayDate ?? null,
+      ...(memberIds.length > 0
+        ? { assignees: { create: memberIds.map((memberId) => ({ memberId })) } }
+        : {}),
     },
-    include: { assigneeMember: { select: memberSelect } },
+    include: listItemInclude,
   });
+  return serializeListItem(item);
 }
 
 export async function updateTripListItem(
@@ -1501,6 +1553,8 @@ export async function updateTripListItem(
     title?: string;
     notes?: string | null;
     quantity?: number | null;
+    assignToAll?: boolean;
+    assigneeMemberIds?: string[];
     assigneeMemberId?: string | null;
     status?: 'PENDING' | 'DONE';
     dayDate?: Date | null;
@@ -1512,19 +1566,43 @@ export async function updateTripListItem(
   const existing = await db.tripListItem.findFirst({ where: { id: itemId, tripId } });
   if (!existing) throw new TripNotFoundError('Ítem no encontrado');
 
-  return db.tripListItem.update({
+  const assigneesTouched =
+    input.assignToAll !== undefined ||
+    input.assigneeMemberIds !== undefined ||
+    input.assigneeMemberId !== undefined;
+
+  let assigneeData: { assignToAll: boolean; memberIds: string[] } | null = null;
+  if (assigneesTouched) {
+    assigneeData = await resolveListAssignees(db, tripId, input);
+  }
+
+  const item = await db.tripListItem.update({
     where: { id: itemId },
     data: {
       ...(input.title != null ? { title: input.title.trim() } : {}),
       ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
       ...(input.quantity !== undefined ? { quantity: input.quantity } : {}),
-      ...(input.assigneeMemberId !== undefined ? { assigneeMemberId: input.assigneeMemberId } : {}),
       ...(input.status != null ? { status: input.status } : {}),
       ...(input.dayDate !== undefined ? { dayDate: input.dayDate } : {}),
       ...(input.type != null ? { type: input.type } : {}),
+      ...(assigneeData
+        ? {
+            assignToAll: assigneeData.assignToAll,
+            assignees: {
+              deleteMany: {},
+              ...(assigneeData.memberIds.length > 0
+                ? {
+                    create: assigneeData.memberIds.map((memberId) => ({ memberId })),
+                  }
+                : {}),
+            },
+          }
+        : {}),
     },
-    include: { assigneeMember: { select: memberSelect } },
+    include: listItemInclude,
   });
+
+  return serializeListItem(item);
 }
 
 export async function deleteTripListItem(db: Db, tripId: string, itemId: string, userId: string) {

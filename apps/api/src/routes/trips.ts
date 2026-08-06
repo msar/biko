@@ -150,6 +150,9 @@ const listItemBodySchema = z.object({
   title: z.string().min(1).max(300),
   notes: z.string().max(1000).nullish(),
   quantity: z.number().int().positive().nullish(),
+  assignToAll: z.boolean().optional(),
+  assigneeMemberIds: z.array(z.string().min(1)).optional(),
+  /** @deprecated use assigneeMemberIds */
   assigneeMemberId: z.string().min(1).nullish(),
   dayDate: optionalDate,
 });
@@ -159,6 +162,9 @@ const listItemPatchSchema = z.object({
   title: z.string().min(1).max(300).optional(),
   notes: z.string().max(1000).nullish(),
   quantity: z.number().int().positive().nullish(),
+  assignToAll: z.boolean().optional(),
+  assigneeMemberIds: z.array(z.string().min(1)).optional(),
+  /** @deprecated use assigneeMemberIds */
   assigneeMemberId: z.string().min(1).nullish(),
   status: z.enum(['PENDING', 'DONE']).optional(),
   dayDate: optionalDate,
