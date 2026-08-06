@@ -1142,11 +1142,16 @@ function PersonasTab({
   const [editRole, setEditRole] = useState<TripMemberRole>('MEMBER');
   const [memberError, setMemberError] = useState<string | null>(null);
 
-  const households = trip.households ?? [];
+  const members = [...trip.members].sort((a, b) =>
+    a.displayName.localeCompare(b.displayName, 'es', { sensitivity: 'base' }),
+  );
+  const households = [...(trip.households ?? [])].sort((a, b) =>
+    a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }),
+  );
   const householdName = (id: string | null) =>
     id ? households.find((h) => h.id === id)?.name ?? null : null;
 
-  const selected = selectedId ? trip.members.find((m) => m.id === selectedId) ?? null : null;
+  const selected = selectedId ? members.find((m) => m.id === selectedId) ?? null : null;
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['trips', trip.id] });
@@ -1262,7 +1267,7 @@ function PersonasTab({
     <>
       <section className="card personas-list">
         <h2>Personas</h2>
-        {trip.members.map((m) => {
+        {members.map((m) => {
           const group = householdName(m.tripHouseholdId);
           return (
             <ListItem
@@ -1314,7 +1319,7 @@ function PersonasTab({
           {households.length > 0 && (
             <ul className="list-plain" style={{ marginBottom: 12 }}>
               {households.map((h) => {
-                const count = trip.members.filter((m) => m.tripHouseholdId === h.id).length;
+                const count = members.filter((m) => m.tripHouseholdId === h.id).length;
                 return (
                   <li key={h.id} className="row-between list-row">
                     <span>

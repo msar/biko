@@ -236,9 +236,9 @@ export async function getTripHub(
       members: {
         where: { inviteStatus: { not: 'DECLINED' } },
         select: memberSelect,
-        orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
+        orderBy: { displayName: 'asc' },
       },
-      households: { select: householdSelect, orderBy: { createdAt: 'asc' } },
+      households: { select: householdSelect, orderBy: { name: 'asc' } },
       invites: { orderBy: { createdAt: 'desc' }, take: 1 },
       accommodation: true,
       exportBatches: householdId
@@ -400,8 +400,12 @@ function serializeTrip(trip: {
     exportedAt: trip.exportedAt,
     createdAt: trip.createdAt,
     updatedAt: trip.updatedAt,
-    members: trip.members.map(serializeMember),
-    households: (trip.households ?? []).map(serializeHousehold),
+    members: [...trip.members]
+      .sort((a, b) => a.displayName.localeCompare(b.displayName, 'es', { sensitivity: 'base' }))
+      .map(serializeMember),
+    households: [...(trip.households ?? [])]
+      .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }))
+      .map(serializeHousehold),
     inviteCode: trip.shareSlug,
     accommodation: trip.accommodation ? serializeAccommodation(trip.accommodation) : null,
   };
@@ -471,8 +475,12 @@ export async function updateTrip(
     where: { id: tripId },
     data,
     include: {
-      members: { where: { inviteStatus: { not: 'DECLINED' } }, select: memberSelect },
-      households: { select: householdSelect, orderBy: { createdAt: 'asc' } },
+      members: {
+        where: { inviteStatus: { not: 'DECLINED' } },
+        select: memberSelect,
+        orderBy: { displayName: 'asc' },
+      },
+      households: { select: householdSelect, orderBy: { name: 'asc' } },
       invites: { orderBy: { createdAt: 'desc' }, take: 1 },
       accommodation: true,
     },
@@ -533,7 +541,7 @@ export async function getTripInvitePreview(db: Db, code: string) {
       userId: null,
     },
     select: memberSelect,
-    orderBy: { createdAt: 'asc' },
+    orderBy: { displayName: 'asc' },
   });
 
   return {
@@ -549,7 +557,9 @@ export async function getTripInvitePreview(db: Db, code: string) {
       startDate: invite.trip.startDate,
       endDate: invite.trip.endDate,
     },
-    unclaimedMembers: unclaimedMembers.map(serializeMember),
+    unclaimedMembers: [...unclaimedMembers]
+      .sort((a, b) => a.displayName.localeCompare(b.displayName, 'es', { sensitivity: 'base' }))
+      .map(serializeMember),
   };
 }
 
@@ -765,9 +775,11 @@ export async function listTripHouseholds(db: Db, tripId: string, actor: TripActo
   const households = await db.tripHousehold.findMany({
     where: { tripId },
     select: householdSelect,
-    orderBy: { createdAt: 'asc' },
+    orderBy: { name: 'asc' },
   });
-  return households.map(serializeHousehold);
+  return [...households]
+    .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }))
+    .map(serializeHousehold);
 }
 
 export async function createTripHousehold(

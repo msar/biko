@@ -23,7 +23,9 @@ export default function TripJoinPage() {
     enabled: Boolean(code),
   });
 
-  const unclaimed = preview.data?.unclaimedMembers ?? [];
+  const unclaimed = [...(preview.data?.unclaimedMembers ?? [])].sort((a, b) =>
+    a.displayName.localeCompare(b.displayName, 'es', { sensitivity: 'base' }),
+  );
 
   useEffect(() => {
     if (unclaimed.length === 0) {
