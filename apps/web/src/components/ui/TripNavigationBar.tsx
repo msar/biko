@@ -21,7 +21,9 @@ function tripIdFromPath(pathname: string): string | null {
 export default function TripNavigationBar() {
   const location = useLocation();
   const tripId = tripIdFromPath(location.pathname);
-  const searchTab = new URLSearchParams(location.search).get('tab') ?? 'resumen';
+  const rawTab = new URLSearchParams(location.search).get('tab') ?? 'resumen';
+  // Alojamiento is opened from Resumen, not a primary bottom-nav item.
+  const searchTab = rawTab === 'alojamiento' ? 'resumen' : rawTab;
   const onHub = Boolean(tripId) && /^\/viajes\/[^/]+$/.test(location.pathname);
 
   const destinations: NavDestination[] = tripId

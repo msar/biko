@@ -3,7 +3,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
 import PieChart from '../components/charts/PieChart';
-import { Button, IconButton, SegmentedButton, Chip, ListItem } from '../components/ui';
+import { Button, IconButton, Chip, ListItem } from '../components/ui';
 import { api, fmtDate, fmtMoney } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type {
@@ -170,36 +170,27 @@ export default function TripHubPage() {
         </div>
       )}
 
-      <SegmentedButton
-        className="trip-hub-tabs md-segmented-wrap"
-        wrap
-        label="Secciones del viaje"
-        value={tab}
-        onChange={changeTab}
-        options={
-          [
-            { id: 'resumen' as const, label: 'Resumen' },
-            { id: 'gastos' as const, label: 'Gastos' },
-            { id: 'listas' as const, label: 'Listas' },
-            { id: 'alojamiento' as const, label: 'Alojamiento' },
-            { id: 'personas' as const, label: 'Personas' },
-          ]
-        }
-      />
-
       {tab === 'resumen' && (
         <ResumenTab
           trip={trip}
           closed={closed}
           onSettle={() => setSettleOpen(true)}
           onExport={guest ? undefined : () => setExportOpen(true)}
+          onOpenAlojamiento={() => changeTab('alojamiento')}
         />
       )}
       {tab === 'gastos' && (
         <GastosTab tripId={trip.id} closed={closed} onAdd={() => navigate(`/viajes/${trip.id}/gastos/nuevo`)} />
       )}
       {tab === 'listas' && <ListasTab trip={trip} closed={closed} />}
-      {tab === 'alojamiento' && <AlojamientoTab trip={trip} closed={closed} />}
+      {tab === 'alojamiento' && (
+        <>
+          <button type="button" className="btn-link" onClick={() => changeTab('resumen')}>
+            ← Resumen
+          </button>
+          <AlojamientoTab trip={trip} closed={closed} />
+        </>
+      )}
       {tab === 'personas' && (
         <PersonasTab
           trip={trip}
@@ -378,11 +369,13 @@ function ResumenTab({
   closed,
   onSettle,
   onExport,
+  onOpenAlojamiento,
 }: {
   trip: TripHub;
   closed: boolean;
   onSettle: () => void;
   onExport?: () => void;
+  onOpenAlojamiento: () => void;
 }) {
   const slices = useMemo(
     () =>
@@ -395,16 +388,61 @@ function ResumenTab({
     [trip.categoryTotals],
   );
 
+  const acc = trip.accommodation;
+  const checkInLabel = acc ? formatStayMoment(acc.checkIn, acc.checkInTime, fmtDate) : null;
+  const checkOutLabel = acc ? formatStayMoment(acc.checkOut, acc.checkOutTime, fmtDate) : null;
+
   return (
     <>
       <section className="hero-card">
-        <p className="hint">Total del viaje</p>
+        <p className="hero-label">Total del viaje</p>
         <p className="hero-amount">{fmtMoney(trip.totalSpent)}</p>
         {(trip.startDate || trip.endDate) && (
-          <p className="hint">
+          <p className="hero-meta">
             {trip.startDate ? fmtDate(trip.startDate) : '—'}
             {' → '}
             {trip.endDate ? fmtDate(trip.endDate) : '—'}
+          </p>
+        )}
+      </section>
+
+      <section
+        className="card trip-accommodation-entry"
+        role="button"
+        tabIndex={0}
+        onClick={onOpenAlojamiento}
+        onKeyDown={(ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            onOpenAlojamiento();
+          }
+        }}
+      >
+        <div className="row-between">
+          <h2 style={{ margin: 0 }}>Alojamiento</h2>
+          <span className="hint">{acc ? 'Ver' : closed ? '' : 'Agregar'}</span>
+        </div>
+        {acc ? (
+          <>
+            <p style={{ margin: '8px 0 0' }}>
+              <strong>{acc.label || 'Alojamiento'}</strong>
+            </p>
+            {acc.address && !isHttpUrl(acc.address) && (
+              <p className="hint" style={{ margin: '4px 0 0' }}>
+                {acc.address}
+              </p>
+            )}
+            {(checkInLabel || checkOutLabel) && (
+              <p className="hint" style={{ margin: '4px 0 0' }}>
+                {checkInLabel ? `Check-in ${checkInLabel}` : 'Check-in —'}
+                {' · '}
+                {checkOutLabel ? `Check-out ${checkOutLabel}` : 'Check-out —'}
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="hint" style={{ margin: '8px 0 0' }}>
+            {closed ? 'Sin alojamiento cargado' : 'Tocá para cargar el lugar donde se quedan'}
           </p>
         )}
       </section>

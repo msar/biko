@@ -185,8 +185,17 @@ body {
 
 .hero-label {
   font-size: var(--md-sys-typescale-label-large-size);
+  color: var(--md-sys-color-on-primary);
   opacity: 0.88;
   font-weight: 600;
+  margin: 0;
+}
+
+.hero-meta {
+  font-size: var(--md-sys-typescale-body-small-size);
+  color: var(--md-sys-color-on-primary);
+  opacity: 0.8;
+  margin: 0;
 }
 
 .hero-amount {
@@ -195,6 +204,21 @@ body {
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
+  color: var(--md-sys-color-on-primary);
+  margin: 0;
+}
+
+.trip-accommodation-entry {
+  cursor: pointer;
+}
+
+.trip-accommodation-entry:hover {
+  border-color: var(--md-sys-color-outline);
+}
+
+.trip-accommodation-entry:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
 }
 
 .hero-savings {
