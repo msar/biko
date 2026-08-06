@@ -1256,10 +1256,15 @@ function AlojamientoTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
 }
 
 function memberStatusLabel(m: TripMember): string {
-  if (m.role === 'ORGANIZER') return 'Organizador';
   if (m.inviteStatus === 'PENDING' && !m.userId) return 'Sin reclamar';
   if (m.inviteStatus === 'JOINED') return 'Unido';
   return 'Pendiente';
+}
+
+function canDeleteMember(trip: TripHub, m: TripMember): boolean {
+  if (m.id === trip.myMember.id) return false;
+  if (m.role === 'ORGANIZER') return false;
+  return true;
 }
 
 function isPendingSlot(m: TripMember): boolean {
@@ -1288,6 +1293,8 @@ function PersonasTab({
   const [editHouseholdId, setEditHouseholdId] = useState('');
   const [editRole, setEditRole] = useState<TripMemberRole>('MEMBER');
   const [memberError, setMemberError] = useState<string | null>(null);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [editingGroupName, setEditingGroupName] = useState('');
 
   const members = [...trip.members].sort((a, b) =>
     a.displayName.localeCompare(b.displayName, 'es', { sensitivity: 'base' }),
@@ -1387,6 +1394,43 @@ function PersonasTab({
     onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo eliminar'),
   });
 
+  const renameGroup = useMutation({
+    mutationFn: ({ householdId, name }: { householdId: string; name: string }) =>
+      api(`/trips/${trip.id}/households/${householdId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: () => {
+      setEditingGroupId(null);
+      setEditingGroupName('');
+      setError(null);
+      invalidate();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo renombrar'),
+  });
+
+  const startEditGroup = (h: { id: string; name: string }) => {
+    setEditingGroupId(h.id);
+    setEditingGroupName(h.name);
+    setError(null);
+  };
+
+  const saveEditGroup = () => {
+    if (!editingGroupId) return;
+    const name = editingGroupName.trim();
+    if (!name) {
+      setError('El nombre del grupo es obligatorio');
+      return;
+    }
+    const current = households.find((h) => h.id === editingGroupId);
+    if (current && name === current.name) {
+      setEditingGroupId(null);
+      setEditingGroupName('');
+      return;
+    }
+    renameGroup.mutate({ householdId: editingGroupId, name });
+  };
+
   const saveMember = () => {
     if (!selected) return;
     const name = editName.trim();
@@ -1467,20 +1511,73 @@ function PersonasTab({
             <ul className="list-plain" style={{ marginBottom: 12 }}>
               {households.map((h) => {
                 const count = members.filter((m) => m.tripHouseholdId === h.id).length;
+                const isEditing = editingGroupId === h.id;
                 return (
                   <li key={h.id} className="row-between list-row">
-                    <span>
-                      {h.name}
-                      <span className="hint"> · {count} persona{count === 1 ? '' : 's'}</span>
-                    </span>
-                    <button
-                      type="button"
-                      className="btn-link"
-                      onClick={() => deleteGroup.mutate(h.id)}
-                      disabled={deleteGroup.isPending}
-                    >
-                      Eliminar
-                    </button>
+                    {isEditing ? (
+                      <form
+                        className="row-between"
+                        style={{ flex: 1, gap: 8, alignItems: 'center' }}
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          saveEditGroup();
+                        }}
+                      >
+                        <input
+                          value={editingGroupName}
+                          onChange={(e) => setEditingGroupName(e.target.value)}
+                          autoFocus
+                          required
+                          aria-label="Nombre del grupo"
+                          style={{ flex: 1 }}
+                        />
+                        <span className="list-row-actions">
+                          <button
+                            type="submit"
+                            className="btn-link"
+                            disabled={renameGroup.isPending}
+                          >
+                            {renameGroup.isPending ? 'Guardando…' : 'Guardar'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-link"
+                            onClick={() => {
+                              setEditingGroupId(null);
+                              setEditingGroupName('');
+                            }}
+                            disabled={renameGroup.isPending}
+                          >
+                            Cancelar
+                          </button>
+                        </span>
+                      </form>
+                    ) : (
+                      <>
+                        <span>
+                          {h.name}
+                          <span className="hint"> · {count} persona{count === 1 ? '' : 's'}</span>
+                        </span>
+                        <span className="list-row-actions">
+                          <button
+                            type="button"
+                            className="btn-link"
+                            onClick={() => startEditGroup(h)}
+                            disabled={deleteGroup.isPending || renameGroup.isPending}
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-link"
+                            onClick={() => deleteGroup.mutate(h.id)}
+                            disabled={deleteGroup.isPending || renameGroup.isPending}
+                          >
+                            Eliminar
+                          </button>
+                        </span>
+                      </>
+                    )}
                   </li>
                 );
               })}
@@ -1606,7 +1703,7 @@ function PersonasTab({
               {memberError && <p className="error">{memberError}</p>}
             </div>
             <div className="md-dialog-actions personas-member-actions">
-              {canEdit && isPendingSlot(selected) && (
+              {canEdit && canDeleteMember(trip, selected) && (
                 <Button
                   type="button"
                   variant="danger-text"

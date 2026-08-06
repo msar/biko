@@ -708,17 +708,17 @@ export async function deleteTripMember(
   actorUserId: string,
   memberId: string,
 ) {
-  await requireTripOrganizer(db, tripId, actorUserId);
+  const actor = await requireTripOrganizer(db, tripId, actorUserId);
   const trip = await db.trip.findUniqueOrThrow({ where: { id: tripId } });
   assertTripWritable(trip.status);
 
   const member = await db.tripMember.findFirst({ where: { id: memberId, tripId } });
   if (!member) throw new TripNotFoundError('Miembro no encontrado');
-  if (member.role === 'ORGANIZER') {
-    throw new TripValidationError('No se puede eliminar al organizador');
+  if (member.id === actor.id) {
+    throw new TripValidationError('No podés eliminarte a vos mismo');
   }
-  if (member.inviteStatus === 'JOINED' && member.userId) {
-    throw new TripValidationError('Solo se pueden eliminar viajeros sin reclamar');
+  if (member.role === 'ORGANIZER') {
+    throw new TripValidationError('No se puede eliminar a un organizador');
   }
 
   const [paidCount, paymentCount, allocCount, settleCount] = await Promise.all([

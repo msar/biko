@@ -193,7 +193,7 @@ NestJS module e.g. `trips` (names indicative). Auth: JWT user; guest join may us
 |--------|------|--------|
 | `GET` | `/trips/:tripId/members` | Roster (joined + pending) |
 | `POST` | `/trips/:tripId/members` | Organizer: pre-create pending traveller `{ displayName, tripHouseholdId? }` |
-| `DELETE` | `/trips/:tripId/members/:memberId` | Organizer: remove unclaimed pending slot |
+| `DELETE` | `/trips/:tripId/members/:memberId` | Organizer: remove member (not self / not organizer; blocked if has expenses) |
 | `POST` | `/trips/:tripId/invites` | Mint trip invite (not household) |
 | `GET` | `/trips/invite/:code` | Preview trip + unclaimed members for claim picker |
 | `POST` | `/trips/join` | Body: `{ code, displayName?, claimMemberId? }` → claim slot or create member |
