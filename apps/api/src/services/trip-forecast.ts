@@ -19,8 +19,18 @@ import {
 } from './trip-location.js';
 
 /** Single Keep-style PACK item that holds weather packing suggestions as a checklist. */
-export const PACKING_LIST_TITLE = 'Lista para traer';
+export const PACKING_LIST_TITLE = 'Lista para llevar';
+/** Pre-rename title — still matched so existing trips keep working. */
+const PACKING_LIST_TITLE_LEGACY = 'Lista para traer';
 const CHECKLIST_MARK = /^[☐☑✓✗xX•\-*]\s*/;
+
+export function isPackingListTitle(title: string): boolean {
+  const key = title.trim().toLowerCase();
+  return (
+    key === PACKING_LIST_TITLE.toLowerCase() ||
+    key === PACKING_LIST_TITLE_LEGACY.toLowerCase()
+  );
+}
 
 export function formatPackingChecklistLine(title: string): string {
   return `☐ ${title.trim()}`;
@@ -402,9 +412,7 @@ export async function applyPackingSuggestions(
     where: { tripId, type: 'PACK' },
     select: { id: true, title: true, notes: true },
   });
-  const existingList = packingLists.find(
-    (item) => item.title.trim().toLowerCase() === PACKING_LIST_TITLE.toLowerCase(),
-  );
+  const existingList = packingLists.find((item) => isPackingListTitle(item.title));
 
   if (existingList) {
     const already = new Set(packingChecklistTitles(existingList.notes).map((t) => t.toLowerCase()));

@@ -853,7 +853,7 @@ function GastosTab({
 }
 
 function listItemTypeLabel(type: TripListItemRow['type']): string {
-  if (type === 'PACK') return 'Traer';
+  if (type === 'PACK') return 'Llevar';
   if (type === 'BUY') return 'Comprar';
   return 'Hacer';
 }
@@ -870,8 +870,17 @@ function isMyListItem(item: TripListItemRow, myMemberId: string): boolean {
 }
 
 /** Matches API `PACKING_LIST_TITLE` — single Keep-style weather packing checklist. */
-const PACKING_LIST_TITLE = 'Lista para traer';
+const PACKING_LIST_TITLE = 'Lista para llevar';
+const PACKING_LIST_TITLE_LEGACY = 'Lista para traer';
 const PACKING_CHECKLIST_MARK = /^[☐☑✓✗xX•\-*]\s*/;
+
+function isPackingListTitle(title: string): boolean {
+  const key = title.trim().toLowerCase();
+  return (
+    key === PACKING_LIST_TITLE.toLowerCase() ||
+    key === PACKING_LIST_TITLE_LEGACY.toLowerCase()
+  );
+}
 
 function packingChecklistTitles(notes: string | null | undefined): string[] {
   if (!notes?.trim()) return [];
@@ -881,13 +890,9 @@ function packingChecklistTitles(notes: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
-function defaultListItemType(mode: 'TODO' | 'PACK_BUY' | 'MINE'): 'TODO' | 'PACK' | 'BUY' {
-  return mode === 'PACK_BUY' ? 'PACK' : 'TODO';
-}
-
 function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const queryClient = useQueryClient();
-  const [mode, setMode] = useState<'TODO' | 'PACK_BUY' | 'MINE'>('TODO');
+  const [mineOnly, setMineOnly] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TripListItemRow | null>(null);
@@ -908,8 +913,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     const suggestions = forecastQuery.data?.packingSuggestions ?? [];
     if (suggestions.length === 0) return [];
     const packingList = (items ?? []).find(
-      (i) =>
-        i.type === 'PACK' && i.title.trim().toLowerCase() === PACKING_LIST_TITLE.toLowerCase(),
+      (i) => i.type === 'PACK' && isPackingListTitle(i.title),
     );
     const inChecklist = new Set(
       packingChecklistTitles(packingList?.notes).map((t) => t.toLowerCase()),
@@ -924,20 +928,18 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
 
   const filtered = useMemo(() => {
     const all = items ?? [];
-    if (mode === 'MINE') {
+    if (mineOnly) {
       return all.filter((i) => isMyListItem(i, trip.myMember.id));
     }
-    return all.filter((i) =>
-      mode === 'TODO' ? i.type === 'TODO' : i.type === 'PACK' || i.type === 'BUY',
-    );
-  }, [items, mode, trip.myMember.id]);
+    return all;
+  }, [items, mineOnly, trip.myMember.id]);
 
-  const resetForm = (nextMode: typeof mode = mode) => {
+  const resetForm = () => {
     setEditingId(null);
     setFormOpen(false);
     setTitle('');
     setNotes('');
-    setItemType(defaultListItemType(nextMode));
+    setItemType('TODO');
     setAssignToAll(false);
     setAssigneeIds([]);
   };
@@ -946,7 +948,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     setEditingId(null);
     setTitle('');
     setNotes('');
-    setItemType(defaultListItemType(mode));
+    setItemType('TODO');
     setAssignToAll(false);
     setAssigneeIds([]);
     setFormOpen(true);
@@ -1012,7 +1014,6 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
-      setMode('PACK_BUY');
     },
   });
 
@@ -1040,53 +1041,31 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     createMutation.mutate(body);
   };
 
-  const emptyCopy =
-    mode === 'TODO'
-      ? 'Nada que hacer todavía'
-      : mode === 'PACK_BUY'
-        ? 'Nada que traer todavía'
-        : 'No tenés tareas asignadas';
+  const emptyCopy = mineOnly ? 'No tenés tareas asignadas' : 'Todavía no hay ítems';
 
   const showForm = !closed && (formOpen || editingId != null);
   const formBusy = createMutation.isPending || updateMutation.isPending;
   const showPackingSuggestions = !closed && pendingSuggestions.length > 0;
   const titlePlaceholder =
-    itemType === 'TODO' ? 'Reservar auto' : itemType === 'PACK' ? 'Lista para traer' : 'Protector solar';
+    itemType === 'TODO'
+      ? 'Reservar auto'
+      : itemType === 'PACK'
+        ? 'Lista para llevar'
+        : 'Protector solar';
   const notesPlaceholder =
     itemType === 'PACK' ? '☐ Ítem por línea (opcional)' : 'Opcional';
 
   return (
     <>
-      <div className="segmented segmented-wrap">
-        <button
-          type="button"
-          className={mode === 'TODO' ? 'active' : ''}
-          onClick={() => {
-            setMode('TODO');
-            if (!editingId && !formOpen) setItemType('TODO');
-          }}
-        >
-          Hacer
-        </button>
-        <button
-          type="button"
-          className={mode === 'PACK_BUY' ? 'active' : ''}
-          onClick={() => {
-            setMode('PACK_BUY');
-            if (!editingId && !formOpen) setItemType('PACK');
-          }}
-        >
-          Traer / Comprar
-        </button>
-        <button
-          type="button"
-          className={mode === 'MINE' ? 'active' : ''}
-          onClick={() => {
-            setMode('MINE');
-          }}
-        >
+      <div className="listas-toolbar">
+        <Chip selected={mineOnly} onClick={() => setMineOnly((v) => !v)}>
           Mis tareas
-        </button>
+        </Chip>
+        {!closed && !showForm && (
+          <button type="button" className="btn-primary" onClick={openCreateForm}>
+            + Agregar
+          </button>
+        )}
       </div>
 
       {showPackingSuggestions && (
@@ -1095,7 +1074,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
             <div>
               <h2 style={{ margin: 0 }}>Según el clima</h2>
               <p className="hint" style={{ margin: '4px 0 0' }}>
-                Sugerencias para armar la lista de traer
+                Sugerencias para armar la lista de llevar
               </p>
             </div>
             <button
@@ -1124,12 +1103,6 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
         </section>
       )}
 
-      {!closed && !showForm && (
-        <button type="button" className="btn-primary" onClick={openCreateForm}>
-          + Agregar
-        </button>
-      )}
-
       {showForm && (
         <form className="card promo-form" onSubmit={onSubmit}>
           <div className="segmented">
@@ -1145,7 +1118,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
               className={itemType === 'PACK' ? 'active' : ''}
               onClick={() => setItemType('PACK')}
             >
-              Traer
+              Llevar
             </button>
             <button
               type="button"
@@ -1217,10 +1190,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           {filtered.map((item) => {
             const typeLabel = listItemTypeLabel(item.type);
             const assigneeLabel = listItemAssigneeLabel(item);
-            const metaParts = [
-              mode !== 'TODO' ? typeLabel : null,
-              assigneeLabel,
-            ].filter(Boolean);
+            const metaParts = [typeLabel, assigneeLabel].filter(Boolean);
             const hasMultilineNotes = Boolean(item.notes && item.notes.includes('\n'));
             const support =
               metaParts.length > 0 || item.notes ? (
