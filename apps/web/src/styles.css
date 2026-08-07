@@ -2906,10 +2906,6 @@ label {
   text-align: center;
 }
 
-.trip-forecast-day.is-active {
-  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
-}
-
 .trip-forecast-weekday {
   font-size: 0.8rem;
   font-weight: 650;

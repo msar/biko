@@ -480,12 +480,8 @@ function TripForecastCard({ trip }: { trip: TripHub }) {
         </p>
       )}
       <div className="trip-forecast-strip" role="list">
-        {forecast.daily.map((day, index) => (
-          <div
-            key={day.date}
-            className={`trip-forecast-day${index === 0 ? ' is-active' : ''}`}
-            role="listitem"
-          >
+        {forecast.daily.map((day) => (
+          <div key={day.date} className="trip-forecast-day" role="listitem">
             <span className="trip-forecast-weekday">{weekdayShort(day.date)}</span>
             <WeatherIcon code={day.weatherCode} size={36} />
             <span className="trip-forecast-temps">
@@ -1045,8 +1041,9 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const forecastSummaryLabel = useMemo(() => {
     const summary = forecastQuery.data?.summary;
     if (!summary) return null;
+    const climate = summary.climateLabel?.trim();
     const parts = [
-      summary.label,
+      climate ? `Pronóstico: ${climate}` : summary.label,
       `${Math.round(summary.tMin)}–${Math.round(summary.tMax)}°C`,
     ];
     if (summary.rainyDays > 0) {
