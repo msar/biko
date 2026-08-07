@@ -229,9 +229,12 @@ export interface TripInvitePreview {
   unclaimedMembers: TripMember[];
 }
 
+export type TripPackingSection = 'clima' | 'viaje';
+
 export interface TripPackingSuggestion {
   title: string;
   reason: string;
+  section?: TripPackingSection;
 }
 
 export interface TripForecastDaily {

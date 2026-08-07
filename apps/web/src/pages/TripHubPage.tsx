@@ -15,6 +15,7 @@ import type {
   TripListItemRow,
   TripMember,
   TripMemberRole,
+  TripPackingSuggestion,
 } from '../lib/trip-types';
 import type { SessionUser } from '../lib/types';
 import {
@@ -29,6 +30,19 @@ import {
   timeInputValue,
   tripInviteUrl,
 } from '../lib/trip-utils';
+import {
+  isPackingListTitle,
+  normalizeChecklistNotes,
+  normalizePackingNotes,
+  notesAreChecklist,
+  PACKING_LIST_TITLE,
+  PACKING_SECTION_LABELS,
+  packingChecklistProgress,
+  packingChecklistTitles,
+  parsePackingChecklist,
+  togglePackingChecklistLine,
+  type PackingSection,
+} from '../lib/packing-checklist';
 
 type HubTab = 'resumen' | 'gastos' | 'listas' | 'alojamiento' | 'personas';
 
@@ -869,25 +883,127 @@ function isMyListItem(item: TripListItemRow, myMemberId: string): boolean {
   return item.assignees.some((m) => m.id === myMemberId);
 }
 
-/** Matches API `PACKING_LIST_TITLE` — single Keep-style weather packing checklist. */
-const PACKING_LIST_TITLE = 'Lista para llevar';
-const PACKING_LIST_TITLE_LEGACY = 'Lista para traer';
-const PACKING_CHECKLIST_MARK = /^[☐☑✓✗xX•\-*]\s*/;
+/** Nested Keep-style checklist rendered from item notes (PACK / BUY / TODO alike). */
+function NestedChecklistSupport({
+  notes,
+  metaLabel,
+  closed,
+  busy,
+  onToggleLine,
+}: {
+  notes: string;
+  metaLabel: string | null;
+  closed: boolean;
+  busy: boolean;
+  onToggleLine: (lineIndex: number) => void;
+}) {
+  const entries = parsePackingChecklist(notes);
+  const progress = packingChecklistProgress(notes);
 
-function isPackingListTitle(title: string): boolean {
-  const key = title.trim().toLowerCase();
   return (
-    key === PACKING_LIST_TITLE.toLowerCase() ||
-    key === PACKING_LIST_TITLE_LEGACY.toLowerCase()
+    <div className="listas-checklist">
+      {(metaLabel || progress.total > 0) && (
+        <div className="listas-checklist-meta">
+          {[metaLabel, progress.total > 0 ? `${progress.done}/${progress.total} listos` : null]
+            .filter(Boolean)
+            .join(' · ')}
+        </div>
+      )}
+      <div className="listas-checklist-list">
+        {entries.map((entry, idx) => {
+          if (entry.kind === 'section') {
+            return (
+              <div key={`section-${entry.section}-${idx}`} className="listas-checklist-section">
+                {entry.label}
+              </div>
+            );
+          }
+          return (
+            <div key={`${entry.lineIndex}-${entry.title}`} className="listas-checklist-line">
+              <label className={entry.checked ? 'listas-checklist-line-done' : undefined}>
+                <input
+                  type="checkbox"
+                  checked={entry.checked}
+                  disabled={closed || busy}
+                  onChange={() => onToggleLine(entry.lineIndex)}
+                />
+                <span>{entry.title}</span>
+              </label>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
-function packingChecklistTitles(notes: string | null | undefined): string[] {
-  if (!notes?.trim()) return [];
-  return notes
-    .split('\n')
-    .map((line) => line.replace(PACKING_CHECKLIST_MARK, '').trim())
-    .filter(Boolean);
+function PackingSuggestionsCard({
+  suggestions,
+  summaryLabel,
+  applying,
+  error,
+  onAddAll,
+  onAddOne,
+}: {
+  suggestions: TripPackingSuggestion[];
+  summaryLabel: string | null;
+  applying: boolean;
+  error: string | null;
+  onAddAll: () => void;
+  onAddOne: (suggestion: TripPackingSuggestion) => void;
+}) {
+  const bySection = (Object.keys(PACKING_SECTION_LABELS) as PackingSection[])
+    .map((section) => ({
+      section,
+      label: PACKING_SECTION_LABELS[section],
+      items: suggestions.filter((s) => (s.section ?? 'viaje') === section),
+    }))
+    .filter((group) => group.items.length > 0);
+
+  return (
+    <section className="card">
+      <div className="row-between" style={{ gap: 8, alignItems: 'flex-start' }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Según el clima</h2>
+          <p className="hint" style={{ margin: '4px 0 0' }}>
+            {summaryLabel
+              ? `${summaryLabel} · ${suggestions.length} pendientes para la lista`
+              : `${suggestions.length} pendientes para armar la lista`}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={applying}
+          onClick={onAddAll}
+        >
+          {applying ? 'Agregando…' : 'Agregar todas'}
+        </button>
+      </div>
+      {bySection.map((group) => (
+        <div key={group.section} className="listas-packing-suggest-group">
+          <p className="listas-packing-suggest-label">{group.label}</p>
+          <div className="chip-row">
+            {group.items.map((s) => (
+              <Chip
+                key={s.title}
+                title={s.reason}
+                disabled={applying}
+                onClick={() => onAddOne(s)}
+              >
+                + {s.title}
+              </Chip>
+            ))}
+          </div>
+        </div>
+      ))}
+      {error && (
+        <p className="error" style={{ marginTop: 8 }}>
+          {error}
+        </p>
+      )}
+    </section>
+  );
 }
 
 function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
@@ -925,6 +1041,21 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
       return !inChecklist.has(key) && !asStandalone.has(key);
     });
   }, [forecastQuery.data, items]);
+
+  const forecastSummaryLabel = useMemo(() => {
+    const summary = forecastQuery.data?.summary;
+    if (!summary) return null;
+    const parts = [
+      summary.label,
+      `${Math.round(summary.tMin)}–${Math.round(summary.tMax)}°C`,
+    ];
+    if (summary.rainyDays > 0) {
+      parts.push(
+        summary.rainyDays === 1 ? '1 día con lluvia' : `${summary.rainyDays} días con lluvia`,
+      );
+    }
+    return parts.join(' · ');
+  }, [forecastQuery.data?.summary]);
 
   const filtered = useMemo(() => {
     const all = items ?? [];
@@ -996,6 +1127,46 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     },
   });
 
+  const checklistToggleMutation = useMutation({
+    mutationFn: ({
+      itemId,
+      notes: nextNotes,
+      status,
+    }: {
+      itemId: string;
+      notes: string;
+      status?: 'PENDING' | 'DONE';
+    }) =>
+      api(`/trips/${trip.id}/list-items/${itemId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ notes: nextNotes, ...(status ? { status } : {}) }),
+      }),
+    onMutate: async ({ itemId, notes: nextNotes, status }) => {
+      await queryClient.cancelQueries({ queryKey: ['trips', trip.id, 'list-items'] });
+      const previous = queryClient.getQueryData<TripListItemRow[]>([
+        'trips',
+        trip.id,
+        'list-items',
+      ]);
+      queryClient.setQueryData<TripListItemRow[]>(['trips', trip.id, 'list-items'], (old) =>
+        (old ?? []).map((item) =>
+          item.id === itemId
+            ? { ...item, notes: nextNotes, status: status ?? item.status }
+            : item,
+        ),
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(['trips', trip.id, 'list-items'], ctx.previous);
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (itemId: string) =>
       api(`/trips/${trip.id}/list-items/${itemId}`, { method: 'DELETE' }),
@@ -1007,10 +1178,10 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   });
 
   const applyPackingMutation = useMutation({
-    mutationFn: (titles: string[]) =>
+    mutationFn: (itemsToAdd: Array<{ title: string; section: PackingSection }>) =>
       api<TripListItemRow[]>(`/trips/${trip.id}/packing-suggestions/apply`, {
         method: 'POST',
-        body: JSON.stringify({ titles }),
+        body: JSON.stringify({ items: itemsToAdd }),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
@@ -1027,10 +1198,20 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim() || closed) return;
+    const trimmedTitle = title.trim();
+    const trimmedNotes = notes.trim();
+    const isPackingList =
+      itemType === 'PACK' && (isPackingListTitle(trimmedTitle) || Boolean(trimmedNotes));
+    const shouldNormalizeChecklist = isPackingList || notesAreChecklist(trimmedNotes);
+    const normalizedNotes = shouldNormalizeChecklist
+      ? (isPackingListTitle(trimmedTitle)
+          ? normalizePackingNotes(notes)
+          : normalizeChecklistNotes(notes)) || null
+      : trimmedNotes || null;
     const body = {
       type: itemType,
-      title: title.trim(),
-      notes: notes.trim() || null,
+      title: trimmedTitle,
+      notes: normalizedNotes,
       assignToAll,
       assigneeMemberIds: assignToAll ? [] : assigneeIds,
     };
@@ -1050,10 +1231,21 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     itemType === 'TODO'
       ? 'Reservar auto'
       : itemType === 'PACK'
-        ? 'Lista para llevar'
+        ? PACKING_LIST_TITLE
         : 'Protector solar';
-  const notesPlaceholder =
-    itemType === 'PACK' ? '☐ Ítem por línea (opcional)' : 'Opcional';
+  const notesPlaceholder = '* Ítem por línea (opcional)';
+
+  const toggleChecklistLine = (item: TripListItemRow, lineIndex: number) => {
+    const nextNotes = togglePackingChecklistLine(item.notes, lineIndex);
+    const progress = packingChecklistProgress(nextNotes);
+    const status =
+      progress.total > 0 && progress.done === progress.total
+        ? ('DONE' as const)
+        : progress.done < progress.total && item.status === 'DONE'
+          ? ('PENDING' as const)
+          : undefined;
+    checklistToggleMutation.mutate({ itemId: item.id, notes: nextNotes, status });
+  };
 
   return (
     <>
@@ -1069,38 +1261,29 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
       </div>
 
       {showPackingSuggestions && (
-        <section className="card">
-          <div className="row-between" style={{ gap: 8, alignItems: 'flex-start' }}>
-            <div>
-              <h2 style={{ margin: 0 }}>Según el clima</h2>
-              <p className="hint" style={{ margin: '4px 0 0' }}>
-                Sugerencias para armar la lista de llevar
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={applyPackingMutation.isPending}
-              onClick={() =>
-                applyPackingMutation.mutate(pendingSuggestions.map((s) => s.title))
-              }
-            >
-              {applyPackingMutation.isPending ? 'Agregando…' : 'Agregar a la lista'}
-            </button>
-          </div>
-          <div className="chip-row" style={{ marginTop: 12 }}>
-            {pendingSuggestions.map((s) => (
-              <Chip key={s.title} title={s.reason}>
-                {s.title}
-              </Chip>
-            ))}
-          </div>
-          {applyPackingMutation.isError && (
-            <p className="error" style={{ marginTop: 8 }}>
-              {forecastErrorMessage(applyPackingMutation.error)}
-            </p>
-          )}
-        </section>
+        <PackingSuggestionsCard
+          suggestions={pendingSuggestions}
+          summaryLabel={forecastSummaryLabel}
+          applying={applyPackingMutation.isPending}
+          error={
+            applyPackingMutation.isError
+              ? forecastErrorMessage(applyPackingMutation.error)
+              : null
+          }
+          onAddAll={() =>
+            applyPackingMutation.mutate(
+              pendingSuggestions.map((s) => ({
+                title: s.title,
+                section: s.section ?? 'viaje',
+              })),
+            )
+          }
+          onAddOne={(s) =>
+            applyPackingMutation.mutate([
+              { title: s.title, section: s.section ?? 'viaje' },
+            ])
+          }
+        />
       )}
 
       {showForm && (
@@ -1191,20 +1374,37 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
             const typeLabel = listItemTypeLabel(item.type);
             const assigneeLabel = listItemAssigneeLabel(item);
             const metaParts = [typeLabel, assigneeLabel].filter(Boolean);
-            const hasMultilineNotes = Boolean(item.notes && item.notes.includes('\n'));
-            const support =
-              metaParts.length > 0 || item.notes ? (
-                <>
-                  {metaParts.length > 0 && <span>{metaParts.join(' · ')}</span>}
-                  {item.notes ? (
-                    <span className={hasMultilineNotes ? 'listas-item-notes' : undefined}>
-                      {metaParts.length > 0 && !hasMultilineNotes
-                        ? ` · ${item.notes}`
-                        : item.notes}
-                    </span>
-                  ) : null}
-                </>
-              ) : undefined;
+            const isPackingList = item.type === 'PACK' && isPackingListTitle(item.title);
+            const hasNestedChecklist = Boolean(
+              item.notes &&
+                (notesAreChecklist(item.notes) ||
+                  (isPackingList &&
+                    parsePackingChecklist(item.notes).some((e) => e.kind === 'item'))),
+            );
+            const hasMultilineNotes = Boolean(
+              !hasNestedChecklist && item.notes && item.notes.includes('\n'),
+            );
+
+            const support = hasNestedChecklist ? (
+              <NestedChecklistSupport
+                notes={item.notes!}
+                metaLabel={metaParts.length > 0 ? metaParts.join(' · ') : null}
+                closed={closed}
+                busy={checklistToggleMutation.isPending}
+                onToggleLine={(lineIndex) => toggleChecklistLine(item, lineIndex)}
+              />
+            ) : metaParts.length > 0 || item.notes ? (
+              <>
+                {metaParts.length > 0 && <span>{metaParts.join(' · ')}</span>}
+                {item.notes ? (
+                  <span className={hasMultilineNotes ? 'listas-item-notes' : undefined}>
+                    {metaParts.length > 0 && !hasMultilineNotes
+                      ? ` · ${item.notes}`
+                      : item.notes}
+                  </span>
+                ) : null}
+              </>
+            ) : undefined;
 
             return (
               <ListItem
@@ -1212,23 +1412,28 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
                 className={[
                   item.status === 'DONE' ? 'listas-item-done' : '',
                   editingId === item.id ? 'listas-item-editing' : '',
-                  hasMultilineNotes ? 'listas-item-multiline' : '',
+                  hasMultilineNotes || hasNestedChecklist ? 'listas-item-multiline' : '',
+                  hasNestedChecklist ? 'listas-item-checklist' : '',
                 ]
                   .filter(Boolean)
                   .join(' ') || undefined}
                 leading={
-                  <input
-                    type="checkbox"
-                    checked={item.status === 'DONE'}
-                    disabled={closed}
-                    aria-label={item.status === 'DONE' ? 'Marcar pendiente' : 'Marcar hecho'}
-                    onChange={() =>
-                      toggleMutation.mutate({
-                        itemId: item.id,
-                        status: item.status === 'DONE' ? 'PENDING' : 'DONE',
-                      })
-                    }
-                  />
+                  hasNestedChecklist ? (
+                    <span className="listas-checklist-leading" aria-hidden />
+                  ) : (
+                    <input
+                      type="checkbox"
+                      checked={item.status === 'DONE'}
+                      disabled={closed}
+                      aria-label={item.status === 'DONE' ? 'Marcar pendiente' : 'Marcar hecho'}
+                      onChange={() =>
+                        toggleMutation.mutate({
+                          itemId: item.id,
+                          status: item.status === 'DONE' ? 'PENDING' : 'DONE',
+                        })
+                      }
+                    />
+                  )
                 }
                 title={item.title}
                 support={support}

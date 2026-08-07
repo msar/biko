@@ -945,7 +945,8 @@ body {
 }
 
 /* --- forms --- */
-input,
+/* Text fields only — checkboxes/radios must not inherit 48px min-height. */
+input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='range']):not([type='color']):not([type='submit']):not([type='button']):not([type='hidden']):not([type='image']):not([type='reset']),
 select,
 textarea {
   width: 100%;
@@ -959,7 +960,7 @@ textarea {
   color: var(--md-sys-color-on-surface);
 }
 
-input:focus,
+input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='range']):not([type='color']):not([type='submit']):not([type='button']):not([type='hidden']):not([type='image']):not([type='reset']):focus,
 select:focus,
 textarea:focus {
   outline: none;
@@ -2606,6 +2607,165 @@ label {
   display: block;
   white-space: pre-line;
   margin-top: 2px;
+  line-height: 1.35;
+}
+
+.listas-item-checklist .md-list-item-support {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  line-height: 1.15;
+}
+
+.listas-item-checklist .md-list-item-body {
+  gap: 2px;
+}
+
+.listas-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.listas-checklist-meta {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-medium-size);
+  line-height: 1.2;
+  margin: 0 0 2px;
+}
+
+.listas-checklist-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.listas-checklist-section {
+  margin: 8px 0 2px;
+  padding: 0;
+  font-size: var(--md-sys-typescale-label-medium-size);
+  font-weight: var(--md-sys-typescale-label-large-weight);
+  color: var(--md-sys-color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
+.listas-checklist-section:first-child {
+  margin-top: 0;
+}
+
+/*
+ * Keep-like density: override global `label { flex-direction: column; gap; flex: 1 }`.
+ * Checkboxes are excluded from the text-field `input` rule; still pin box size explicitly.
+ */
+.listas-list .listas-checklist-line {
+  display: block;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  line-height: 1.15;
+}
+
+.listas-list .listas-checklist-line > label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 100%;
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--md-sys-color-on-surface);
+  font-size: var(--md-sys-typescale-body-medium-size);
+  font-weight: var(--md-sys-typescale-body-medium-weight, 400);
+  line-height: 1.15;
+}
+
+.listas-list .listas-checklist-line > label > input[type='checkbox'] {
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  max-width: 14px;
+  max-height: 14px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  flex: 0 0 14px;
+  align-self: center;
+  appearance: auto;
+  background: transparent;
+  accent-color: var(--md-sys-color-primary);
+}
+
+.listas-list .listas-checklist-line > label > input[type='checkbox']:focus {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 1px;
+  border: none;
+  padding: 0;
+}
+
+.listas-list .listas-checklist-line > label > span {
+  margin: 0;
+  padding: 0;
+  line-height: 1.15;
+}
+
+.listas-checklist-line-done > span {
+  text-decoration: line-through;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.listas-checklist-leading {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  border-radius: 4px;
+  border: 1.5px solid var(--md-sys-color-outline-variant);
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 35%,
+      var(--md-sys-color-outline-variant) 35%,
+      var(--md-sys-color-outline-variant) 45%,
+      transparent 45%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 65%,
+      var(--md-sys-color-outline-variant) 65%,
+      var(--md-sys-color-outline-variant) 75%,
+      transparent 75%
+    );
+}
+
+.listas-packing-suggest-group {
+  margin-top: 12px;
+}
+
+.listas-packing-suggest-label {
+  margin: 0 0 6px;
+  font-size: var(--md-sys-typescale-label-medium-size);
+  font-weight: var(--md-sys-typescale-label-large-weight);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.listas-packing-suggest-group .md-chip:disabled {
+  opacity: 0.55;
 }
 
 .personas-list {
@@ -2658,10 +2818,20 @@ label {
   min-width: 8px;
 }
 
-.listas-list .md-list-item input[type='checkbox'] {
+.listas-list .md-list-item > input[type='checkbox'] {
+  box-sizing: border-box;
   width: 18px;
   height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  max-width: 18px;
+  max-height: 18px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  flex: 0 0 18px;
   flex-shrink: 0;
+  background: transparent;
   accent-color: var(--md-sys-color-primary);
 }
 

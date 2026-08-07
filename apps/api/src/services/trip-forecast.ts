@@ -18,11 +18,36 @@ import {
   TripLocationError,
 } from './trip-location.js';
 
-/** Single Keep-style PACK item that holds weather packing suggestions as a checklist. */
+/** Single Keep-style PACK item that holds weather packing suggestions as a nested checklist. */
 export const PACKING_LIST_TITLE = 'Lista para llevar';
 /** Pre-rename title — still matched so existing trips keep working. */
 const PACKING_LIST_TITLE_LEGACY = 'Lista para traer';
-const CHECKLIST_MARK = /^[☐☑✓✗xX•\-*]\s*/;
+
+/**
+ * Canonical nested checklist line: `* Item` / `* [x] Item`.
+ * Also accepted: `- Item`, `☐/☑ Item`, `- [ ] Item`, `• Item`, etc.
+ */
+const TASK_BOX = /^\[\s*([xX✓☑]|)\s*\]\s*/;
+
+/** Dropped always-on boilerplate from older suggestion builds. */
+const LEGACY_BOILERPLATE = new Set(
+  ['documentos', 'cargador', 'medicamentos básicos', 'medicamentos basicos'].map((s) =>
+    s.toLowerCase(),
+  ),
+);
+
+export type PackingSection = 'clima' | 'viaje';
+
+export const PACKING_SECTION_LABELS: Record<PackingSection, string> = {
+  clima: 'Clima',
+  viaje: 'Para el viaje',
+};
+
+const SECTION_LABEL_TO_KEY = new Map<string, PackingSection>(
+  (Object.entries(PACKING_SECTION_LABELS) as Array<[PackingSection, string]>).map(
+    ([key, label]) => [label.toLowerCase(), key],
+  ),
+);
 
 export function isPackingListTitle(title: string): boolean {
   const key = title.trim().toLowerCase();
@@ -32,37 +57,187 @@ export function isPackingListTitle(title: string): boolean {
   );
 }
 
-export function formatPackingChecklistLine(title: string): string {
-  return `☐ ${title.trim()}`;
+export function stripChecklistMarkup(line: string): string {
+  let rest = line.trim();
+  if (!rest) return '';
+  // Orphan markers like `*` / `☐` / `-` with no label.
+  if (/^[-*•☐☑✓✗]+$/.test(rest)) return '';
+
+  const bullet = rest.match(/^[-*•]\s+/);
+  if (bullet) {
+    rest = rest.slice(bullet[0].length);
+  } else if (/^[☐☑✓✗]\s*/.test(rest)) {
+    rest = rest.replace(/^[☐☑✓✗]\s*/, '');
+  }
+
+  const box = rest.match(TASK_BOX);
+  if (box) {
+    rest = rest.slice(box[0].length);
+  }
+
+  return rest.trim();
+}
+
+export function isPackingSectionHeader(line: string): boolean {
+  return SECTION_LABEL_TO_KEY.has(stripChecklistMarkup(line).toLowerCase());
+}
+
+export function formatPackingChecklistLine(title: string, checked = false): string {
+  const clean = title.trim();
+  return checked ? `* [x] ${clean}` : `* ${clean}`;
+}
+
+function isCheckedLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (/^[☑✓]/.test(trimmed)) return true;
+  if (/^[-*•]\s+\[\s*[xX✓☑]\s*\]/.test(trimmed)) return true;
+  if (/^\[\s*[xX✓☑]\s*\]/.test(trimmed)) return true;
+  return false;
+}
+
+function looksLikeChecklistItem(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (/^[☐☑✓✗]/.test(trimmed)) return true;
+  if (/^[-*•]\s+/.test(trimmed)) return true;
+  if (TASK_BOX.test(trimmed)) return true;
+  return false;
+}
+
+type PackingNoteBlock =
+  | { kind: 'section'; section: PackingSection }
+  | { kind: 'item'; title: string; checked: boolean }
+  | { kind: 'other'; text: string };
+
+function parsePackingNotes(notes: string | null | undefined): PackingNoteBlock[] {
+  if (!notes?.trim()) return [];
+  const blocks: PackingNoteBlock[] = [];
+  for (const raw of notes.split('\n')) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+
+    const title = stripChecklistMarkup(trimmed);
+    if (!title) continue;
+
+    const section = SECTION_LABEL_TO_KEY.get(title.toLowerCase());
+    if (section) {
+      blocks.push({ kind: 'section', section });
+      continue;
+    }
+
+    if (looksLikeChecklistItem(trimmed)) {
+      blocks.push({ kind: 'item', title, checked: isCheckedLine(trimmed) });
+      continue;
+    }
+
+    // Unmarked non-section lines are checklist items (legacy one-item-per-line notes).
+    blocks.push({ kind: 'item', title, checked: false });
+  }
+  return blocks;
 }
 
 export function packingChecklistTitles(notes: string | null | undefined): string[] {
-  if (!notes?.trim()) return [];
-  return notes
-    .split('\n')
-    .map((line) => line.replace(CHECKLIST_MARK, '').trim())
-    .filter(Boolean);
+  return parsePackingNotes(notes)
+    .filter((b): b is Extract<PackingNoteBlock, { kind: 'item' }> => b.kind === 'item')
+    .map((b) => b.title);
 }
 
-function mergePackingChecklist(existingNotes: string | null | undefined, titles: string[]): string {
-  const lines = existingNotes?.trim()
-    ? existingNotes
-        .split('\n')
-        .map((line) => line.trimEnd())
-        .filter((line) => line.trim().length > 0)
-    : [];
-  const seen = new Set(packingChecklistTitles(existingNotes).map((t) => t.toLowerCase()));
+function serializePackingNotes(blocks: PackingNoteBlock[]): string {
+  const lines: string[] = [];
+  let emittedItem = false;
 
-  for (const title of titles) {
-    const trimmed = title.trim();
-    if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    lines.push(formatPackingChecklistLine(trimmed));
+  for (const block of blocks) {
+    if (block.kind === 'section') {
+      if (lines.length > 0 && emittedItem) lines.push('');
+      lines.push(PACKING_SECTION_LABELS[block.section]);
+      emittedItem = false;
+      continue;
+    }
+    if (block.kind === 'item') {
+      lines.push(formatPackingChecklistLine(block.title, block.checked));
+      emittedItem = true;
+      continue;
+    }
+    lines.push(block.text);
+    emittedItem = true;
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Normalize free-form notes into the canonical nested checklist format.
+ * Blank lines and empty markers are dropped; section headers stay unmarked.
+ */
+export function normalizePackingNotes(notes: string | null | undefined): string {
+  if (!notes?.trim()) return '';
+  const blocks = parsePackingNotes(notes).filter((block) => {
+    if (block.kind === 'item') return !LEGACY_BOILERPLATE.has(block.title.toLowerCase());
+    if (block.kind === 'other') return !LEGACY_BOILERPLATE.has(block.text.toLowerCase());
+    return true;
+  });
+  return serializePackingNotes(blocks);
+}
+
+export function mergePackingChecklist(
+  existingNotes: string | null | undefined,
+  items: Array<{ title: string; section?: PackingSection }>,
+): string {
+  const blocks = parsePackingNotes(existingNotes);
+  const sectionItems: Record<PackingSection, Array<{ title: string; checked: boolean }>> = {
+    clima: [],
+    viaje: [],
+  };
+  const orphanItems: Array<{ title: string; checked: boolean }> = [];
+  let currentSection: PackingSection | null = null;
+
+  for (const block of blocks) {
+    if (block.kind === 'section') {
+      currentSection = block.section;
+      continue;
+    }
+    if (block.kind === 'item') {
+      if (LEGACY_BOILERPLATE.has(block.title.toLowerCase())) continue;
+      if (currentSection) sectionItems[currentSection].push(block);
+      else orphanItems.push(block);
+      continue;
+    }
+    if (LEGACY_BOILERPLATE.has(block.text.toLowerCase())) continue;
+    const asItem = { title: block.text, checked: false };
+    if (currentSection) sectionItems[currentSection].push(asItem);
+    else orphanItems.push(asItem);
+  }
+
+  const seen = new Set(
+    [...sectionItems.clima, ...sectionItems.viaje, ...orphanItems].map((i) =>
+      i.title.toLowerCase(),
+    ),
+  );
+
+  for (const raw of items) {
+    const title = raw.title.trim();
+    if (!title) continue;
+    if (LEGACY_BOILERPLATE.has(title.toLowerCase())) continue;
+    const key = title.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sectionItems[raw.section ?? 'viaje'].push({ title, checked: false });
+  }
+
+  // Unsectioned legacy lines sit under "Para el viaje".
+  if (orphanItems.length > 0) {
+    sectionItems.viaje = [...orphanItems, ...sectionItems.viaje];
+  }
+
+  const out: PackingNoteBlock[] = [];
+  for (const section of ['clima', 'viaje'] as PackingSection[]) {
+    const list = sectionItems[section];
+    if (list.length === 0) continue;
+    out.push({ kind: 'section', section });
+    for (const item of list) out.push({ kind: 'item', ...item });
+  }
+
+  return serializePackingNotes(out);
 }
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -89,6 +264,7 @@ export type TripForecastDaily = {
 export type PackingSuggestion = {
   title: string;
   reason: string;
+  section: PackingSection;
 };
 
 export type TripForecast = {
@@ -230,52 +406,7 @@ async function fetchDailyForecast(
   }));
 }
 
-export function buildPackingSuggestions(
-  daily: TripForecastDaily[],
-  tripDayCount: number,
-): PackingSuggestion[] {
-  const suggestions: PackingSuggestion[] = [
-    { title: 'Documentos', reason: 'Esenciales para viajar' },
-    { title: 'Cargador', reason: 'Para el celular y otros dispositivos' },
-    { title: 'Medicamentos básicos', reason: 'Por si hace falta en el camino' },
-  ];
-
-  if (daily.length === 0) return suggestions;
-
-  const tMin = Math.min(...daily.map((d) => d.tMin));
-  const tMax = Math.max(...daily.map((d) => d.tMax));
-  const rainy = daily.some((d) => d.precipProb > 40);
-
-  if (tMin < 10) {
-    suggestions.push(
-      { title: 'Abrigo', reason: `Mínimas cerca de ${Math.round(tMin)}°C` },
-      { title: 'Buzo', reason: 'Para las noches más frescas' },
-      { title: 'Gorro', reason: 'Protección contra el frío' },
-    );
-  }
-
-  if (tMax > 28) {
-    suggestions.push(
-      { title: 'Protector solar', reason: `Máximas cerca de ${Math.round(tMax)}°C` },
-      { title: 'Gorra', reason: 'Para el sol' },
-      { title: 'Ropa liviana', reason: 'Días calurosos' },
-    );
-  }
-
-  if (rainy) {
-    suggestions.push(
-      { title: 'Paraguas', reason: 'Hay días con probabilidad de lluvia alta' },
-      { title: 'Impermeable', reason: 'Por si llueve' },
-    );
-  }
-
-  if (tripDayCount >= 2) {
-    suggestions.push(
-      { title: 'Muda extra', reason: `Viaje de ${tripDayCount} días` },
-      { title: 'Kit de aseo', reason: 'Para varios días afuera' },
-    );
-  }
-
+function dedupeSuggestions(suggestions: PackingSuggestion[]): PackingSuggestion[] {
   const seen = new Set<string>();
   return suggestions.filter((s) => {
     const key = s.title.toLowerCase();
@@ -283,6 +414,198 @@ export function buildPackingSuggestions(
     seen.add(key);
     return true;
   });
+}
+
+/** Trip-length items only — no documentos/cargador/kit genérico. */
+function pushTripLengthBasics(suggestions: PackingSuggestion[], tripDayCount: number) {
+  if (tripDayCount < 2) return;
+
+  const nights = tripDayCount - 1;
+  if (tripDayCount >= 7) {
+    const mudas = Math.min(5, Math.max(3, nights));
+    suggestions.push({
+      title: `${mudas} mudas de ropa`,
+      reason: `${tripDayCount} días / ${nights} noches — alcanza con menos si lavás`,
+      section: 'viaje',
+    });
+    suggestions.push({
+      title: 'Detergente de viaje',
+      reason: 'Para lavar en viajes largos',
+      section: 'viaje',
+    });
+    return;
+  }
+
+  suggestions.push({
+    title: `${Math.max(nights, 1)} mudas de ropa`,
+    reason: `Viaje de ${tripDayCount} días`,
+    section: 'viaje',
+  });
+}
+
+/**
+ * Weather- and length-driven packing ideas. Avoids always-on boilerplate
+ * (documentos, cargador) that everyone already packs.
+ */
+export function buildPackingSuggestions(
+  daily: TripForecastDaily[],
+  tripDayCount: number,
+): PackingSuggestion[] {
+  const suggestions: PackingSuggestion[] = [];
+
+  if (daily.length === 0) {
+    pushTripLengthBasics(suggestions, tripDayCount);
+    return dedupeSuggestions(suggestions);
+  }
+
+  const tMin = Math.min(...daily.map((d) => d.tMin));
+  const tMax = Math.max(...daily.map((d) => d.tMax));
+  const avgMax = daily.reduce((sum, d) => sum + d.tMax, 0) / daily.length;
+  const swing = tMax - tMin;
+  const rainyDays = daily.filter((d) => d.precipProb > 40).length;
+  const snowy = daily.some((d) => {
+    const code = d.weatherCode;
+    return (code >= 71 && code <= 77) || (code >= 85 && code <= 86);
+  });
+  const stormy = daily.some((d) => d.weatherCode >= 95);
+
+  if (tMin <= 0) {
+    suggestions.push(
+      {
+        title: 'Campera de abrigo',
+        reason: `Mínimas cerca de ${Math.round(tMin)}°C`,
+        section: 'clima',
+      },
+      {
+        title: 'Guantes',
+        reason: 'Noches bajo cero o cerca',
+        section: 'clima',
+      },
+      {
+        title: 'Gorro de lana',
+        reason: 'Protección contra el frío',
+        section: 'clima',
+      },
+    );
+  } else if (tMin < 8) {
+    suggestions.push(
+      {
+        title: 'Abrigo',
+        reason: `Mínimas cerca de ${Math.round(tMin)}°C`,
+        section: 'clima',
+      },
+      {
+        title: 'Buzo o polar',
+        reason: 'Para las noches más frescas',
+        section: 'clima',
+      },
+    );
+  } else if (tMin < 14) {
+    suggestions.push({
+      title: 'Buzo liviano',
+      reason: `Noches cerca de ${Math.round(tMin)}°C`,
+      section: 'clima',
+    });
+  }
+
+  if (tMax >= 32 || avgMax >= 30) {
+    suggestions.push(
+      {
+        title: 'Ropa liviana',
+        reason: `Máximas cerca de ${Math.round(tMax)}°C`,
+        section: 'clima',
+      },
+      {
+        title: 'Protector solar',
+        reason: 'Días de mucho calor',
+        section: 'clima',
+      },
+      {
+        title: 'Gorra o sombrero',
+        reason: 'Para el sol fuerte',
+        section: 'clima',
+      },
+      {
+        title: 'Anteojos de sol',
+        reason: 'Días soleados y calurosos',
+        section: 'clima',
+      },
+      {
+        title: 'Botella de agua',
+        reason: 'Hidratación con el calor',
+        section: 'clima',
+      },
+    );
+  } else if (tMax >= 26) {
+    suggestions.push(
+      {
+        title: 'Ropa liviana',
+        reason: `Máximas cerca de ${Math.round(tMax)}°C`,
+        section: 'clima',
+      },
+      {
+        title: 'Protector solar',
+        reason: 'Hay días de calor',
+        section: 'clima',
+      },
+      {
+        title: 'Gorra',
+        reason: 'Para el sol',
+        section: 'clima',
+      },
+    );
+  }
+
+  if (swing >= 12 && tMin < 16 && tMax > 22) {
+    suggestions.push({
+      title: 'Ropa en capas',
+      reason: `Amplitud térmica de ~${Math.round(swing)}°C`,
+      section: 'clima',
+    });
+  }
+
+  if (snowy) {
+    suggestions.push(
+      {
+        title: 'Calzado para nieve',
+        reason: 'Hay probabilidad de nieve',
+        section: 'clima',
+      },
+      {
+        title: 'Ropa térmica',
+        reason: 'Para el frío y la nieve',
+        section: 'clima',
+      },
+    );
+  } else if (stormy || rainyDays >= 3) {
+    suggestions.push(
+      {
+        title: 'Impermeable',
+        reason:
+          rainyDays >= 3
+            ? `${rainyDays} días con lluvia probable`
+            : 'Hay riesgo de tormenta',
+        section: 'clima',
+      },
+      {
+        title: 'Calzado cerrado',
+        reason: 'Por si llueve fuerte',
+        section: 'clima',
+      },
+    );
+  } else if (rainyDays >= 1) {
+    suggestions.push({
+      title: 'Paraguas o impermeable',
+      reason:
+        rainyDays === 1
+          ? 'Hay un día con lluvia probable'
+          : `Hay ${rainyDays} días con lluvia probable`,
+      section: 'clima',
+    });
+  }
+
+  pushTripLengthBasics(suggestions, tripDayCount);
+  return dedupeSuggestions(suggestions);
 }
 
 function clampForecastRange(
@@ -387,23 +710,38 @@ export async function getTripForecast(
   };
 }
 
+export type PackingApplyItem = {
+  title: string;
+  section?: PackingSection;
+};
+
 export async function applyPackingSuggestions(
   db: Db,
   tripId: string,
   actor: TripActor | string,
-  titles?: string[],
+  selection?: string[] | PackingApplyItem[],
 ) {
   await requireTripMember(db, tripId, actor);
 
-  let wanted: string[];
+  let wanted: PackingApplyItem[];
 
-  if (titles?.length) {
-    wanted = titles.map((t) => t.trim()).filter(Boolean);
+  if (selection?.length) {
+    wanted = selection.map((entry) =>
+      typeof entry === 'string'
+        ? { title: entry.trim(), section: undefined }
+        : { title: entry.title.trim(), section: entry.section },
+    );
   } else {
     const forecast = await getTripForecast(db, tripId, actor);
-    wanted = forecast.packingSuggestions.map((s) => s.title);
+    wanted = forecast.packingSuggestions.map((s) => ({
+      title: s.title,
+      section: s.section,
+    }));
   }
 
+  wanted = wanted
+    .filter((item) => item.title.length > 0)
+    .map((item) => ({ ...item, section: item.section ?? 'viaje' }));
   if (wanted.length === 0) {
     return [];
   }
@@ -415,12 +753,12 @@ export async function applyPackingSuggestions(
   const existingList = packingLists.find((item) => isPackingListTitle(item.title));
 
   if (existingList) {
-    const already = new Set(packingChecklistTitles(existingList.notes).map((t) => t.toLowerCase()));
-    const toAdd = wanted.filter((title) => !already.has(title.toLowerCase()));
-    if (toAdd.length === 0) {
+    // Re-merge always: drops blank/orphan markers, strips legacy boilerplate,
+    // normalizes to `* Item` lines, and appends any missing suggestions.
+    const notes = mergePackingChecklist(existingList.notes, wanted);
+    if (notes === (existingList.notes ?? '').trim()) {
       return [];
     }
-    const notes = mergePackingChecklist(existingList.notes, toAdd);
     const updated = await updateTripListItem(db, tripId, existingList.id, actor, { notes });
     return [updated];
   }

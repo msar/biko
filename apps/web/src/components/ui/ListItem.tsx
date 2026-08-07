@@ -35,7 +35,8 @@ export default function ListItem(props: ListItemProps) {
       {leading}
       <div className="md-list-item-body">
         <span className="md-list-item-title">{title}</span>
-        {support != null && <span className="md-list-item-support">{support}</span>}
+        {/* div: support may contain block checklist markup (invalid inside span) */}
+        {support != null && <div className="md-list-item-support">{support}</div>}
       </div>
       {trailing != null && <div className="md-list-item-trailing">{trailing}</div>}
     </>

@@ -259,6 +259,14 @@ function mapTripError(error: unknown, reply: { code: (n: number) => { send: (b: 
 
 const applyPackingSchema = z.object({
   titles: z.array(z.string().min(1).max(300)).optional(),
+  items: z
+    .array(
+      z.object({
+        title: z.string().min(1).max(300),
+        section: z.enum(['clima', 'viaje']).optional(),
+      }),
+    )
+    .optional(),
 });
 
 function requireUserId(user: JwtPayload): string {
@@ -653,7 +661,10 @@ export default async function tripRoutes(app: FastifyInstance) {
       const body = applyPackingSchema.parse(request.body ?? {});
       const { actor } = tripActorFromRequest(request);
       try {
-        const created = await applyPackingSuggestions(app.prisma, tripId, actor, body.titles);
+        const selection = body.items?.length
+          ? body.items
+          : body.titles;
+        const created = await applyPackingSuggestions(app.prisma, tripId, actor, selection);
         return reply.code(201).send(created);
       } catch (error) {
         return mapTripError(error, reply);
