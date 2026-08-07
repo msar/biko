@@ -82,7 +82,7 @@ El script crea `api`, `web` y `promotions-sync` (si no existen), configura varia
 **api**
 - `DATABASE_URL` → `${{Postgres.DATABASE_URL}}`
 - `NODE_ENV` → `production` (habilita el guard de `JWT_SECRET`)
-- `JWT_SECRET` → **variable persistente en Railway** (literal fijo). Generarla una sola vez y no rotarla: cada cambio invalida todas las sesiones. **Nunca** uses `${{ secret() }}` — Railway puede regenerarlo al re-aplicar variables y eso desloguea a todos en cada deploy. El API falla al arrancar si falta, es el valor de desarrollo, o parece un template `secret()`. Para rotar sin mass-logout: poné el valor actual en `JWT_SECRET_PREVIOUS`, el nuevo en `JWT_SECRET`, redeploy, y borrá `JWT_SECRET_PREVIOUS` después.
+- `JWT_SECRET` → **variable persistente en Railway** (literal fijo, ≥40 chars). Generarla una sola vez y no rotarla: cada cambio invalida todas las sesiones. **Nunca** uses `${{ secret() }}` — en servicios ya deployados Railway **regenera el valor en cada redeploy** (aunque el CLI muestre un string “resuelto” de 32 chars) y eso desloguea a todos. Si sospechás regeneración: `railway variable delete JWT_SECRET --service api` y volvé a setear un literal (`openssl rand -base64 48`), o `FORCE_JWT_RESET=1 ./scripts/railway-setup.sh`. El API falla al arrancar si falta, es el valor de desarrollo, o parece un template `secret()`. Para rotar sin mass-logout: poné el valor actual en `JWT_SECRET_PREVIOUS`, el nuevo en `JWT_SECRET`, redeploy, y borrá `JWT_SECRET_PREVIOUS` después.
 - `CORS_ORIGIN` → `https://${{web.RAILWAY_PUBLIC_DOMAIN}}`
 - `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` → dominio público de `web` (passkeys / Face ID)
 - `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` → Web Push (`npx web-push generate-vapid-keys`)

@@ -46,7 +46,8 @@ done
 
 # Never rotate JWT_SECRET on re-runs — regenerating invalidates every logged-in client.
 # Detect key presence (not only readable value): sealed/unreadable values must not be overwritten.
-# Never use Railway's ${{ secret() }} template — it can regenerate when variables are re-applied.
+# Never use Railway's ${{ secret() }} template — it regenerates on every redeploy even when the
+# CLI shows a "resolved" 32-char string. Fix: delete the variable, then set a fixed literal.
 JWT_STATUS="$(railway variable list --service api --json 2>/dev/null | python3 -c 'import json,sys
 try:
   raw=json.load(sys.stdin)
@@ -60,8 +61,11 @@ try:
     print("missing")
   else:
     val=str(vars_.get("JWT_SECRET") or "")
-    if "secret(" in val:
+    if "secret(" in val or "${{" in val:
       print("template")
+    # Railway secret(32) values are typically 32 chars and regenerate on redeploy.
+    elif len(val) < 40:
+      print("short_suspect")
     else:
       print("present")
 except Exception:
@@ -77,25 +81,30 @@ API_VARS=(
   'WEBAUTHN_ORIGIN=https://${{web.RAILWAY_PUBLIC_DOMAIN}}'
 )
 
+replace_jwt_secret() {
+  local reason="$1"
+  # Delete first: overwriting a secret()-backed var in place can leave the generator attached.
+  railway variable delete JWT_SECRET --service api --json >/dev/null 2>&1 || true
+  GENERATED_JWT="$(openssl rand -base64 48 | tr -d '\n')"
+  API_VARS+=("JWT_SECRET=$GENERATED_JWT")
+  echo "Replaced JWT_SECRET with a stable literal ($reason)"
+}
+
 if [[ -n "${JWT_SECRET:-}" ]]; then
-  if [[ "$JWT_SECRET" == *"secret("* ]]; then
+  if [[ "$JWT_SECRET" == *"secret("* ]] || [[ "$JWT_SECRET" == *'${{'* ]]; then
     echo "ERROR: JWT_SECRET must be a fixed string, not a Railway \${{ secret() }} template." >&2
     exit 1
   fi
+  railway variable delete JWT_SECRET --service api --json >/dev/null 2>&1 || true
   API_VARS+=("JWT_SECRET=$JWT_SECRET")
-  echo "Using JWT_SECRET from environment (explicit override)"
+  echo "Using JWT_SECRET from environment (explicit override; deleted prior value first)"
+elif [[ "${FORCE_JWT_RESET:-}" == "1" ]]; then
+  replace_jwt_secret "FORCE_JWT_RESET=1"
 elif [[ "$JWT_STATUS" == "present" || "$JWT_STATUS" == "unknown" ]]; then
   # present: keep. unknown: do not invent a new secret (avoids accidental mass logout).
   echo "Keeping existing JWT_SECRET (status=$JWT_STATUS; not overwriting)"
-elif [[ "$JWT_STATUS" == "template" || "$JWT_STATUS" == "missing" ]]; then
-  # Fixed random once; Railway template secret() can regenerate on re-apply.
-  GENERATED_JWT="$(openssl rand -base64 48 | tr -d '\n/=+' | head -c 48)"
-  API_VARS+=("JWT_SECRET=$GENERATED_JWT")
-  if [[ "$JWT_STATUS" == "template" ]]; then
-    echo "Replacing Railway \${{ secret() }} JWT_SECRET with a stable literal (was regenerating on re-apply)"
-  else
-    echo "Generated a new stable JWT_SECRET"
-  fi
+elif [[ "$JWT_STATUS" == "template" || "$JWT_STATUS" == "short_suspect" || "$JWT_STATUS" == "missing" ]]; then
+  replace_jwt_secret "status=$JWT_STATUS"
 else
   echo "ERROR: unexpected JWT_STATUS=$JWT_STATUS" >&2
   exit 1
