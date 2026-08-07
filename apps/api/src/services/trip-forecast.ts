@@ -256,6 +256,8 @@ type Db = PrismaClient | Prisma.TransactionClient;
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 /** Open-Meteo free forecast horizon is roughly 16 days from today. */
 const FORECAST_HORIZON_DAYS = 15;
+/** Re-fetch Open-Meteo when the stored snapshot is older than this. */
+const FORECAST_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 export class TripForecastError extends Error {
   constructor(message: string) {
@@ -499,6 +501,25 @@ function clampForecastRange(
   };
 }
 
+function asTripForecast(payload: Prisma.JsonValue): TripForecast | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const p = payload as Record<string, unknown>;
+  if (!p.location || !p.range || !Array.isArray(p.daily) || !p.summary) return null;
+  if (!Array.isArray(p.packingSuggestions)) return null;
+  return payload as unknown as TripForecast;
+}
+
+function isForecastCacheFresh(
+  cache: { destinationKey: string; rangeStart: string; rangeEnd: string; retrievedAt: Date },
+  destinationKey: string,
+  range: { start: string; end: string },
+  now = new Date(),
+): boolean {
+  if (cache.destinationKey !== destinationKey) return false;
+  if (cache.rangeStart !== range.start || cache.rangeEnd !== range.end) return false;
+  return now.getTime() - cache.retrievedAt.getTime() < FORECAST_CACHE_TTL_MS;
+}
+
 export async function getTripForecast(
   db: Db,
   tripId: string,
@@ -515,8 +536,20 @@ export async function getTripForecast(
     throw new TripValidationError('Faltan las fechas del viaje para el pronóstico');
   }
 
+  const cached = await db.tripForecastCache.findUnique({ where: { tripId } });
+  const knownTimeZone = trip.destinationTimezone?.trim() || null;
+
+  // With a stored timezone we can clamp the range and serve a fresh cache without geocoding.
+  if (cached && knownTimeZone) {
+    const range = clampForecastRange(trip.startDate, trip.endDate, knownTimeZone);
+    if (isForecastCacheFresh(cached, destination, range)) {
+      const payload = asTripForecast(cached.payload);
+      if (payload) return payload;
+    }
+  }
+
   const location = await geocodeDestination(destination);
-  const timeZone = trip.destinationTimezone?.trim() || location.timezone || tripTimeZone(null);
+  const timeZone = knownTimeZone || location.timezone || tripTimeZone(null);
   if (!trip.destinationTimezone && location.timezone) {
     await db.trip.update({
       where: { id: tripId },
@@ -524,6 +557,13 @@ export async function getTripForecast(
     });
   }
   const range = clampForecastRange(trip.startDate, trip.endDate, timeZone);
+
+  // Cache may still be fresh if we only needed geocode for a missing timezone.
+  if (cached && isForecastCacheFresh(cached, destination, range)) {
+    const payload = asTripForecast(cached.payload);
+    if (payload) return payload;
+  }
+
   const daily = await fetchDailyForecast(
     location.latitude,
     location.longitude,
@@ -546,7 +586,7 @@ export async function getTripForecast(
   };
   const packing = buildPackingCatalog(daily, range.tripDayCount, destinationCtx);
 
-  return {
+  const forecast: TripForecast = {
     location: {
       name: location.name,
       country: location.country,
@@ -571,6 +611,28 @@ export async function getTripForecast(
       (s) => !LEGACY_BOILERPLATE.has(s.title.toLowerCase()),
     ),
   };
+
+  const retrievedAt = new Date();
+  await db.tripForecastCache.upsert({
+    where: { tripId },
+    create: {
+      tripId,
+      destinationKey: destination,
+      rangeStart: range.start,
+      rangeEnd: range.end,
+      payload: forecast as unknown as Prisma.InputJsonValue,
+      retrievedAt,
+    },
+    update: {
+      destinationKey: destination,
+      rangeStart: range.start,
+      rangeEnd: range.end,
+      payload: forecast as unknown as Prisma.InputJsonValue,
+      retrievedAt,
+    },
+  });
+
+  return forecast;
 }
 
 export type PackingApplyItem = {

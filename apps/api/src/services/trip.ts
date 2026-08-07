@@ -578,6 +578,15 @@ export async function updateTrip(
     }
   }
 
+  const forecastInputsChanged =
+    input.destination !== undefined ||
+    input.startDate !== undefined ||
+    input.endDate !== undefined ||
+    tzChanged;
+  if (forecastInputsChanged) {
+    await db.tripForecastCache.deleteMany({ where: { tripId } });
+  }
+
   return db.trip.update({
     where: { id: tripId },
     data,

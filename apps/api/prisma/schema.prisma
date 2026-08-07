@@ -851,9 +851,26 @@ model Trip {
   listItems     TripListItem[]
   accommodation TripAccommodation?
   exportBatches TripExportBatch[]
+  forecastCache TripForecastCache?
 
   @@index([createdByUserId, status])
   @@index([status, updatedAt])
+}
+
+/// Cached Open-Meteo daily forecast for a trip (refreshed when older than 6h).
+model TripForecastCache {
+  id              String   @id @default(cuid())
+  tripId          String   @unique
+  trip            Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  /// Trimmed destination string used when the forecast was fetched.
+  destinationKey  String
+  rangeStart      String
+  rangeEnd        String
+  /// Full TripForecast JSON payload returned by the API.
+  payload         Json
+  retrievedAt     DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 /// Trip-internal traveller group for settlement (not a Biko hogar).
