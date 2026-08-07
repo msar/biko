@@ -31,6 +31,7 @@ import {
   tripInviteUrl,
 } from '../lib/trip-utils';
 import {
+  isLegacyPackingBoilerplate,
   isPackingListTitle,
   normalizeChecklistNotes,
   normalizePackingNotes,
@@ -64,6 +65,7 @@ export default function TripHubPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   useEffect(() => {
     setTab(parseTab(searchParams.get('tab')));
@@ -128,6 +130,7 @@ export default function TripHubPage() {
   }
 
   const closed = trip.status === 'CLOSED';
+  const canEditDetails = trip.isOrganizer && !closed;
   const inviteLink = trip.shareSlug
     ? tripInviteUrl(trip.shareSlug)
     : trip.inviteCode
@@ -146,6 +149,16 @@ export default function TripHubPage() {
     }
   };
 
+  const headerMeta = (
+    <>
+      <h1 style={{ margin: 0 }}>{trip.name}</h1>
+      <p className="hint" style={{ margin: 0 }}>
+        {trip.destination ? `${trip.destination} · ` : ''}
+        {TRIP_STATUS_LABEL[trip.status]}
+      </p>
+    </>
+  );
+
   return (
     <div className="page">
       <header className="page-header">
@@ -155,14 +168,25 @@ export default function TripHubPage() {
           <span />
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={{ margin: 0 }}>{trip.name}</h1>
-          <p className="hint" style={{ margin: 0 }}>
-            {trip.destination ? `${trip.destination} · ` : ''}
-            {TRIP_STATUS_LABEL[trip.status]}
-          </p>
+          {canEditDetails ? (
+            <button
+              type="button"
+              className="trip-header-details-btn"
+              onClick={() => setDetailsOpen(true)}
+              aria-label="Editar datos del viaje"
+            >
+              {headerMeta}
+            </button>
+          ) : (
+            headerMeta
+          )}
         </div>
         <span />
       </header>
+
+      {canEditDetails && (
+        <TripDetailsDialog trip={trip} open={detailsOpen} onClose={() => setDetailsOpen(false)} />
+      )}
 
       {guest && (
         <div className="card" style={{ marginBottom: 12 }}>
@@ -498,10 +522,16 @@ function TripForecastCard({ trip }: { trip: TripHub }) {
   );
 }
 
-function TripDetailsCard({ trip, closed }: { trip: TripHub; closed: boolean }) {
+function TripDetailsDialog({
+  trip,
+  open,
+  onClose,
+}: {
+  trip: TripHub;
+  open: boolean;
+  onClose: () => void;
+}) {
   const queryClient = useQueryClient();
-  const canEdit = trip.isOrganizer && !closed;
-  const [editing, setEditing] = useState(false);
   const [name, setName] = useState(trip.name);
   const [destination, setDestination] = useState(trip.destination ?? '');
   const [startDate, setStartDate] = useState(dateInputValue(trip.startDate));
@@ -509,12 +539,13 @@ function TripDetailsCard({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (editing) return;
+    if (!open) return;
     setName(trip.name);
     setDestination(trip.destination ?? '');
     setStartDate(dateInputValue(trip.startDate));
     setEndDate(dateInputValue(trip.endDate));
-  }, [trip.name, trip.destination, trip.startDate, trip.endDate, editing]);
+    setError(null);
+  }, [open, trip.name, trip.destination, trip.startDate, trip.endDate]);
 
   const saveMutation = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -523,8 +554,8 @@ function TripDetailsCard({ trip, closed }: { trip: TripHub; closed: boolean }) {
       void queryClient.invalidateQueries({ queryKey: ['trips', trip.id] });
       void queryClient.invalidateQueries({ queryKey: ['trips'] });
       void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'forecast'] });
-      setEditing(false);
       setError(null);
+      onClose();
     },
     onError: (err) => setError(err instanceof Error ? err.message : 'No se pudo guardar'),
   });
@@ -549,86 +580,65 @@ function TripDetailsCard({ trip, closed }: { trip: TripHub; closed: boolean }) {
     });
   };
 
-  if (!editing) {
-    return (
-      <section className="card">
-        <div className="row-between">
-          <h2 style={{ margin: 0 }}>Datos del viaje</h2>
-          {canEdit && (
-            <button type="button" className="btn-link" onClick={() => setEditing(true)}>
-              Editar
-            </button>
-          )}
-        </div>
-        <p style={{ margin: '8px 0 0' }}>
-          <strong>{trip.name}</strong>
-        </p>
-        {trip.destination && (
-          <p className="hint" style={{ margin: '4px 0 0' }}>
-            {trip.destination}
-          </p>
-        )}
-        {(trip.startDate || trip.endDate) && (
-          <p className="hint" style={{ margin: '4px 0 0' }}>
-            {trip.startDate ? fmtDate(trip.startDate) : '—'}
-            {' → '}
-            {trip.endDate ? fmtDate(trip.endDate) : '—'}
-          </p>
-        )}
-        {!trip.destination && !trip.startDate && !trip.endDate && (
-          <p className="hint" style={{ margin: '8px 0 0' }}>
-            {canEdit ? 'Tocá Editar para cargar destino y fechas' : 'Sin destino ni fechas'}
-          </p>
-        )}
-      </section>
-    );
-  }
+  if (!open) return null;
 
   return (
-    <section className="card">
-      <h2 style={{ marginTop: 0 }}>Datos del viaje</h2>
-      <form className="promo-form" onSubmit={onSave}>
-        <label>
-          Nombre
-          <input value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
-        </label>
-        <label>
-          Destino
-          <input
-            value={destination}
-            onChange={(e) => setDestination(e.target.value)}
-            placeholder="Ciudad o lugar"
-          />
-        </label>
-        <div className="form-row-2">
-          <label>
-            Desde
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-          </label>
-          <label>
-            Hasta
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          </label>
+    <div className="md-dialog-overlay" role="presentation" onClick={onClose}>
+      <div
+        className="md-dialog trip-details-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="trip-details-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="trip-details-title">Datos del viaje</h2>
+        <div className="md-dialog-body">
+          <form className="promo-form" id="trip-details-form" onSubmit={onSave}>
+            <label>
+              Nombre
+              <input value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+            </label>
+            <label>
+              Destino
+              <input
+                value={destination}
+                onChange={(e) => setDestination(e.target.value)}
+                placeholder="Ciudad o lugar"
+              />
+            </label>
+            <div className="form-row-2">
+              <label>
+                Desde
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              </label>
+              <label>
+                Hasta
+                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              </label>
+            </div>
+            {error && <p className="error">{error}</p>}
+          </form>
         </div>
-        {error && <p className="error">{error}</p>}
-        <div className="row-between" style={{ gap: 8 }}>
+        <div className="md-dialog-actions">
           <Button
             type="button"
             variant="text"
-            onClick={() => {
-              setEditing(false);
-              setError(null);
-            }}
+            onClick={onClose}
             disabled={saveMutation.isPending}
           >
             Cancelar
           </Button>
-          <Button type="submit" variant="filled" disabled={saveMutation.isPending}>
+          <Button
+            type="submit"
+            form="trip-details-form"
+            variant="filled"
+            disabled={saveMutation.isPending}
+          >
             {saveMutation.isPending ? 'Guardando…' : 'Guardar'}
           </Button>
         </div>
-      </form>
-    </section>
+      </div>
+    </div>
   );
 }
 
@@ -673,8 +683,6 @@ function ResumenTab({
           </p>
         )}
       </section>
-
-      <TripDetailsCard trip={trip} closed={closed} />
 
       <TripForecastCard trip={trip} />
 
@@ -1033,6 +1041,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     // Legacy: individual PACK items created before the unified checklist.
     const asStandalone = new Set((items ?? []).map((i) => i.title.trim().toLowerCase()));
     return suggestions.filter((s) => {
+      if (isLegacyPackingBoilerplate(s.title)) return false;
       const key = s.title.toLowerCase();
       return !inChecklist.has(key) && !asStandalone.has(key);
     });
@@ -1182,6 +1191,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
+      void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'forecast'] });
     },
   });
 
@@ -1256,32 +1266,6 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           </button>
         )}
       </div>
-
-      {showPackingSuggestions && (
-        <PackingSuggestionsCard
-          suggestions={pendingSuggestions}
-          summaryLabel={forecastSummaryLabel}
-          applying={applyPackingMutation.isPending}
-          error={
-            applyPackingMutation.isError
-              ? forecastErrorMessage(applyPackingMutation.error)
-              : null
-          }
-          onAddAll={() =>
-            applyPackingMutation.mutate(
-              pendingSuggestions.map((s) => ({
-                title: s.title,
-                section: s.section ?? 'viaje',
-              })),
-            )
-          }
-          onAddOne={(s) =>
-            applyPackingMutation.mutate([
-              { title: s.title, section: s.section ?? 'viaje' },
-            ])
-          }
-        />
-      )}
 
       {showForm && (
         <form className="card promo-form" onSubmit={onSubmit}>
@@ -1460,6 +1444,32 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
             );
           })}
         </div>
+      )}
+
+      {showPackingSuggestions && (
+        <PackingSuggestionsCard
+          suggestions={pendingSuggestions}
+          summaryLabel={forecastSummaryLabel}
+          applying={applyPackingMutation.isPending}
+          error={
+            applyPackingMutation.isError
+              ? forecastErrorMessage(applyPackingMutation.error)
+              : null
+          }
+          onAddAll={() =>
+            applyPackingMutation.mutate(
+              pendingSuggestions.map((s) => ({
+                title: s.title,
+                section: s.section ?? 'viaje',
+              })),
+            )
+          }
+          onAddOne={(s) =>
+            applyPackingMutation.mutate([
+              { title: s.title, section: s.section ?? 'viaje' },
+            ])
+          }
+        />
       )}
 
       <ConfirmDialog

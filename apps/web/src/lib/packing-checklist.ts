@@ -172,6 +172,11 @@ const LEGACY_PACKING_BOILERPLATE = new Set([
   'medicamentos basicos',
 ]);
 
+/** Titles dropped from weather suggestions / checklist merges (older always-on chips). */
+export function isLegacyPackingBoilerplate(title: string): boolean {
+  return LEGACY_PACKING_BOILERPLATE.has(title.trim().toLowerCase());
+}
+
 /**
  * Normalize free-form notes (one item per line, optional `*` / `-` / `☐`) into the
  * canonical nested checklist format (`* Item` / `* [x] Item`).
@@ -229,7 +234,7 @@ export function normalizePackingNotes(notes: string | null | undefined): string 
       continue;
     }
 
-    if (LEGACY_PACKING_BOILERPLATE.has(title.toLowerCase())) continue;
+    if (isLegacyPackingBoilerplate(title)) continue;
 
     lines.push(formatPackingChecklistLine(title, isCheckedLine(trimmed)));
     lastWasItem = true;

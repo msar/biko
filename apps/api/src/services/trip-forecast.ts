@@ -567,7 +567,9 @@ export async function getTripForecast(
       label,
       climateLabel: packing.climateLabel,
     },
-    packingSuggestions: packing.suggestions,
+    packingSuggestions: packing.suggestions.filter(
+      (s) => !LEGACY_BOILERPLATE.has(s.title.toLowerCase()),
+    ),
   };
 }
 
@@ -602,6 +604,7 @@ export async function applyPackingSuggestions(
 
   wanted = wanted
     .filter((item) => item.title.length > 0)
+    .filter((item) => !LEGACY_BOILERPLATE.has(item.title.toLowerCase()))
     .map((item) => ({ ...item, section: item.section ?? 'viaje' }));
   if (wanted.length === 0) {
     return [];

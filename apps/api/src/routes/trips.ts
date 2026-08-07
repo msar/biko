@@ -263,7 +263,7 @@ const applyPackingSchema = z.object({
     .array(
       z.object({
         title: z.string().min(1).max(300),
-        section: z.enum(['clima', 'viaje']).optional(),
+        section: z.enum(['clima', 'destino', 'viaje']).optional(),
       }),
     )
     .optional(),
