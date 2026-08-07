@@ -77,12 +77,18 @@ body {
 }
 
 .trip-details-dialog {
-  max-width: 360px;
+  max-width: 400px;
+  overflow: hidden;
 }
 
 .trip-details-dialog .promo-form {
   margin: 0;
   gap: 12px;
+}
+
+.trip-details-dialog .form-row-2 input[type='date'] {
+  padding-inline: 10px;
+  font-size: var(--md-sys-typescale-body-medium-size);
 }
 
 .dashboard-greeting {
@@ -3169,6 +3175,17 @@ code {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+
+.form-row-2 > * {
+  min-width: 0;
+}
+
+.form-row-2 input[type='date'],
+.form-row-2 input[type='time'] {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .trip-payer-row {

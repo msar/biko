@@ -609,11 +609,25 @@ function TripDetailsDialog({
             <div className="form-row-2">
               <label>
                 Desde
-                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                <input
+                  type="date"
+                  value={startDate}
+                  max={endDate || undefined}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setStartDate(next);
+                    if (next && endDate && endDate < next) setEndDate(next);
+                  }}
+                />
               </label>
               <label>
                 Hasta
-                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                <input
+                  type="date"
+                  value={endDate}
+                  min={startDate || undefined}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
               </label>
             </div>
             {error && <p className="error">{error}</p>}
