@@ -243,6 +243,42 @@ export function normalizePackingNotes(notes: string | null | undefined): string 
   return lines.join('\n');
 }
 
+/**
+ * Append a new unchecked item to checklist notes (under `viaje` when sections exist).
+ * No-op if the title is empty, legacy boilerplate, or already present.
+ */
+export function appendPackingChecklistItem(
+  notes: string | null | undefined,
+  title: string,
+  section: PackingSection = 'viaje',
+): string {
+  const clean = stripChecklistMarkup(title.trim()) || title.trim();
+  if (!clean || isLegacyPackingBoilerplate(clean) || isPackingSectionHeader(clean)) {
+    return notes ?? '';
+  }
+
+  const existing = packingChecklistTitles(notes).map((t) => t.toLowerCase());
+  if (existing.includes(clean.toLowerCase())) return notes ?? '';
+
+  const itemLine = formatPackingChecklistLine(clean);
+  const base = (notes ?? '').trimEnd();
+  if (!base) {
+    return `${PACKING_SECTION_LABELS[section]}\n${itemLine}`;
+  }
+
+  const parsed = parsePackingChecklist(base);
+  const hasAnySection = parsed.some((e) => e.kind === 'section');
+  const hasTargetSection = parsed.some(
+    (e) => e.kind === 'section' && e.section === section,
+  );
+
+  if (hasAnySection && !hasTargetSection) {
+    return `${base}\n\n${PACKING_SECTION_LABELS[section]}\n${itemLine}`;
+  }
+
+  return `${base}\n${itemLine}`;
+}
+
 /** Toggle checked state for the checklist item at lineIndex; returns updated notes. */
 export function togglePackingChecklistLine(
   notes: string | null | undefined,

@@ -31,6 +31,7 @@ import {
   tripInviteUrl,
 } from '../lib/trip-utils';
 import {
+  appendPackingChecklistItem,
   isLegacyPackingBoilerplate,
   isPackingListTitle,
   normalizeChecklistNotes,
@@ -908,15 +909,26 @@ function NestedChecklistSupport({
   closed,
   busy,
   onToggleLine,
+  onAddItem,
 }: {
   notes: string;
   metaLabel: string | null;
   closed: boolean;
   busy: boolean;
   onToggleLine: (lineIndex: number) => void;
+  onAddItem?: (title: string) => void;
 }) {
   const entries = parsePackingChecklist(notes);
   const progress = packingChecklistProgress(notes);
+  const [draft, setDraft] = useState('');
+  const canAdd = Boolean(onAddItem) && !closed;
+
+  const submitDraft = () => {
+    const title = draft.trim();
+    if (!title || busy || !onAddItem) return;
+    onAddItem(title);
+    setDraft('');
+  };
 
   return (
     <div className="listas-checklist">
@@ -951,6 +963,27 @@ function NestedChecklistSupport({
           );
         })}
       </div>
+      {canAdd && (
+        <form
+          className="listas-checklist-add"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitDraft();
+          }}
+        >
+          <input
+            type="text"
+            value={draft}
+            disabled={busy}
+            placeholder="Agregar ítem"
+            aria-label="Agregar ítem a la lista"
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <button type="submit" className="btn-link" disabled={busy || !draft.trim()}>
+            Agregar
+          </button>
+        </form>
+      )}
     </div>
   );
 }
@@ -1240,6 +1273,39 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
       updateMutation.mutate({ itemId: editingId, body });
       return;
     }
+
+    // Fold plain "Llevar" titles into the shared packing checklist when it exists.
+    if (itemType === 'PACK' && !isPackingListTitle(trimmedTitle)) {
+      const packingList = (items ?? []).find(
+        (i) => i.type === 'PACK' && isPackingListTitle(i.title),
+      );
+      if (packingList) {
+        let nextNotes = appendPackingChecklistItem(packingList.notes, trimmedTitle);
+        if (trimmedNotes) {
+          for (const raw of trimmedNotes.split('\n')) {
+            const line = raw.trim();
+            if (!line) continue;
+            nextNotes = appendPackingChecklistItem(nextNotes, line);
+          }
+        }
+        if (nextNotes === (packingList.notes ?? '')) {
+          resetForm();
+          return;
+        }
+        const progress = packingChecklistProgress(nextNotes);
+        updateMutation.mutate({
+          itemId: packingList.id,
+          body: {
+            notes: nextNotes,
+            ...(packingList.status === 'DONE' && progress.done < progress.total
+              ? { status: 'PENDING' }
+              : {}),
+          },
+        });
+        return;
+      }
+    }
+
     createMutation.mutate(body);
   };
 
@@ -1267,6 +1333,22 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           : undefined;
     checklistToggleMutation.mutate({ itemId: item.id, notes: nextNotes, status });
   };
+
+  const addChecklistItem = (item: TripListItemRow, title: string) => {
+    const nextNotes = appendPackingChecklistItem(item.notes, title);
+    if (nextNotes === (item.notes ?? '')) return;
+    const progress = packingChecklistProgress(nextNotes);
+    const status =
+      item.status === 'DONE' && progress.done < progress.total
+        ? ('PENDING' as const)
+        : undefined;
+    checklistToggleMutation.mutate({ itemId: item.id, notes: nextNotes, status });
+  };
+
+  const formError =
+    (createMutation.isError && createMutation.error) ||
+    (updateMutation.isError && updateMutation.error) ||
+    null;
 
   return (
     <>
@@ -1357,6 +1439,11 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
               Cancelar
             </button>
           </div>
+          {formError && (
+            <p className="error" style={{ marginTop: 8 }}>
+              {formError instanceof Error ? formError.message : 'No se pudo guardar'}
+            </p>
+          )}
         </form>
       )}
 
@@ -1387,6 +1474,9 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
                 closed={closed}
                 busy={checklistToggleMutation.isPending}
                 onToggleLine={(lineIndex) => toggleChecklistLine(item, lineIndex)}
+                onAddItem={
+                  !closed ? (title) => addChecklistItem(item, title) : undefined
+                }
               />
             ) : metaParts.length > 0 || item.notes ? (
               <>

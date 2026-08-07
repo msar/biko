@@ -188,10 +188,13 @@ const settleSchema = z.object({
   close: z.boolean().optional(),
 });
 
+/** Nested packing checklists can grow past a short free-text note. */
+const LIST_ITEM_NOTES_MAX = 10_000;
+
 const listItemBodySchema = z.object({
   type: z.enum(['TODO', 'PACK', 'BUY']),
   title: z.string().min(1).max(300),
-  notes: z.string().max(1000).nullish(),
+  notes: z.string().max(LIST_ITEM_NOTES_MAX).nullish(),
   quantity: z.number().int().positive().nullish(),
   assignToAll: z.boolean().optional(),
   assigneeMemberIds: z.array(z.string().min(1)).optional(),
@@ -203,7 +206,7 @@ const listItemBodySchema = z.object({
 const listItemPatchSchema = z.object({
   type: z.enum(['TODO', 'PACK', 'BUY']).optional(),
   title: z.string().min(1).max(300).optional(),
-  notes: z.string().max(1000).nullish(),
+  notes: z.string().max(LIST_ITEM_NOTES_MAX).nullish(),
   quantity: z.number().int().positive().nullish(),
   assignToAll: z.boolean().optional(),
   assigneeMemberIds: z.array(z.string().min(1)).optional(),
