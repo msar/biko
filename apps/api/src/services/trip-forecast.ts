@@ -17,6 +17,13 @@ import {
   TripDestinationNotFoundError,
   TripLocationError,
 } from './trip-location.js';
+import {
+  buildPackingCatalog,
+  type DestinationPackingContext,
+  type PackingSection as CatalogPackingSection,
+  type PackingSuggestion as CatalogPackingSuggestion,
+  type TripForecastDaily as CatalogDaily,
+} from './trip-packing-catalog.js';
 
 /** Single Keep-style PACK item that holds weather packing suggestions as a nested checklist. */
 export const PACKING_LIST_TITLE = 'Lista para llevar';
@@ -36,12 +43,15 @@ const LEGACY_BOILERPLATE = new Set(
   ),
 );
 
-export type PackingSection = 'clima' | 'viaje';
+export type PackingSection = CatalogPackingSection;
 
 export const PACKING_SECTION_LABELS: Record<PackingSection, string> = {
   clima: 'Clima',
+  destino: 'Destino',
   viaje: 'Para el viaje',
 };
+
+const SECTION_ORDER: PackingSection[] = ['clima', 'destino', 'viaje'];
 
 const SECTION_LABEL_TO_KEY = new Map<string, PackingSection>(
   (Object.entries(PACKING_SECTION_LABELS) as Array<[PackingSection, string]>).map(
@@ -186,6 +196,7 @@ export function mergePackingChecklist(
   const blocks = parsePackingNotes(existingNotes);
   const sectionItems: Record<PackingSection, Array<{ title: string; checked: boolean }>> = {
     clima: [],
+    destino: [],
     viaje: [],
   };
   const orphanItems: Array<{ title: string; checked: boolean }> = [];
@@ -209,8 +220,8 @@ export function mergePackingChecklist(
   }
 
   const seen = new Set(
-    [...sectionItems.clima, ...sectionItems.viaje, ...orphanItems].map((i) =>
-      i.title.toLowerCase(),
+    [...sectionItems.clima, ...sectionItems.destino, ...sectionItems.viaje, ...orphanItems].map(
+      (i) => i.title.toLowerCase(),
     ),
   );
 
@@ -230,7 +241,7 @@ export function mergePackingChecklist(
   }
 
   const out: PackingNoteBlock[] = [];
-  for (const section of ['clima', 'viaje'] as PackingSection[]) {
+  for (const section of SECTION_ORDER) {
     const list = sectionItems[section];
     if (list.length === 0) continue;
     out.push({ kind: 'section', section });
@@ -253,19 +264,9 @@ export class TripForecastError extends Error {
   }
 }
 
-export type TripForecastDaily = {
-  date: string;
-  tMax: number;
-  tMin: number;
-  precipProb: number;
-  weatherCode: number;
-};
+export type TripForecastDaily = CatalogDaily;
 
-export type PackingSuggestion = {
-  title: string;
-  reason: string;
-  section: PackingSection;
-};
+export type PackingSuggestion = CatalogPackingSuggestion;
 
 export type TripForecast = {
   location: {
@@ -273,10 +274,17 @@ export type TripForecast = {
     country?: string;
     latitude: number;
     longitude: number;
+    elevation?: number;
   };
   range: { start: string; end: string; truncated: boolean };
   daily: TripForecastDaily[];
-  summary: { tMin: number; tMax: number; rainyDays: number; label: string };
+  summary: {
+    tMin: number;
+    tMax: number;
+    rainyDays: number;
+    label: string;
+    climateLabel?: string | null;
+  };
   packingSuggestions: PackingSuggestion[];
 };
 
@@ -333,9 +341,7 @@ function dominantWeatherLabel(daily: TripForecastDaily[]): string {
   return best;
 }
 
-type GeoResult = {
-  name: string;
-  country?: string;
+type GeoResult = DestinationPackingContext & {
   latitude: number;
   longitude: number;
   timezone: string;
@@ -343,7 +349,18 @@ type GeoResult = {
 
 async function geocodeDestination(destination: string): Promise<GeoResult> {
   try {
-    return await geocodeTripDestination(destination);
+    const hit = await geocodeTripDestination(destination);
+    return {
+      name: hit.name,
+      country: hit.country,
+      countryCode: hit.countryCode,
+      admin1: hit.admin1,
+      elevation: hit.elevation,
+      query: destination,
+      latitude: hit.latitude,
+      longitude: hit.longitude,
+      timezone: hit.timezone,
+    };
   } catch (error) {
     if (error instanceof TripDestinationNotFoundError) {
       throw new TripValidationError(error.message);
@@ -366,7 +383,15 @@ async function fetchDailyForecast(
   url.searchParams.set('longitude', String(longitude));
   url.searchParams.set(
     'daily',
-    'temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode',
+    [
+      'temperature_2m_max',
+      'temperature_2m_min',
+      'precipitation_probability_max',
+      'weathercode',
+      'uv_index_max',
+      'precipitation_sum',
+      'wind_speed_10m_max',
+    ].join(','),
   );
   url.searchParams.set('timezone', 'auto');
   url.searchParams.set('start_date', start);
@@ -389,6 +414,10 @@ async function fetchDailyForecast(
       temperature_2m_min?: Array<number | null>;
       precipitation_probability_max?: Array<number | null>;
       weathercode?: Array<number | null>;
+      uv_index_max?: Array<number | null>;
+      precipitation_sum?: Array<number | null>;
+      wind_speed_10m_max?: Array<number | null>;
+      windspeed_10m_max?: Array<number | null>;
     };
   };
 
@@ -403,209 +432,24 @@ async function fetchDailyForecast(
     tMin: Number(body.daily?.temperature_2m_min?.[i] ?? 0),
     precipProb: Number(body.daily?.precipitation_probability_max?.[i] ?? 0),
     weatherCode: Number(body.daily?.weathercode?.[i] ?? 0),
+    uvIndexMax: Number(body.daily?.uv_index_max?.[i] ?? 0),
+    precipSum: Number(body.daily?.precipitation_sum?.[i] ?? 0),
+    windSpeedMax: Number(
+      body.daily?.wind_speed_10m_max?.[i] ?? body.daily?.windspeed_10m_max?.[i] ?? 0,
+    ),
   }));
 }
 
-function dedupeSuggestions(suggestions: PackingSuggestion[]): PackingSuggestion[] {
-  const seen = new Set<string>();
-  return suggestions.filter((s) => {
-    const key = s.title.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-/** Trip-length items only — no documentos/cargador/kit genérico. */
-function pushTripLengthBasics(suggestions: PackingSuggestion[], tripDayCount: number) {
-  if (tripDayCount < 2) return;
-
-  const nights = tripDayCount - 1;
-  if (tripDayCount >= 7) {
-    const mudas = Math.min(5, Math.max(3, nights));
-    suggestions.push({
-      title: `${mudas} mudas de ropa`,
-      reason: `${tripDayCount} días / ${nights} noches — alcanza con menos si lavás`,
-      section: 'viaje',
-    });
-    suggestions.push({
-      title: 'Detergente de viaje',
-      reason: 'Para lavar en viajes largos',
-      section: 'viaje',
-    });
-    return;
-  }
-
-  suggestions.push({
-    title: `${Math.max(nights, 1)} mudas de ropa`,
-    reason: `Viaje de ${tripDayCount} días`,
-    section: 'viaje',
-  });
-}
-
 /**
- * Weather- and length-driven packing ideas. Avoids always-on boilerplate
- * (documentos, cargador) that everyone already packs.
+ * Weather-, destination-, and length-driven packing ideas.
+ * Avoids always-on boilerplate (documentos, cargador).
  */
 export function buildPackingSuggestions(
   daily: TripForecastDaily[],
   tripDayCount: number,
+  destination?: DestinationPackingContext | null,
 ): PackingSuggestion[] {
-  const suggestions: PackingSuggestion[] = [];
-
-  if (daily.length === 0) {
-    pushTripLengthBasics(suggestions, tripDayCount);
-    return dedupeSuggestions(suggestions);
-  }
-
-  const tMin = Math.min(...daily.map((d) => d.tMin));
-  const tMax = Math.max(...daily.map((d) => d.tMax));
-  const avgMax = daily.reduce((sum, d) => sum + d.tMax, 0) / daily.length;
-  const swing = tMax - tMin;
-  const rainyDays = daily.filter((d) => d.precipProb > 40).length;
-  const snowy = daily.some((d) => {
-    const code = d.weatherCode;
-    return (code >= 71 && code <= 77) || (code >= 85 && code <= 86);
-  });
-  const stormy = daily.some((d) => d.weatherCode >= 95);
-
-  if (tMin <= 0) {
-    suggestions.push(
-      {
-        title: 'Campera de abrigo',
-        reason: `Mínimas cerca de ${Math.round(tMin)}°C`,
-        section: 'clima',
-      },
-      {
-        title: 'Guantes',
-        reason: 'Noches bajo cero o cerca',
-        section: 'clima',
-      },
-      {
-        title: 'Gorro de lana',
-        reason: 'Protección contra el frío',
-        section: 'clima',
-      },
-    );
-  } else if (tMin < 8) {
-    suggestions.push(
-      {
-        title: 'Abrigo',
-        reason: `Mínimas cerca de ${Math.round(tMin)}°C`,
-        section: 'clima',
-      },
-      {
-        title: 'Buzo o polar',
-        reason: 'Para las noches más frescas',
-        section: 'clima',
-      },
-    );
-  } else if (tMin < 14) {
-    suggestions.push({
-      title: 'Buzo liviano',
-      reason: `Noches cerca de ${Math.round(tMin)}°C`,
-      section: 'clima',
-    });
-  }
-
-  if (tMax >= 32 || avgMax >= 30) {
-    suggestions.push(
-      {
-        title: 'Ropa liviana',
-        reason: `Máximas cerca de ${Math.round(tMax)}°C`,
-        section: 'clima',
-      },
-      {
-        title: 'Protector solar',
-        reason: 'Días de mucho calor',
-        section: 'clima',
-      },
-      {
-        title: 'Gorra o sombrero',
-        reason: 'Para el sol fuerte',
-        section: 'clima',
-      },
-      {
-        title: 'Anteojos de sol',
-        reason: 'Días soleados y calurosos',
-        section: 'clima',
-      },
-      {
-        title: 'Botella de agua',
-        reason: 'Hidratación con el calor',
-        section: 'clima',
-      },
-    );
-  } else if (tMax >= 26) {
-    suggestions.push(
-      {
-        title: 'Ropa liviana',
-        reason: `Máximas cerca de ${Math.round(tMax)}°C`,
-        section: 'clima',
-      },
-      {
-        title: 'Protector solar',
-        reason: 'Hay días de calor',
-        section: 'clima',
-      },
-      {
-        title: 'Gorra',
-        reason: 'Para el sol',
-        section: 'clima',
-      },
-    );
-  }
-
-  if (swing >= 12 && tMin < 16 && tMax > 22) {
-    suggestions.push({
-      title: 'Ropa en capas',
-      reason: `Amplitud térmica de ~${Math.round(swing)}°C`,
-      section: 'clima',
-    });
-  }
-
-  if (snowy) {
-    suggestions.push(
-      {
-        title: 'Calzado para nieve',
-        reason: 'Hay probabilidad de nieve',
-        section: 'clima',
-      },
-      {
-        title: 'Ropa térmica',
-        reason: 'Para el frío y la nieve',
-        section: 'clima',
-      },
-    );
-  } else if (stormy || rainyDays >= 3) {
-    suggestions.push(
-      {
-        title: 'Impermeable',
-        reason:
-          rainyDays >= 3
-            ? `${rainyDays} días con lluvia probable`
-            : 'Hay riesgo de tormenta',
-        section: 'clima',
-      },
-      {
-        title: 'Calzado cerrado',
-        reason: 'Por si llueve fuerte',
-        section: 'clima',
-      },
-    );
-  } else if (rainyDays >= 1) {
-    suggestions.push({
-      title: 'Paraguas o impermeable',
-      reason:
-        rainyDays === 1
-          ? 'Hay un día con lluvia probable'
-          : `Hay ${rainyDays} días con lluvia probable`,
-      section: 'clima',
-    });
-  }
-
-  pushTripLengthBasics(suggestions, tripDayCount);
-  return dedupeSuggestions(suggestions);
+  return buildPackingCatalog(daily, tripDayCount, destination).suggestions;
 }
 
 function clampForecastRange(
@@ -692,12 +536,23 @@ export async function getTripForecast(
   const rainyDays = daily.filter((d) => d.precipProb > 40).length;
   const label = dominantWeatherLabel(daily);
 
+  const destinationCtx: DestinationPackingContext = {
+    name: location.name,
+    country: location.country,
+    countryCode: location.countryCode,
+    admin1: location.admin1,
+    elevation: location.elevation,
+    query: destination,
+  };
+  const packing = buildPackingCatalog(daily, range.tripDayCount, destinationCtx);
+
   return {
     location: {
       name: location.name,
       country: location.country,
       latitude: location.latitude,
       longitude: location.longitude,
+      elevation: location.elevation,
     },
     range: {
       start: range.start,
@@ -705,8 +560,14 @@ export async function getTripForecast(
       truncated: range.truncated,
     },
     daily,
-    summary: { tMin, tMax, rainyDays, label },
-    packingSuggestions: buildPackingSuggestions(daily, range.tripDayCount),
+    summary: {
+      tMin,
+      tMax,
+      rainyDays,
+      label,
+      climateLabel: packing.climateLabel,
+    },
+    packingSuggestions: packing.suggestions,
   };
 }
 

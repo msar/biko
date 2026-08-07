@@ -3,10 +3,11 @@
 export const PACKING_LIST_TITLE = 'Lista para llevar';
 export const PACKING_LIST_TITLE_LEGACY = 'Lista para traer';
 
-export type PackingSection = 'clima' | 'viaje';
+export type PackingSection = 'clima' | 'destino' | 'viaje';
 
 export const PACKING_SECTION_LABELS: Record<PackingSection, string> = {
   clima: 'Clima',
+  destino: 'Destino',
   viaje: 'Para el viaje',
 };
 

@@ -17,6 +17,9 @@ export class TripDestinationNotFoundError extends TripLocationError {
 export type TripGeoResult = {
   name: string;
   country?: string;
+  countryCode?: string;
+  admin1?: string;
+  elevation?: number;
   latitude: number;
   longitude: number;
   timezone: string;
@@ -43,6 +46,9 @@ export async function geocodeTripDestination(destination: string): Promise<TripG
     results?: Array<{
       name: string;
       country?: string;
+      country_code?: string;
+      admin1?: string;
+      elevation?: number;
       latitude: number;
       longitude: number;
       timezone?: string;
@@ -55,6 +61,9 @@ export async function geocodeTripDestination(destination: string): Promise<TripG
   return {
     name: hit.name,
     country: hit.country,
+    countryCode: hit.country_code?.trim().toUpperCase() || undefined,
+    admin1: hit.admin1?.trim() || undefined,
+    elevation: typeof hit.elevation === 'number' && Number.isFinite(hit.elevation) ? hit.elevation : undefined,
     latitude: hit.latitude,
     longitude: hit.longitude,
     timezone: hit.timezone?.trim() || 'UTC',

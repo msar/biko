@@ -10,6 +10,12 @@ import {
   PACKING_LIST_TITLE,
   type TripForecastDaily,
 } from './trip-forecast.js';
+import {
+  buildPackingCatalog,
+  classifyClimate,
+  classifyDestination,
+  climateBandLabelEs,
+} from './trip-packing-catalog.js';
 
 function day(partial: Partial<TripForecastDaily> & { date: string }): TripForecastDaily {
   return {
@@ -17,6 +23,9 @@ function day(partial: Partial<TripForecastDaily> & { date: string }): TripForeca
     tMin: 12,
     precipProb: 10,
     weatherCode: 1,
+    uvIndexMax: 3,
+    precipSum: 0,
+    windSpeedMax: 10,
     ...partial,
   };
 }
@@ -50,6 +59,7 @@ describe('packing checklist helpers', () => {
     expect(isPackingSectionHeader('Clima')).toBe(true);
     expect(isPackingSectionHeader('* Para el viaje')).toBe(true);
     expect(isPackingSectionHeader('Para el viaje')).toBe(true);
+    expect(isPackingSectionHeader('Destino')).toBe(true);
   });
 
   it('normalizes free-form notes to canonical * lines without orphan blanks', () => {
@@ -91,6 +101,7 @@ describe('packing checklist helpers', () => {
     const merged = mergePackingChecklist(existing, [
       { title: 'Abrigo', section: 'clima' },
       { title: 'Gorra', section: 'clima' },
+      { title: 'Traje de baño', section: 'destino' },
       { title: '3 mudas de ropa', section: 'viaje' },
       { title: 'Cargador', section: 'viaje' },
     ]);
@@ -100,6 +111,9 @@ describe('packing checklist helpers', () => {
         '* Abrigo',
         '* [x] Paraguas',
         '* Gorra',
+        '',
+        'Destino',
+        '* Traje de baño',
         '',
         'Para el viaje',
         '* 3 mudas de ropa',
@@ -118,8 +132,32 @@ describe('packing checklist helpers', () => {
   });
 });
 
+describe('climate / destination classifiers', () => {
+  it('classifies freezing and wet profiles', () => {
+    const profile = classifyClimate([
+      day({ date: '2026-07-01', tMin: -2, tMax: 1, precipProb: 80, weatherCode: 73, uvIndexMax: 2 }),
+    ]);
+    expect(profile?.band).toBe('freezing');
+    expect(profile?.snowy).toBe(true);
+    expect(climateBandLabelEs(profile!)).toMatch(/nieve|frío/i);
+  });
+
+  it('detects coastal and high-altitude destinations', () => {
+    expect(
+      classifyDestination({ name: 'Mar del Plata', query: 'playa Mar del Plata' }).coastal,
+    ).toBe(true);
+    expect(
+      classifyDestination({ name: 'Cerro Catedral', query: 'sierra Bariloche', elevation: 890 })
+        .mountain,
+    ).toBe(true);
+    expect(
+      classifyDestination({ name: 'La Quiaca', elevation: 3442 }).highAltitude,
+    ).toBe(true);
+  });
+});
+
 describe('buildPackingSuggestions', () => {
-  it('omits generic always-on boilerplate', () => {
+  it('omits generic always-on boilerplate on short mild trips', () => {
     const suggestions = buildPackingSuggestions(
       [day({ date: '2026-08-10', tMin: 18, tMax: 24, precipProb: 5 })],
       1,
@@ -129,7 +167,15 @@ describe('buildPackingSuggestions', () => {
     expect(titles.some((t) => t.includes('cargador'))).toBe(false);
     expect(titles.some((t) => t.includes('medicamento'))).toBe(false);
     expect(titles.some((t) => t.includes('kit de aseo'))).toBe(false);
-    expect(suggestions).toEqual([]);
+  });
+
+  it('keeps mild multi-day trips non-empty', () => {
+    const suggestions = buildPackingSuggestions(
+      [day({ date: '2026-08-10', tMin: 14, tMax: 22, precipProb: 5 })],
+      3,
+    );
+    expect(suggestions.length).toBeGreaterThan(0);
+    expect(suggestions.some((s) => s.title.includes('mudas'))).toBe(true);
   });
 
   it('suggests cold-weather gear from low minima', () => {
@@ -149,9 +195,30 @@ describe('buildPackingSuggestions', () => {
   it('suggests heat gear and rain cover when relevant', () => {
     const suggestions = buildPackingSuggestions(
       [
-        day({ date: '2026-01-10', tMin: 22, tMax: 34, precipProb: 55, weatherCode: 61 }),
-        day({ date: '2026-01-11', tMin: 23, tMax: 33, precipProb: 60, weatherCode: 63 }),
-        day({ date: '2026-01-12', tMin: 21, tMax: 32, precipProb: 50, weatherCode: 80 }),
+        day({
+          date: '2026-01-10',
+          tMin: 22,
+          tMax: 34,
+          precipProb: 55,
+          weatherCode: 61,
+          uvIndexMax: 9,
+        }),
+        day({
+          date: '2026-01-11',
+          tMin: 23,
+          tMax: 33,
+          precipProb: 60,
+          weatherCode: 63,
+          uvIndexMax: 8,
+        }),
+        day({
+          date: '2026-01-12',
+          tMin: 21,
+          tMax: 32,
+          precipProb: 50,
+          weatherCode: 80,
+          uvIndexMax: 9,
+        }),
       ],
       3,
     );
@@ -172,6 +239,28 @@ describe('buildPackingSuggestions', () => {
     expect(titles).toContain('Campera de abrigo');
   });
 
+  it('adds destination section for coastal names', () => {
+    const { suggestions } = buildPackingCatalog(
+      [day({ date: '2026-01-10', tMin: 20, tMax: 28, precipProb: 10, uvIndexMax: 7 })],
+      3,
+      { name: 'Pinamar', query: 'playa Pinamar' },
+    );
+    const destino = suggestions.filter((s) => s.section === 'destino').map((s) => s.title);
+    expect(destino).toContain('Traje de baño');
+    expect(destino).toContain('Toalla de playa o viaje');
+  });
+
+  it('adds altitude gear for high elevation', () => {
+    const { suggestions } = buildPackingCatalog(
+      [day({ date: '2026-08-10', tMin: 8, tMax: 18, precipProb: 15 })],
+      3,
+      { name: 'La Quiaca', elevation: 3442, query: 'La Quiaca' },
+    );
+    const destino = suggestions.filter((s) => s.section === 'destino');
+    expect(destino.some((s) => s.title.includes('polar') || s.title.includes('capas'))).toBe(true);
+    expect(destino.some((s) => s.title === 'Protector solar')).toBe(true);
+  });
+
   it('scales clothing count with trip length (nights-based)', () => {
     const shortTrip = buildPackingSuggestions(
       [day({ date: '2026-08-10', tMin: 15, tMax: 22 })],
@@ -184,5 +273,23 @@ describe('buildPackingSuggestions', () => {
     expect(shortTrip.some((s) => s.title === '3 mudas de ropa')).toBe(true);
     expect(longTrip.some((s) => s.title.includes('mudas de ropa'))).toBe(true);
     expect(longTrip.some((s) => s.title === 'Detergente de viaje')).toBe(true);
+  });
+
+  it('suggests sun gear from high UV even when not hot', () => {
+    const suggestions = buildPackingSuggestions(
+      [
+        day({
+          date: '2026-09-01',
+          tMin: 6,
+          tMax: 16,
+          precipProb: 5,
+          uvIndexMax: 8,
+          weatherCode: 0,
+        }),
+      ],
+      2,
+    );
+    expect(suggestions.some((s) => s.title === 'Protector solar')).toBe(true);
+    expect(suggestions.some((s) => s.title === 'Anteojos de sol')).toBe(true);
   });
 });

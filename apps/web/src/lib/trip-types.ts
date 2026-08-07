@@ -229,7 +229,7 @@ export interface TripInvitePreview {
   unclaimedMembers: TripMember[];
 }
 
-export type TripPackingSection = 'clima' | 'viaje';
+export type TripPackingSection = 'clima' | 'destino' | 'viaje';
 
 export interface TripPackingSuggestion {
   title: string;
@@ -243,6 +243,9 @@ export interface TripForecastDaily {
   tMin: number;
   precipProb: number;
   weatherCode: number;
+  uvIndexMax?: number;
+  precipSum?: number;
+  windSpeedMax?: number;
 }
 
 export interface TripForecast {
@@ -251,9 +254,16 @@ export interface TripForecast {
     country?: string;
     latitude: number;
     longitude: number;
+    elevation?: number;
   };
   range: { start: string; end: string; truncated: boolean };
   daily: TripForecastDaily[];
-  summary: { tMin: number; tMax: number; rainyDays: number; label: string };
+  summary: {
+    tMin: number;
+    tMax: number;
+    rainyDays: number;
+    label: string;
+    climateLabel?: string | null;
+  };
   packingSuggestions: TripPackingSuggestion[];
 }
