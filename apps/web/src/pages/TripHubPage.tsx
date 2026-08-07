@@ -1547,6 +1547,10 @@ function AlojamientoTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
       }
       amountValue = n;
     }
+    if (checkIn && checkOut && checkOut < checkIn) {
+      setError('El check-out debe ser posterior al check-in');
+      return;
+    }
     saveMutation.mutate({
       label: label.trim() || null,
       address: address.trim() || null,
@@ -1652,7 +1656,16 @@ function AlojamientoTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
       <div className="form-row-2">
         <label>
           Check-in
-          <input type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} />
+          <input
+            type="date"
+            value={checkIn}
+            max={checkOut || undefined}
+            onChange={(e) => {
+              const next = e.target.value;
+              setCheckIn(next);
+              if (next && checkOut && checkOut < next) setCheckOut(next);
+            }}
+          />
         </label>
         <label>
           Hora check-in
@@ -1662,7 +1675,12 @@ function AlojamientoTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
       <div className="form-row-2">
         <label>
           Check-out
-          <input type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} />
+          <input
+            type="date"
+            value={checkOut}
+            min={checkIn || undefined}
+            onChange={(e) => setCheckOut(e.target.value)}
+          />
         </label>
         <label>
           Hora check-out
