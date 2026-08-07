@@ -8,6 +8,7 @@ import {
 import {
   createTripListItem,
   requireTripMember,
+  updateTripListItem,
   TripValidationError,
   type TripActor,
 } from './trip.js';
@@ -16,6 +17,43 @@ import {
   TripDestinationNotFoundError,
   TripLocationError,
 } from './trip-location.js';
+
+/** Single Keep-style PACK item that holds weather packing suggestions as a checklist. */
+export const PACKING_LIST_TITLE = 'Lista para traer';
+const CHECKLIST_MARK = /^[☐☑✓✗xX•\-*]\s*/;
+
+export function formatPackingChecklistLine(title: string): string {
+  return `☐ ${title.trim()}`;
+}
+
+export function packingChecklistTitles(notes: string | null | undefined): string[] {
+  if (!notes?.trim()) return [];
+  return notes
+    .split('\n')
+    .map((line) => line.replace(CHECKLIST_MARK, '').trim())
+    .filter(Boolean);
+}
+
+function mergePackingChecklist(existingNotes: string | null | undefined, titles: string[]): string {
+  const lines = existingNotes?.trim()
+    ? existingNotes
+        .split('\n')
+        .map((line) => line.trimEnd())
+        .filter((line) => line.trim().length > 0)
+    : [];
+  const seen = new Set(packingChecklistTitles(existingNotes).map((t) => t.toLowerCase()));
+
+  for (const title of titles) {
+    const trimmed = title.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(formatPackingChecklistLine(trimmed));
+  }
+
+  return lines.join('\n');
+}
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -348,42 +386,43 @@ export async function applyPackingSuggestions(
   await requireTripMember(db, tripId, actor);
 
   let wanted: string[];
-  let reasonByTitle = new Map<string, string>();
 
   if (titles?.length) {
     wanted = titles.map((t) => t.trim()).filter(Boolean);
   } else {
     const forecast = await getTripForecast(db, tripId, actor);
     wanted = forecast.packingSuggestions.map((s) => s.title);
-    reasonByTitle = new Map(
-      forecast.packingSuggestions.map((s) => [s.title.toLowerCase(), s.reason]),
-    );
   }
 
   if (wanted.length === 0) {
     return [];
   }
 
-  const existing = await db.tripListItem.findMany({
-    where: { tripId },
-    select: { title: true },
+  const packingLists = await db.tripListItem.findMany({
+    where: { tripId, type: 'PACK' },
+    select: { id: true, title: true, notes: true },
   });
-  const existingKeys = new Set(existing.map((i) => i.title.trim().toLowerCase()));
+  const existingList = packingLists.find(
+    (item) => item.title.trim().toLowerCase() === PACKING_LIST_TITLE.toLowerCase(),
+  );
 
-  const toCreate = wanted.filter((title) => !existingKeys.has(title.toLowerCase()));
-
-  const created = [];
-  for (const title of toCreate) {
-    const notes = reasonByTitle.get(title.toLowerCase()) ?? null;
-    const item = await createTripListItem(db, tripId, actor, {
-      type: 'PACK',
-      title,
-      notes,
-      assignToAll: true,
-    });
-    created.push(item);
-    existingKeys.add(title.toLowerCase());
+  if (existingList) {
+    const already = new Set(packingChecklistTitles(existingList.notes).map((t) => t.toLowerCase()));
+    const toAdd = wanted.filter((title) => !already.has(title.toLowerCase()));
+    if (toAdd.length === 0) {
+      return [];
+    }
+    const notes = mergePackingChecklist(existingList.notes, toAdd);
+    const updated = await updateTripListItem(db, tripId, existingList.id, actor, { notes });
+    return [updated];
   }
 
-  return created;
+  const notes = mergePackingChecklist(null, wanted);
+  const created = await createTripListItem(db, tripId, actor, {
+    type: 'PACK',
+    title: PACKING_LIST_TITLE,
+    notes,
+    assignToAll: true,
+  });
+  return [created];
 }

@@ -2590,6 +2590,16 @@ label {
   padding: 6px 0;
 }
 
+.listas-list .md-list-item.listas-item-multiline {
+  align-items: flex-start;
+}
+
+.listas-item-notes {
+  display: block;
+  white-space: pre-line;
+  margin-top: 2px;
+}
+
 .personas-list {
   padding: 4px 12px 8px;
 }

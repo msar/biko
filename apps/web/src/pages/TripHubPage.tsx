@@ -869,10 +869,28 @@ function isMyListItem(item: TripListItemRow, myMemberId: string): boolean {
   return item.assignees.some((m) => m.id === myMemberId);
 }
 
+/** Matches API `PACKING_LIST_TITLE` — single Keep-style weather packing checklist. */
+const PACKING_LIST_TITLE = 'Lista para traer';
+const PACKING_CHECKLIST_MARK = /^[☐☑✓✗xX•\-*]\s*/;
+
+function packingChecklistTitles(notes: string | null | undefined): string[] {
+  if (!notes?.trim()) return [];
+  return notes
+    .split('\n')
+    .map((line) => line.replace(PACKING_CHECKLIST_MARK, '').trim())
+    .filter(Boolean);
+}
+
+function defaultListItemType(mode: 'TODO' | 'PACK_BUY' | 'MINE'): 'TODO' | 'PACK' | 'BUY' {
+  return mode === 'PACK_BUY' ? 'PACK' : 'TODO';
+}
+
 function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<'TODO' | 'PACK_BUY' | 'MINE'>('TODO');
+  const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<TripListItemRow | null>(null);
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [itemType, setItemType] = useState<'TODO' | 'PACK' | 'BUY'>('TODO');
@@ -889,8 +907,19 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const pendingSuggestions = useMemo(() => {
     const suggestions = forecastQuery.data?.packingSuggestions ?? [];
     if (suggestions.length === 0) return [];
-    const existing = new Set((items ?? []).map((i) => i.title.trim().toLowerCase()));
-    return suggestions.filter((s) => !existing.has(s.title.toLowerCase()));
+    const packingList = (items ?? []).find(
+      (i) =>
+        i.type === 'PACK' && i.title.trim().toLowerCase() === PACKING_LIST_TITLE.toLowerCase(),
+    );
+    const inChecklist = new Set(
+      packingChecklistTitles(packingList?.notes).map((t) => t.toLowerCase()),
+    );
+    // Legacy: individual PACK items created before the unified checklist.
+    const asStandalone = new Set((items ?? []).map((i) => i.title.trim().toLowerCase()));
+    return suggestions.filter((s) => {
+      const key = s.title.toLowerCase();
+      return !inChecklist.has(key) && !asStandalone.has(key);
+    });
   }, [forecastQuery.data, items]);
 
   const filtered = useMemo(() => {
@@ -905,15 +934,27 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
 
   const resetForm = (nextMode: typeof mode = mode) => {
     setEditingId(null);
+    setFormOpen(false);
     setTitle('');
     setNotes('');
-    setItemType(nextMode === 'PACK_BUY' ? 'PACK' : 'TODO');
+    setItemType(defaultListItemType(nextMode));
     setAssignToAll(false);
     setAssigneeIds([]);
   };
 
+  const openCreateForm = () => {
+    setEditingId(null);
+    setTitle('');
+    setNotes('');
+    setItemType(defaultListItemType(mode));
+    setAssignToAll(false);
+    setAssigneeIds([]);
+    setFormOpen(true);
+  };
+
   const startEdit = (item: TripListItemRow) => {
     setEditingId(item.id);
+    setFormOpen(true);
     setTitle(item.title);
     setNotes(item.notes ?? '');
     setItemType(item.type);
@@ -958,6 +999,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
       api(`/trips/${trip.id}/list-items/${itemId}`, { method: 'DELETE' }),
     onSuccess: (_data, itemId) => {
       void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
+      setDeleteTarget(null);
       if (editingId === itemId) resetForm();
     },
   });
@@ -995,7 +1037,6 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
       updateMutation.mutate({ itemId: editingId, body });
       return;
     }
-    if (mode === 'MINE') return;
     createMutation.mutate(body);
   };
 
@@ -1006,10 +1047,13 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
         ? 'Nada que traer todavía'
         : 'No tenés tareas asignadas';
 
-  const showForm = !closed && (editingId != null || mode !== 'MINE');
+  const showForm = !closed && (formOpen || editingId != null);
   const formBusy = createMutation.isPending || updateMutation.isPending;
-  const showTypePicker = editingId != null || mode === 'PACK_BUY';
   const showPackingSuggestions = !closed && pendingSuggestions.length > 0;
+  const titlePlaceholder =
+    itemType === 'TODO' ? 'Reservar auto' : itemType === 'PACK' ? 'Lista para traer' : 'Protector solar';
+  const notesPlaceholder =
+    itemType === 'PACK' ? '☐ Ítem por línea (opcional)' : 'Opcional';
 
   return (
     <>
@@ -1019,7 +1063,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           className={mode === 'TODO' ? 'active' : ''}
           onClick={() => {
             setMode('TODO');
-            if (!editingId) resetForm('TODO');
+            if (!editingId && !formOpen) setItemType('TODO');
           }}
         >
           Hacer
@@ -1029,7 +1073,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           className={mode === 'PACK_BUY' ? 'active' : ''}
           onClick={() => {
             setMode('PACK_BUY');
-            if (!editingId) resetForm('PACK_BUY');
+            if (!editingId && !formOpen) setItemType('PACK');
           }}
         >
           Traer / Comprar
@@ -1039,7 +1083,6 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           className={mode === 'MINE' ? 'active' : ''}
           onClick={() => {
             setMode('MINE');
-            if (!editingId) resetForm('MINE');
           }}
         >
           Mis tareas
@@ -1081,49 +1124,52 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
         </section>
       )}
 
+      {!closed && !showForm && (
+        <button type="button" className="btn-primary" onClick={openCreateForm}>
+          + Agregar
+        </button>
+      )}
+
       {showForm && (
         <form className="card promo-form" onSubmit={onSubmit}>
-          {showTypePicker && (
-            <div className="segmented">
-              {editingId != null && (
-                <button
-                  type="button"
-                  className={itemType === 'TODO' ? 'active' : ''}
-                  onClick={() => setItemType('TODO')}
-                >
-                  Hacer
-                </button>
-              )}
-              <button
-                type="button"
-                className={itemType === 'PACK' ? 'active' : ''}
-                onClick={() => setItemType('PACK')}
-              >
-                Traer
-              </button>
-              <button
-                type="button"
-                className={itemType === 'BUY' ? 'active' : ''}
-                onClick={() => setItemType('BUY')}
-              >
-                Comprar
-              </button>
-            </div>
-          )}
+          <div className="segmented">
+            <button
+              type="button"
+              className={itemType === 'TODO' ? 'active' : ''}
+              onClick={() => setItemType('TODO')}
+            >
+              Hacer
+            </button>
+            <button
+              type="button"
+              className={itemType === 'PACK' ? 'active' : ''}
+              onClick={() => setItemType('PACK')}
+            >
+              Traer
+            </button>
+            <button
+              type="button"
+              className={itemType === 'BUY' ? 'active' : ''}
+              onClick={() => setItemType('BUY')}
+            >
+              Comprar
+            </button>
+          </div>
           <label>
             {itemType === 'TODO' ? 'Qué hay que hacer' : 'Ítem'}
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder={itemType === 'TODO' ? 'Reservar auto' : 'Protector solar'}
+              placeholder={titlePlaceholder}
             />
           </label>
           <label>
             Notas
-            <input
+            <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Opcional"
+              placeholder={notesPlaceholder}
+              rows={itemType === 'PACK' ? 4 : 2}
             />
           </label>
           <div className="listas-assignees">
@@ -1156,11 +1202,9 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
             <button type="submit" className="btn-secondary" disabled={!title.trim() || formBusy}>
               {editingId ? 'Guardar' : 'Agregar'}
             </button>
-            {editingId && (
-              <button type="button" className="btn-link" onClick={() => resetForm()}>
-                Cancelar
-              </button>
-            )}
+            <button type="button" className="btn-link" onClick={() => resetForm()}>
+              Cancelar
+            </button>
           </div>
         </form>
       )}
@@ -1173,11 +1217,24 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           {filtered.map((item) => {
             const typeLabel = listItemTypeLabel(item.type);
             const assigneeLabel = listItemAssigneeLabel(item);
-            const supportParts = [
+            const metaParts = [
               mode !== 'TODO' ? typeLabel : null,
               assigneeLabel,
-              item.notes ? item.notes : null,
             ].filter(Boolean);
+            const hasMultilineNotes = Boolean(item.notes && item.notes.includes('\n'));
+            const support =
+              metaParts.length > 0 || item.notes ? (
+                <>
+                  {metaParts.length > 0 && <span>{metaParts.join(' · ')}</span>}
+                  {item.notes ? (
+                    <span className={hasMultilineNotes ? 'listas-item-notes' : undefined}>
+                      {metaParts.length > 0 && !hasMultilineNotes
+                        ? ` · ${item.notes}`
+                        : item.notes}
+                    </span>
+                  ) : null}
+                </>
+              ) : undefined;
 
             return (
               <ListItem
@@ -1185,6 +1242,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
                 className={[
                   item.status === 'DONE' ? 'listas-item-done' : '',
                   editingId === item.id ? 'listas-item-editing' : '',
+                  hasMultilineNotes ? 'listas-item-multiline' : '',
                 ]
                   .filter(Boolean)
                   .join(' ') || undefined}
@@ -1203,7 +1261,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
                   />
                 }
                 title={item.title}
-                support={supportParts.length > 0 ? supportParts.join(' · ') : undefined}
+                support={support}
                 trailing={
                   !closed ? (
                     <div className="listas-item-actions">
@@ -1218,7 +1276,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
                       <button
                         type="button"
                         className="btn-link"
-                        onClick={() => deleteMutation.mutate(item.id)}
+                        onClick={() => setDeleteTarget(item)}
                         aria-label="Eliminar"
                       >
                         ✕
@@ -1231,6 +1289,25 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           })}
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget != null}
+        title="Eliminar ítem"
+        confirmLabel="Eliminar"
+        loadingLabel="Eliminando…"
+        loading={deleteMutation.isPending}
+        message={
+          <p>
+            ¿Eliminar <strong>{deleteTarget?.title}</strong>?
+          </p>
+        }
+        onConfirm={() => {
+          if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+        }}
+        onCancel={() => {
+          if (!deleteMutation.isPending) setDeleteTarget(null);
+        }}
+      />
     </>
   );
 }
