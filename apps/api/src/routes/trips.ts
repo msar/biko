@@ -16,6 +16,12 @@ import {
   TripForecastError,
 } from '../services/trip-forecast.js';
 import {
+  createTripItineraryItem,
+  deleteTripItineraryItem,
+  listTripItinerary,
+  updateTripItineraryItem,
+} from '../services/trip-itinerary.js';
+import {
   closeTrip,
   computeTripBalance,
   createTrip,
@@ -247,6 +253,45 @@ const accommodationSchema = z.object({
   amount: optionalAmount,
   link: z.string().max(1000).nullish(),
   notes: z.string().max(2000).nullish(),
+});
+
+const itineraryCreateSchema = z.object({
+  type: z.enum(['MEAL', 'RESERVATION', 'ACTIVITY']),
+  dayDate: dateInput,
+  startTime: optionalTime,
+  endTime: optionalTime,
+  title: z.string().max(300).nullish(),
+  notes: z.string().max(2000).nullish(),
+  sortOrder: z.number().int().optional(),
+  mealSlot: z.enum(['BREAKFAST', 'LUNCH', 'DINNER']).nullish(),
+  menu: z.string().max(4000).nullish(),
+  inChargeMemberId: z.string().min(1).nullish(),
+  placeName: z.string().max(300).nullish(),
+  address: z.string().max(2000).nullish(),
+  link: z.string().max(1000).nullish(),
+  mealItemId: z.string().min(1).nullish(),
+  amount: optionalAmount,
+});
+
+const itineraryPatchSchema = z.object({
+  dayDate: optionalDate,
+  startTime: optionalTime,
+  endTime: optionalTime,
+  title: z.string().max(300).nullish(),
+  notes: z.string().max(2000).nullish(),
+  sortOrder: z.number().int().optional(),
+  mealSlot: z.enum(['BREAKFAST', 'LUNCH', 'DINNER']).nullish(),
+  menu: z.string().max(4000).nullish(),
+  inChargeMemberId: z.string().min(1).nullish(),
+  placeName: z.string().max(300).nullish(),
+  address: z.string().max(2000).nullish(),
+  link: z.string().max(1000).nullish(),
+  mealItemId: z.string().min(1).nullish(),
+  amount: optionalAmount,
+});
+
+const itineraryQuerySchema = z.object({
+  date: optionalDate,
 });
 
 function mapTripError(error: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
@@ -764,6 +809,54 @@ export default async function tripRoutes(app: FastifyInstance) {
     const { actor } = tripActorFromRequest(request);
     try {
       return await upsertTripAccommodation(app.prisma, tripId, actor, body);
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.get('/trips/:tripId/itinerary', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId } = tripIdParams.parse(request.params);
+    const query = itineraryQuerySchema.parse(request.query ?? {});
+    const { actor } = tripActorFromRequest(request);
+    try {
+      return await listTripItinerary(app.prisma, tripId, actor, { date: query.date ?? null });
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.post('/trips/:tripId/itinerary', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId } = tripIdParams.parse(request.params);
+    const body = itineraryCreateSchema.parse(request.body ?? {});
+    const { actor } = tripActorFromRequest(request);
+    try {
+      const item = await createTripItineraryItem(app.prisma, tripId, actor, body);
+      return reply.code(201).send(item);
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.patch('/trips/:tripId/itinerary/:itemId', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId, itemId } = itemIdParams.parse(request.params);
+    const body = itineraryPatchSchema.parse(request.body ?? {});
+    const { actor } = tripActorFromRequest(request);
+    try {
+      return await updateTripItineraryItem(app.prisma, tripId, itemId, actor, {
+        ...body,
+        dayDate: body.dayDate === null ? undefined : body.dayDate,
+      });
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.delete('/trips/:tripId/itinerary/:itemId', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId, itemId } = itemIdParams.parse(request.params);
+    const { actor } = tripActorFromRequest(request);
+    try {
+      await deleteTripItineraryItem(app.prisma, tripId, itemId, actor);
+      return reply.code(204).send();
     } catch (error) {
       return mapTripError(error, reply);
     }

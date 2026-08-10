@@ -162,8 +162,16 @@ export async function requireTripOrganizer(db: Db, tripId: string, actor: TripAc
   return member;
 }
 
-function assertTripWritable(status: TripStatus) {
+export function assertTripWritable(status: TripStatus) {
   if (status === 'CLOSED') throw new TripClosedError();
+}
+
+export function tripAmountToNum(value: unknown): number {
+  return toNum(value);
+}
+
+export function tripRound2(v: number): number {
+  return round2(v);
 }
 
 export async function listTripsForUser(db: Db, userId: string) {
@@ -1005,7 +1013,7 @@ export type TripExpenseInput = {
 };
 
 /** Roster for expense splits: joined + pending (pre-created) travellers. */
-async function rosterMemberIds(db: Db, tripId: string): Promise<string[]> {
+export async function rosterMemberIds(db: Db, tripId: string): Promise<string[]> {
   const members = await db.tripMember.findMany({
     where: { tripId, inviteStatus: { in: ['JOINED', 'PENDING'] } },
     select: { id: true },
@@ -1014,7 +1022,7 @@ async function rosterMemberIds(db: Db, tripId: string): Promise<string[]> {
   return members.map((m) => m.id);
 }
 
-async function defaultTripPayerId(db: Db, tripId: string): Promise<string> {
+export async function defaultTripPayerId(db: Db, tripId: string): Promise<string> {
   const members = await db.tripMember.findMany({
     where: { tripId, inviteStatus: { in: ['JOINED', 'PENDING'] } },
     select: { id: true, role: true, createdAt: true },
@@ -1027,7 +1035,7 @@ async function defaultTripPayerId(db: Db, tripId: string): Promise<string> {
   return organizer?.id ?? members[0]!.id;
 }
 
-function normalizeExpensePayments(
+export function normalizeExpensePayments(
   amount: number,
   memberIds: string[],
   input: { paidByMemberId?: string; payments?: TripExpensePaymentInput[] | null },
@@ -1076,7 +1084,7 @@ function normalizeExpensePayments(
   return { payments, paidByMemberId: primary.memberId };
 }
 
-function scalePaymentsToAmount(
+export function scalePaymentsToAmount(
   payments: TripExpensePaymentInput[],
   newAmount: number,
   fallbackMemberId: string,
@@ -1103,7 +1111,7 @@ function scalePaymentsToAmount(
   return scaled.filter((p) => p.amount > 0);
 }
 
-function buildTripAllocations(
+export function buildTripAllocations(
   input: TripExpenseInput & { paidByMemberId: string },
   memberIds: string[],
 ) {

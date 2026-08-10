@@ -215,6 +215,46 @@ export interface TripListItemActivity {
   member: { id: string; displayName: string } | null;
 }
 
+export type TripItineraryItemType = 'MEAL' | 'RESERVATION' | 'ACTIVITY' | 'ARRIVAL';
+export type TripMealSlot = 'BREAKFAST' | 'LUNCH' | 'DINNER';
+export type TripArrivalKind = 'CHECK_IN' | 'CHECK_OUT' | 'FLIGHT' | 'CAR';
+
+export interface TripItineraryMealRef {
+  id: string;
+  type: TripItineraryItemType;
+  mealSlot: TripMealSlot | null;
+  dayDate: string;
+  title: string | null;
+  menu: string | null;
+}
+
+export interface TripItineraryItem {
+  id: string;
+  tripId: string;
+  type: TripItineraryItemType;
+  dayDate: string;
+  startTime: string | null;
+  endTime: string | null;
+  title: string | null;
+  notes: string | null;
+  sortOrder: number;
+  mealSlot: TripMealSlot | null;
+  menu: string | null;
+  inChargeMemberId: string | null;
+  inChargeMember: TripMember | null;
+  placeName: string | null;
+  address: string | null;
+  link: string | null;
+  mealItemId: string | null;
+  mealItem: TripItineraryMealRef | null;
+  amount: number | null;
+  expenseId: string | null;
+  arrivalKind: TripArrivalKind | null;
+  virtual: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TripExportPreview {
   eligible: boolean;
   reason?: string;

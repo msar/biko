@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import ConfirmDialog from '../components/ConfirmDialog';
 import NestedChecklist from '../components/NestedChecklist';
 import PieChart from '../components/charts/PieChart';
+import { ResumenHoyItinerary, TripItinerarioTab } from '../components/TripItinerarioTab';
 import { WeatherIcon } from '../components/WeatherIcon';
 import { Button, IconButton, Chip, ListItem } from '../components/ui';
 import { ApiError, api, fmtDate, fmtMoney } from '../lib/api';
@@ -44,9 +45,9 @@ import {
   type PackingSection,
 } from '../lib/packing-checklist';
 
-type HubTab = 'resumen' | 'gastos' | 'listas' | 'alojamiento' | 'personas';
+type HubTab = 'resumen' | 'gastos' | 'listas' | 'alojamiento' | 'personas' | 'itinerario';
 
-const TAB_IDS: HubTab[] = ['resumen', 'gastos', 'listas', 'alojamiento', 'personas'];
+const TAB_IDS: HubTab[] = ['resumen', 'gastos', 'listas', 'alojamiento', 'personas', 'itinerario'];
 
 function parseTab(value: string | null): HubTab {
   if (value && TAB_IDS.includes(value as HubTab)) return value as HubTab;
@@ -218,12 +219,20 @@ export default function TripHubPage() {
           onSettle={() => setSettleOpen(true)}
           onExport={guest ? undefined : () => setExportOpen(true)}
           onOpenAlojamiento={() => changeTab('alojamiento')}
+          onOpenItinerario={() => changeTab('itinerario')}
         />
       )}
       {tab === 'gastos' && (
         <GastosTab tripId={trip.id} closed={closed} onAdd={() => navigate(`/viajes/${trip.id}/gastos/nuevo`)} />
       )}
       {tab === 'listas' && <ListasTab trip={trip} closed={closed} />}
+      {tab === 'itinerario' && (
+        <TripItinerarioTab
+          trip={trip}
+          closed={closed}
+          onOpenAlojamiento={() => changeTab('alojamiento')}
+        />
+      )}
       {tab === 'alojamiento' && (
         <>
           <button type="button" className="btn-link" onClick={() => changeTab('resumen')}>
@@ -661,12 +670,14 @@ function ResumenTab({
   onSettle,
   onExport,
   onOpenAlojamiento,
+  onOpenItinerario,
 }: {
   trip: TripHub;
   closed: boolean;
   onSettle: () => void;
   onExport?: () => void;
   onOpenAlojamiento: () => void;
+  onOpenItinerario: () => void;
 }) {
   const slices = useMemo(
     () =>
@@ -698,6 +709,12 @@ function ResumenTab({
       </section>
 
       <TripForecastCard trip={trip} />
+
+      <ResumenHoyItinerary
+        trip={trip}
+        onOpenItinerario={onOpenItinerario}
+        onOpenAlojamiento={onOpenAlojamiento}
+      />
 
       <section
         className="card trip-accommodation-entry"
@@ -973,7 +990,6 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [mineOnly, setMineOnly] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<TripListItemRow | null>(null);
 
   const { data: items, isLoading } = useQuery({
     queryKey: ['trips', trip.id, 'list-items'],
@@ -1078,15 +1094,6 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
       void queryClient.invalidateQueries({
         queryKey: ['trips', trip.id, 'list-items', vars.itemId, 'activities'],
       });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (itemId: string) =>
-      api(`/trips/${trip.id}/list-items/${itemId}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
-      setDeleteTarget(null);
     },
   });
 
@@ -1222,32 +1229,6 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
                   </Link>
                 }
                 support={support}
-                trailing={
-                  !closed ? (
-                    <div className="listas-item-actions">
-                      <button
-                        type="button"
-                        className="btn-link"
-                        onClick={() => navigate(`${detailPath}/editar`)}
-                        aria-label="Editar"
-                      >
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-link"
-                        onClick={() => setDeleteTarget(item)}
-                        aria-label="Eliminar"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ) : (
-                    <Link to={detailPath} className="btn-link">
-                      Ver
-                    </Link>
-                  )
-                }
               />
             );
           })}
@@ -1279,25 +1260,6 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
           }
         />
       )}
-
-      <ConfirmDialog
-        open={deleteTarget != null}
-        title="Eliminar ítem"
-        confirmLabel="Eliminar"
-        loadingLabel="Eliminando…"
-        loading={deleteMutation.isPending}
-        message={
-          <p>
-            ¿Eliminar <strong>{deleteTarget?.title}</strong>?
-          </p>
-        }
-        onConfirm={() => {
-          if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
-        }}
-        onCancel={() => {
-          if (!deleteMutation.isPending) setDeleteTarget(null);
-        }}
-      />
     </>
   );
 }

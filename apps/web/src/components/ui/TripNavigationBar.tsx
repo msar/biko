@@ -29,14 +29,15 @@ export default function TripNavigationBar() {
   const destinations: NavDestination[] = tripId
     ? [
         { to: `/viajes/${tripId}`, label: 'Resumen', icon: 'luggage', tab: 'resumen' },
+        { to: `/viajes/${tripId}?tab=itinerario`, label: 'Agenda', icon: 'calendar_month', tab: 'itinerario' },
         { to: `/viajes/${tripId}?tab=gastos`, label: 'Gastos', icon: 'receipt_long', tab: 'gastos' },
         { to: `/viajes/${tripId}?tab=listas`, label: 'Listas', icon: 'checklist', tab: 'listas' },
         { to: `/viajes/${tripId}?tab=personas`, label: 'Personas', icon: 'group', tab: 'personas' },
       ]
     : [{ to: '/viajes', label: 'Viajes', icon: 'luggage' }];
 
-  const left = destinations.slice(0, 2);
-  const right = destinations.slice(2);
+  const left = destinations.slice(0, 3);
+  const right = destinations.slice(3);
 
   return (
     <nav className="md-nav-bar bottom-nav" aria-label="Viajes">

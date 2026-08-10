@@ -76,6 +76,58 @@ export function todayIso(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/** Today's YYYY-MM-DD in an IANA timezone (falls back to local calendar). */
+export function todayYmdInTimeZone(timeZone?: string | null): string {
+  if (!timeZone) return todayIso();
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+    const map: Record<string, string> = {};
+    for (const p of parts) {
+      if (p.type !== 'literal') map[p.type] = p.value;
+    }
+    return `${map.year}-${map.month}-${map.day}`;
+  } catch {
+    return todayIso();
+  }
+}
+
+export const MEAL_SLOT_LABEL: Record<string, string> = {
+  BREAKFAST: 'Desayuno',
+  LUNCH: 'Almuerzo',
+  DINNER: 'Cena',
+};
+
+export const ARRIVAL_KIND_LABEL: Record<string, string> = {
+  CHECK_IN: 'Check-in',
+  CHECK_OUT: 'Check-out',
+  FLIGHT: 'Vuelo',
+  CAR: 'Auto',
+};
+
+/** Inclusive list of YYYY-MM-DD from start to end (UTC calendar arithmetic). */
+export function eachCalendarDay(startYmd: string, endYmd: string): string[] {
+  const start = startYmd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const end = endYmd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!start || !end) return [];
+  const days: string[] = [];
+  let cur = Date.UTC(Number(start[1]), Number(start[2]) - 1, Number(start[3]));
+  const last = Date.UTC(Number(end[1]), Number(end[2]) - 1, Number(end[3]));
+  if (cur > last) return [];
+  while (cur <= last) {
+    const d = new Date(cur);
+    days.push(
+      `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`,
+    );
+    cur += 24 * 60 * 60 * 1000;
+  }
+  return days;
+}
+
 export function formatTripExpensePayers(
   expense: {
     paidByMember: { displayName: string };
