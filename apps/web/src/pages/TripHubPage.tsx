@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
+import NestedChecklist from '../components/NestedChecklist';
 import PieChart from '../components/charts/PieChart';
 import { WeatherIcon } from '../components/WeatherIcon';
 import { Button, IconButton, Chip, ListItem } from '../components/ui';
@@ -34,10 +35,7 @@ import {
   appendPackingChecklistItem,
   isLegacyPackingBoilerplate,
   isPackingListTitle,
-  normalizeChecklistNotes,
-  normalizePackingNotes,
   notesAreChecklist,
-  PACKING_LIST_TITLE,
   PACKING_SECTION_LABELS,
   packingChecklistProgress,
   packingChecklistTitles,
@@ -902,92 +900,6 @@ function isMyListItem(item: TripListItemRow, myMemberId: string): boolean {
   return item.assignees.some((m) => m.id === myMemberId);
 }
 
-/** Nested Keep-style checklist rendered from item notes (PACK / BUY / TODO alike). */
-function NestedChecklistSupport({
-  notes,
-  metaLabel,
-  closed,
-  busy,
-  onToggleLine,
-  onAddItem,
-}: {
-  notes: string;
-  metaLabel: string | null;
-  closed: boolean;
-  busy: boolean;
-  onToggleLine: (lineIndex: number) => void;
-  onAddItem?: (title: string) => void;
-}) {
-  const entries = parsePackingChecklist(notes);
-  const progress = packingChecklistProgress(notes);
-  const [draft, setDraft] = useState('');
-  const canAdd = Boolean(onAddItem) && !closed;
-
-  const submitDraft = () => {
-    const title = draft.trim();
-    if (!title || busy || !onAddItem) return;
-    onAddItem(title);
-    setDraft('');
-  };
-
-  return (
-    <div className="listas-checklist">
-      {(metaLabel || progress.total > 0) && (
-        <div className="listas-checklist-meta">
-          {[metaLabel, progress.total > 0 ? `${progress.done}/${progress.total} listos` : null]
-            .filter(Boolean)
-            .join(' · ')}
-        </div>
-      )}
-      <div className="listas-checklist-list">
-        {entries.map((entry, idx) => {
-          if (entry.kind === 'section') {
-            return (
-              <div key={`section-${entry.section}-${idx}`} className="listas-checklist-section">
-                {entry.label}
-              </div>
-            );
-          }
-          return (
-            <div key={`${entry.lineIndex}-${entry.title}`} className="listas-checklist-line">
-              <label className={entry.checked ? 'listas-checklist-line-done' : undefined}>
-                <input
-                  type="checkbox"
-                  checked={entry.checked}
-                  disabled={closed || busy}
-                  onChange={() => onToggleLine(entry.lineIndex)}
-                />
-                <span>{entry.title}</span>
-              </label>
-            </div>
-          );
-        })}
-      </div>
-      {canAdd && (
-        <form
-          className="listas-checklist-add"
-          onSubmit={(e) => {
-            e.preventDefault();
-            submitDraft();
-          }}
-        >
-          <input
-            type="text"
-            value={draft}
-            disabled={busy}
-            placeholder="Agregar ítem"
-            aria-label="Agregar ítem a la lista"
-            onChange={(e) => setDraft(e.target.value)}
-          />
-          <button type="submit" className="btn-link" disabled={busy || !draft.trim()}>
-            Agregar
-          </button>
-        </form>
-      )}
-    </div>
-  );
-}
-
 function PackingSuggestionsCard({
   suggestions,
   summaryLabel,
@@ -1058,16 +970,10 @@ function PackingSuggestionsCard({
 }
 
 function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [mineOnly, setMineOnly] = useState(false);
-  const [formOpen, setFormOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TripListItemRow | null>(null);
-  const [title, setTitle] = useState('');
-  const [notes, setNotes] = useState('');
-  const [itemType, setItemType] = useState<'TODO' | 'PACK' | 'BUY'>('TODO');
-  const [assignToAll, setAssignToAll] = useState(false);
-  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
 
   const { data: items, isLoading } = useQuery({
     queryKey: ['trips', trip.id, 'list-items'],
@@ -1118,65 +1024,17 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     return all;
   }, [items, mineOnly, trip.myMember.id]);
 
-  const resetForm = () => {
-    setEditingId(null);
-    setFormOpen(false);
-    setTitle('');
-    setNotes('');
-    setItemType('TODO');
-    setAssignToAll(false);
-    setAssigneeIds([]);
-  };
-
-  const openCreateForm = () => {
-    setEditingId(null);
-    setTitle('');
-    setNotes('');
-    setItemType('TODO');
-    setAssignToAll(false);
-    setAssigneeIds([]);
-    setFormOpen(true);
-  };
-
-  const startEdit = (item: TripListItemRow) => {
-    setEditingId(item.id);
-    setFormOpen(true);
-    setTitle(item.title);
-    setNotes(item.notes ?? '');
-    setItemType(item.type);
-    setAssignToAll(item.assignToAll);
-    setAssigneeIds(item.assignees.map((m) => m.id));
-  };
-
-  const createMutation = useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
-      api(`/trips/${trip.id}/list-items`, { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
-      resetForm();
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ itemId, body }: { itemId: string; body: Record<string, unknown> }) =>
-      api(`/trips/${trip.id}/list-items/${itemId}`, {
-        method: 'PATCH',
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
-      resetForm();
-    },
-  });
-
   const toggleMutation = useMutation({
     mutationFn: ({ itemId, status }: { itemId: string; status: 'PENDING' | 'DONE' }) =>
       api(`/trips/${trip.id}/list-items/${itemId}`, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       }),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
+      void queryClient.invalidateQueries({
+        queryKey: ['trips', trip.id, 'list-items', vars.itemId, 'activities'],
+      });
     },
   });
 
@@ -1215,18 +1073,20 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
         queryClient.setQueryData(['trips', trip.id, 'list-items'], ctx.previous);
       }
     },
-    onSettled: () => {
+    onSettled: (_data, _err, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
+      void queryClient.invalidateQueries({
+        queryKey: ['trips', trip.id, 'list-items', vars.itemId, 'activities'],
+      });
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (itemId: string) =>
       api(`/trips/${trip.id}/list-items/${itemId}`, { method: 'DELETE' }),
-    onSuccess: (_data, itemId) => {
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'list-items'] });
       setDeleteTarget(null);
-      if (editingId === itemId) resetForm();
     },
   });
 
@@ -1242,85 +1102,8 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     },
   });
 
-  const toggleAssignee = (memberId: string) => {
-    setAssignToAll(false);
-    setAssigneeIds((prev) =>
-      prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId],
-    );
-  };
-
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!title.trim() || closed) return;
-    const trimmedTitle = title.trim();
-    const trimmedNotes = notes.trim();
-    const isPackingList =
-      itemType === 'PACK' && (isPackingListTitle(trimmedTitle) || Boolean(trimmedNotes));
-    const shouldNormalizeChecklist = isPackingList || notesAreChecklist(trimmedNotes);
-    const normalizedNotes = shouldNormalizeChecklist
-      ? (isPackingListTitle(trimmedTitle)
-          ? normalizePackingNotes(notes)
-          : normalizeChecklistNotes(notes)) || null
-      : trimmedNotes || null;
-    const body = {
-      type: itemType,
-      title: trimmedTitle,
-      notes: normalizedNotes,
-      assignToAll,
-      assigneeMemberIds: assignToAll ? [] : assigneeIds,
-    };
-    if (editingId) {
-      updateMutation.mutate({ itemId: editingId, body });
-      return;
-    }
-
-    // Fold plain "Llevar" titles into the shared packing checklist when it exists.
-    if (itemType === 'PACK' && !isPackingListTitle(trimmedTitle)) {
-      const packingList = (items ?? []).find(
-        (i) => i.type === 'PACK' && isPackingListTitle(i.title),
-      );
-      if (packingList) {
-        let nextNotes = appendPackingChecklistItem(packingList.notes, trimmedTitle);
-        if (trimmedNotes) {
-          for (const raw of trimmedNotes.split('\n')) {
-            const line = raw.trim();
-            if (!line) continue;
-            nextNotes = appendPackingChecklistItem(nextNotes, line);
-          }
-        }
-        if (nextNotes === (packingList.notes ?? '')) {
-          resetForm();
-          return;
-        }
-        const progress = packingChecklistProgress(nextNotes);
-        updateMutation.mutate({
-          itemId: packingList.id,
-          body: {
-            notes: nextNotes,
-            ...(packingList.status === 'DONE' && progress.done < progress.total
-              ? { status: 'PENDING' }
-              : {}),
-          },
-        });
-        return;
-      }
-    }
-
-    createMutation.mutate(body);
-  };
-
   const emptyCopy = mineOnly ? 'No tenés tareas asignadas' : 'Todavía no hay ítems';
-
-  const showForm = !closed && (formOpen || editingId != null);
-  const formBusy = createMutation.isPending || updateMutation.isPending;
   const showPackingSuggestions = !closed && pendingSuggestions.length > 0;
-  const titlePlaceholder =
-    itemType === 'TODO'
-      ? 'Reservar auto'
-      : itemType === 'PACK'
-        ? PACKING_LIST_TITLE
-        : 'Protector solar';
-  const notesPlaceholder = '* Ítem por línea (opcional)';
 
   const toggleChecklistLine = (item: TripListItemRow, lineIndex: number) => {
     const nextNotes = togglePackingChecklistLine(item.notes, lineIndex);
@@ -1345,107 +1128,22 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
     checklistToggleMutation.mutate({ itemId: item.id, notes: nextNotes, status });
   };
 
-  const formError =
-    (createMutation.isError && createMutation.error) ||
-    (updateMutation.isError && updateMutation.error) ||
-    null;
-
   return (
     <>
       <div className="listas-toolbar">
         <Chip selected={mineOnly} onClick={() => setMineOnly((v) => !v)}>
           Mis tareas
         </Chip>
-        {!closed && !showForm && (
-          <button type="button" className="btn-primary" onClick={openCreateForm}>
+        {!closed && (
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => navigate(`/viajes/${trip.id}/listas/nuevo`)}
+          >
             + Agregar
           </button>
         )}
       </div>
-
-      {showForm && (
-        <form className="card promo-form" onSubmit={onSubmit}>
-          <div className="segmented">
-            <button
-              type="button"
-              className={itemType === 'TODO' ? 'active' : ''}
-              onClick={() => setItemType('TODO')}
-            >
-              Hacer
-            </button>
-            <button
-              type="button"
-              className={itemType === 'PACK' ? 'active' : ''}
-              onClick={() => setItemType('PACK')}
-            >
-              Llevar
-            </button>
-            <button
-              type="button"
-              className={itemType === 'BUY' ? 'active' : ''}
-              onClick={() => setItemType('BUY')}
-            >
-              Comprar
-            </button>
-          </div>
-          <label>
-            {itemType === 'TODO' ? 'Qué hay que hacer' : 'Ítem'}
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder={titlePlaceholder}
-            />
-          </label>
-          <label>
-            Notas
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder={notesPlaceholder}
-              rows={itemType === 'PACK' ? 4 : 2}
-            />
-          </label>
-          <div className="listas-assignees">
-            <span className="listas-assignees-label">Asignar a</span>
-            <div className="chip-row">
-              <Chip
-                selected={assignToAll}
-                onClick={() => {
-                  setAssignToAll(true);
-                  setAssigneeIds([]);
-                }}
-              >
-                Todos
-              </Chip>
-              {trip.members.map((m) => (
-                <Chip
-                  key={m.id}
-                  selected={!assignToAll && assigneeIds.includes(m.id)}
-                  onClick={() => toggleAssignee(m.id)}
-                >
-                  {m.displayName}
-                </Chip>
-              ))}
-            </div>
-            {!assignToAll && assigneeIds.length === 0 && (
-              <span className="hint">Sin asignar</span>
-            )}
-          </div>
-          <div className="listas-form-actions">
-            <button type="submit" className="btn-secondary" disabled={!title.trim() || formBusy}>
-              {editingId ? 'Guardar' : 'Agregar'}
-            </button>
-            <button type="button" className="btn-link" onClick={() => resetForm()}>
-              Cancelar
-            </button>
-          </div>
-          {formError && (
-            <p className="error" style={{ marginTop: 8 }}>
-              {formError instanceof Error ? formError.message : 'No se pudo guardar'}
-            </p>
-          )}
-        </form>
-      )}
 
       {isLoading && <p className="hint">Cargando…</p>}
       {!isLoading && filtered.length === 0 && <p className="empty-state">{emptyCopy}</p>}
@@ -1466,17 +1164,16 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
             const hasMultilineNotes = Boolean(
               !hasNestedChecklist && item.notes && item.notes.includes('\n'),
             );
+            const detailPath = `/viajes/${trip.id}/listas/${item.id}`;
 
             const support = hasNestedChecklist ? (
-              <NestedChecklistSupport
+              <NestedChecklist
                 notes={item.notes!}
                 metaLabel={metaParts.length > 0 ? metaParts.join(' · ') : null}
                 closed={closed}
                 busy={checklistToggleMutation.isPending}
                 onToggleLine={(lineIndex) => toggleChecklistLine(item, lineIndex)}
-                onAddItem={
-                  !closed ? (title) => addChecklistItem(item, title) : undefined
-                }
+                onAddItem={!closed ? (title) => addChecklistItem(item, title) : undefined}
               />
             ) : metaParts.length > 0 || item.notes ? (
               <>
@@ -1496,7 +1193,6 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
                 key={item.id}
                 className={[
                   item.status === 'DONE' ? 'listas-item-done' : '',
-                  editingId === item.id ? 'listas-item-editing' : '',
                   hasMultilineNotes || hasNestedChecklist ? 'listas-item-multiline' : '',
                   hasNestedChecklist ? 'listas-item-checklist' : '',
                 ]
@@ -1520,7 +1216,11 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
                     />
                   )
                 }
-                title={item.title}
+                title={
+                  <Link to={detailPath} className="listas-item-title-link">
+                    {item.title}
+                  </Link>
+                }
                 support={support}
                 trailing={
                   !closed ? (
@@ -1528,7 +1228,7 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
                       <button
                         type="button"
                         className="btn-link"
-                        onClick={() => startEdit(item)}
+                        onClick={() => navigate(`${detailPath}/editar`)}
                         aria-label="Editar"
                       >
                         Editar
@@ -1542,7 +1242,11 @@ function ListasTab({ trip, closed }: { trip: TripHub; closed: boolean }) {
                         ✕
                       </button>
                     </div>
-                  ) : undefined
+                  ) : (
+                    <Link to={detailPath} className="btn-link">
+                      Ver
+                    </Link>
+                  )
                 }
               />
             );

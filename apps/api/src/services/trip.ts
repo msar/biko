@@ -1685,6 +1685,110 @@ const listItemInclude = {
   },
 } as const;
 
+type ListActivityType =
+  | 'CREATED'
+  | 'UPDATED'
+  | 'MARKED_DONE'
+  | 'MARKED_PENDING'
+  | 'CHECKLIST_DONE'
+  | 'CHECKLIST_PENDING'
+  | 'CHECKLIST_ADDED';
+
+const LIST_TASK_BOX = /^\[\s*([xX✓☑]|)\s*\]\s*/;
+
+function stripListChecklistMarkup(line: string): string {
+  let rest = line.trim();
+  if (!rest) return '';
+  if (/^[-*•☐☑✓✗]+$/.test(rest)) return '';
+
+  const bullet = rest.match(/^[-*•]\s+/);
+  if (bullet) {
+    rest = rest.slice(bullet[0].length);
+  } else if (/^[☐☑✓✗]\s*/.test(rest)) {
+    rest = rest.replace(/^[☐☑✓✗]\s*/, '');
+  }
+
+  const box = rest.match(LIST_TASK_BOX);
+  if (box) rest = rest.slice(box[0].length);
+  return rest.trim();
+}
+
+function isListCheckedLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (/^[☑✓]/.test(trimmed)) return true;
+  if (/^[-*•]\s+\[\s*[xX✓☑]\s*\]/.test(trimmed)) return true;
+  if (/^\[\s*[xX✓☑]\s*\]/.test(trimmed)) return true;
+  return false;
+}
+
+function looksLikeListChecklistItem(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (/^[☐☑✓✗]/.test(trimmed)) return true;
+  if (/^[-*•]\s+/.test(trimmed)) return true;
+  if (LIST_TASK_BOX.test(trimmed)) return true;
+  return false;
+}
+
+function notesLookLikeChecklist(notes: string | null | undefined): boolean {
+  if (!notes?.trim()) return false;
+  for (const raw of notes.split('\n')) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    if (looksLikeListChecklistItem(trimmed) && stripListChecklistMarkup(trimmed)) return true;
+  }
+  return false;
+}
+
+function checklistItemsFromNotes(notes: string | null | undefined): Array<{ title: string; checked: boolean }> {
+  if (!notes?.trim()) return [];
+  const treatUnmarked = notesLookLikeChecklist(notes);
+  const items: Array<{ title: string; checked: boolean }> = [];
+  for (const raw of notes.split('\n')) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const title = stripListChecklistMarkup(trimmed);
+    if (!title) continue;
+    // Skip known packing section headers (Clima / Destino / Para el viaje).
+    if (/^(clima|destino|para el viaje)$/i.test(title)) continue;
+    if (looksLikeListChecklistItem(trimmed)) {
+      items.push({ title, checked: isListCheckedLine(trimmed) });
+      continue;
+    }
+    if (treatUnmarked) {
+      items.push({ title, checked: false });
+    }
+  }
+  return items;
+}
+
+function diffChecklistActivities(
+  before: string | null | undefined,
+  after: string | null | undefined,
+): Array<{ type: ListActivityType; detail: string }> {
+  const prev = checklistItemsFromNotes(before);
+  const next = checklistItemsFromNotes(after);
+  const prevByKey = new Map(prev.map((i) => [i.title.toLowerCase(), i]));
+  const events: Array<{ type: ListActivityType; detail: string }> = [];
+
+  for (const item of next) {
+    const key = item.title.toLowerCase();
+    const old = prevByKey.get(key);
+    if (!old) {
+      events.push({ type: 'CHECKLIST_ADDED', detail: item.title });
+      continue;
+    }
+    if (old.checked !== item.checked) {
+      events.push({
+        type: item.checked ? 'CHECKLIST_DONE' : 'CHECKLIST_PENDING',
+        detail: item.title,
+      });
+    }
+    prevByKey.delete(key);
+  }
+  return events;
+}
+
 function serializeListItem<
   T extends { assignees: Array<{ member: unknown }>; dayDate?: Date | null },
 >(item: T, destinationTimezone: string | null = null) {
@@ -1695,6 +1799,43 @@ function serializeListItem<
       dayDate == null ? dayDate ?? null : serializeCalendarDate(dayDate, destinationTimezone),
     assignees: assignees.map((a) => a.member),
   };
+}
+
+function serializeListActivity(activity: {
+  id: string;
+  listItemId: string;
+  type: ListActivityType;
+  detail: string | null;
+  createdAt: Date;
+  member: { id: string; displayName: string } | null;
+}) {
+  return {
+    id: activity.id,
+    listItemId: activity.listItemId,
+    type: activity.type,
+    detail: activity.detail,
+    createdAt: activity.createdAt.toISOString(),
+    member: activity.member
+      ? { id: activity.member.id, displayName: activity.member.displayName }
+      : null,
+  };
+}
+
+async function recordListActivities(
+  db: Db,
+  listItemId: string,
+  memberId: string,
+  events: Array<{ type: ListActivityType; detail?: string | null }>,
+) {
+  if (events.length === 0) return;
+  await db.tripListItemActivity.createMany({
+    data: events.map((event) => ({
+      listItemId,
+      memberId,
+      type: event.type,
+      detail: event.detail?.trim() || null,
+    })),
+  });
 }
 
 async function resolveListAssignees(
@@ -1749,6 +1890,45 @@ export async function listTripListItems(
   return items.map((item) => serializeListItem(item, tz));
 }
 
+export async function getTripListItem(
+  db: Db,
+  tripId: string,
+  itemId: string,
+  actor: TripActor | string,
+) {
+  const me = await requireTripMember(db, tripId, actor);
+  const item = await db.tripListItem.findFirst({
+    where: { id: itemId, tripId },
+    include: listItemInclude,
+  });
+  if (!item) throw new TripNotFoundError('Ítem no encontrado');
+  return serializeListItem(item, me.trip.destinationTimezone ?? null);
+}
+
+export async function listTripListItemActivities(
+  db: Db,
+  tripId: string,
+  itemId: string,
+  actor: TripActor | string,
+) {
+  await requireTripMember(db, tripId, actor);
+  const existing = await db.tripListItem.findFirst({
+    where: { id: itemId, tripId },
+    select: { id: true },
+  });
+  if (!existing) throw new TripNotFoundError('Ítem no encontrado');
+
+  const activities = await db.tripListItemActivity.findMany({
+    where: { listItemId: itemId },
+    include: {
+      member: { select: { id: true, displayName: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+  });
+  return activities.map(serializeListActivity);
+}
+
 export async function createTripListItem(
   db: Db,
   tripId: string,
@@ -1784,6 +1964,9 @@ export async function createTripListItem(
       ...(memberIds.length > 0
         ? { assignees: { create: memberIds.map((memberId) => ({ memberId })) } }
         : {}),
+      activities: {
+        create: { memberId: me.id, type: 'CREATED' },
+      },
     },
     include: listItemInclude,
   });
@@ -1822,12 +2005,47 @@ export async function updateTripListItem(
     assigneeData = await resolveListAssignees(db, tripId, input);
   }
 
+  const nextNotes = input.notes !== undefined ? input.notes?.trim() || null : existing.notes;
+  const nextTitle = input.title != null ? input.title.trim() : existing.title;
+  const activityEvents: Array<{ type: ListActivityType; detail?: string | null }> = [];
+
+  if (input.status != null && input.status !== existing.status) {
+    activityEvents.push({
+      type: input.status === 'DONE' ? 'MARKED_DONE' : 'MARKED_PENDING',
+    });
+  }
+
+  let checklistEvents: Array<{ type: ListActivityType; detail: string }> = [];
+  if (input.notes !== undefined) {
+    checklistEvents = diffChecklistActivities(existing.notes, nextNotes);
+    activityEvents.push(...checklistEvents);
+  }
+
+  const titleChanged = input.title != null && nextTitle !== existing.title;
+  const typeChanged = input.type != null && input.type !== existing.type;
+  const quantityChanged = input.quantity !== undefined && input.quantity !== existing.quantity;
+  const dayChanged = input.dayDate !== undefined;
+  const assigneesChanged = assigneeData != null;
+  const notesProseChanged =
+    input.notes !== undefined && nextNotes !== existing.notes && checklistEvents.length === 0;
+
+  if (
+    titleChanged ||
+    typeChanged ||
+    quantityChanged ||
+    dayChanged ||
+    assigneesChanged ||
+    notesProseChanged
+  ) {
+    activityEvents.push({ type: 'UPDATED' });
+  }
+
   const tz = tripTimeZone(me.trip.destinationTimezone);
   const item = await db.tripListItem.update({
     where: { id: itemId },
     data: {
-      ...(input.title != null ? { title: input.title.trim() } : {}),
-      ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
+      ...(input.title != null ? { title: nextTitle } : {}),
+      ...(input.notes !== undefined ? { notes: nextNotes } : {}),
       ...(input.quantity !== undefined ? { quantity: input.quantity } : {}),
       ...(input.status != null ? { status: input.status } : {}),
       ...(input.dayDate !== undefined
@@ -1850,6 +2068,8 @@ export async function updateTripListItem(
     },
     include: listItemInclude,
   });
+
+  await recordListActivities(db, itemId, me.id, activityEvents);
 
   return serializeListItem(item, me.trip.destinationTimezone ?? null);
 }

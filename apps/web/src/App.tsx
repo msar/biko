@@ -27,6 +27,9 @@ import TripHubPage from './pages/TripHubPage';
 import NewTripExpensePage from './pages/NewTripExpensePage';
 import TripExpenseDetailPage from './pages/TripExpenseDetailPage';
 import EditTripExpensePage from './pages/EditTripExpensePage';
+import NewTripListItemPage from './pages/NewTripListItemPage';
+import TripListItemDetailPage from './pages/TripListItemDetailPage';
+import EditTripListItemPage from './pages/EditTripListItemPage';
 import TripJoinPage from './pages/TripJoinPage';
 
 function OnlineBanner() {
@@ -117,7 +120,8 @@ export default function App() {
     location.pathname.startsWith('/gastos/') ||
     location.pathname.startsWith('/importar-resumen') ||
     location.pathname === '/viajes/nuevo' ||
-    (location.pathname.startsWith('/viajes/') && location.pathname.includes('/gastos/')) ||
+    (location.pathname.startsWith('/viajes/') &&
+      (location.pathname.includes('/gastos/') || location.pathname.includes('/listas/'))) ||
     onInvite;
 
   const useTripNav = onTrip && !hideNav;
@@ -149,6 +153,9 @@ export default function App() {
           <Route path="/viajes/:id/gastos/nuevo" element={<NewTripExpensePage />} />
           <Route path="/viajes/:id/gastos/:expenseId/editar" element={<EditTripExpensePage />} />
           <Route path="/viajes/:id/gastos/:expenseId" element={<TripExpenseDetailPage />} />
+          <Route path="/viajes/:id/listas/nuevo" element={<NewTripListItemPage />} />
+          <Route path="/viajes/:id/listas/:itemId/editar" element={<EditTripListItemPage />} />
+          <Route path="/viajes/:id/listas/:itemId" element={<TripListItemDetailPage />} />
           <Route path="/viajes/:id" element={<TripHubPage />} />
           <Route path="/admin" element={<AdminRoute />} />
           <Route

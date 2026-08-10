@@ -31,10 +31,12 @@ import {
   getTripExpense,
   getTripHub,
   getTripInvitePreview,
+  getTripListItem,
   joinTripByCode,
   linkTripMemberToUser,
   listTripExpenses,
   listTripHouseholds,
+  listTripListItemActivities,
   listTripListItems,
   listTripsForUser,
   mintTripInvite,
@@ -687,6 +689,30 @@ export default async function tripRoutes(app: FastifyInstance) {
       return mapTripError(error, reply);
     }
   });
+
+  app.get('/trips/:tripId/list-items/:itemId', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId, itemId } = itemIdParams.parse(request.params);
+    const { actor } = tripActorFromRequest(request);
+    try {
+      return await getTripListItem(app.prisma, tripId, itemId, actor);
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.get(
+    '/trips/:tripId/list-items/:itemId/activities',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const { tripId, itemId } = itemIdParams.parse(request.params);
+      const { actor } = tripActorFromRequest(request);
+      try {
+        return await listTripListItemActivities(app.prisma, tripId, itemId, actor);
+      } catch (error) {
+        return mapTripError(error, reply);
+      }
+    },
+  );
 
   app.post('/trips/:tripId/list-items', { preHandler: [app.authenticate] }, async (request, reply) => {
     const { tripId } = tripIdParams.parse(request.params);

@@ -123,6 +123,16 @@ enum TripListItemStatus {
   DONE
 }
 
+enum TripListItemActivityType {
+  CREATED
+  UPDATED
+  MARKED_DONE
+  MARKED_PENDING
+  CHECKLIST_DONE
+  CHECKLIST_PENDING
+  CHECKLIST_ADDED
+}
+
 enum TripExpenseCategory {
   ALOJAMIENTO
   VUELOS
@@ -908,6 +918,7 @@ model TripMember {
   settlementsFrom TripSettlement[]         @relation("TripSettlementFrom")
   settlementsTo   TripSettlement[]         @relation("TripSettlementTo")
   listAssignments TripListItemAssignee[]
+  listActivities  TripListItemActivity[]
 
   @@unique([tripId, userId])
   @@index([tripId, inviteStatus])
@@ -1009,7 +1020,8 @@ model TripListItem {
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
 
-  assignees TripListItemAssignee[]
+  assignees  TripListItemAssignee[]
+  activities TripListItemActivity[]
 
   @@index([tripId, type, status])
 }
@@ -1022,6 +1034,22 @@ model TripListItemAssignee {
   member     TripMember   @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@unique([listItemId, memberId])
+  @@index([memberId])
+}
+
+/// Audit log for list edits (status toggles, checklist line changes, metadata).
+model TripListItemActivity {
+  id         String                   @id @default(cuid())
+  listItemId String
+  listItem   TripListItem             @relation(fields: [listItemId], references: [id], onDelete: Cascade)
+  memberId   String?
+  member     TripMember?              @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  type       TripListItemActivityType
+  /// Checklist line title or other short context for the event.
+  detail     String?
+  createdAt  DateTime                 @default(now())
+
+  @@index([listItemId, createdAt])
   @@index([memberId])
 }
 

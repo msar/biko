@@ -197,6 +197,24 @@ export interface TripListItemRow {
   updatedAt: string;
 }
 
+export type TripListItemActivityType =
+  | 'CREATED'
+  | 'UPDATED'
+  | 'MARKED_DONE'
+  | 'MARKED_PENDING'
+  | 'CHECKLIST_DONE'
+  | 'CHECKLIST_PENDING'
+  | 'CHECKLIST_ADDED';
+
+export interface TripListItemActivity {
+  id: string;
+  listItemId: string;
+  type: TripListItemActivityType;
+  detail: string | null;
+  createdAt: string;
+  member: { id: string; displayName: string } | null;
+}
+
 export interface TripExportPreview {
   eligible: boolean;
   reason?: string;
