@@ -29,7 +29,7 @@ export default function TripNavigationBar() {
   const destinations: NavDestination[] = tripId
     ? [
         { to: `/viajes/${tripId}`, label: 'Resumen', icon: 'luggage', tab: 'resumen' },
-        { to: `/viajes/${tripId}?tab=itinerario`, label: 'Agenda', icon: 'calendar_month', tab: 'itinerario' },
+        { to: `/viajes/${tripId}?tab=itinerario`, label: 'Itinerario', icon: 'calendar_month', tab: 'itinerario' },
         { to: `/viajes/${tripId}?tab=gastos`, label: 'Gastos', icon: 'receipt_long', tab: 'gastos' },
         { to: `/viajes/${tripId}?tab=listas`, label: 'Listas', icon: 'checklist', tab: 'listas' },
         { to: `/viajes/${tripId}?tab=personas`, label: 'Personas', icon: 'group', tab: 'personas' },

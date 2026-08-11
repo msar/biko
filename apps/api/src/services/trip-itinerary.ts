@@ -602,7 +602,7 @@ export async function createTripItineraryItem(
   if (input.type === 'RESERVATION') {
     const placeName = input.placeName?.trim() || input.title?.trim() || '';
     if (!placeName) throw new TripValidationError('Indicá el restaurante o lugar');
-    await assertMealLink(db, tripId, input.mealItemId, dayDateUtc, tzName);
+    // mealSlot = meal type (desayuno/almuerzo/cena), not a link to another itinerary event
     const row = await db.tripItineraryItem.create({
       data: {
         tripId,
@@ -616,7 +616,8 @@ export async function createTripItineraryItem(
         placeName,
         address: input.address?.trim() || null,
         link: input.link?.trim() || null,
-        mealItemId: input.mealItemId ?? null,
+        mealSlot: input.mealSlot ?? null,
+        mealItemId: null,
       },
       include: itineraryInclude,
     });
@@ -718,14 +719,16 @@ export async function updateTripItineraryItem(
     }
     if (input.address !== undefined) data.address = input.address?.trim() || null;
     if (input.link !== undefined) data.link = input.link?.trim() || null;
-    if (input.mealItemId !== undefined) {
+    if (input.mealSlot !== undefined) data.mealSlot = input.mealSlot;
+    // Prefer meal type over legacy meal-item link
+    if (input.mealSlot !== undefined || input.mealItemId === null) {
+      data.mealItem = { disconnect: true };
+    } else if (input.mealItemId !== undefined) {
       await assertMealLink(db, tripId, input.mealItemId, dayDateUtc, tzName);
       data.mealItem =
         input.mealItemId == null
           ? { disconnect: true }
           : { connect: { id: input.mealItemId } };
-    } else if (input.dayDate !== undefined && existing.mealItemId) {
-      await assertMealLink(db, tripId, existing.mealItemId, dayDateUtc, tzName);
     }
   }
 

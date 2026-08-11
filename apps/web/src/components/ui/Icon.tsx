@@ -29,7 +29,13 @@ export type IconName =
   | 'luggage'
   | 'list_alt'
   | 'hotel'
-  | 'payments';
+  | 'payments'
+  | 'restaurant'
+  | 'local_activity'
+  | 'menu_book'
+  | 'login'
+  | 'logout'
+  | 'directions_car';
 
 interface IconProps extends HTMLAttributes<HTMLSpanElement> {
   name: IconName | string;

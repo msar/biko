@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Button, Chip } from '../components/ui';
+import { Button, Chip, Icon } from '../components/ui';
+import type { IconName } from '../components/ui/Icon';
 import { ApiError, api, fmtDate, fmtMoney } from '../lib/api';
 import type {
   TripHub,
@@ -20,10 +21,30 @@ type CreateType = 'MEAL' | 'RESERVATION' | 'ACTIVITY';
 
 function typeLabel(item: TripItineraryItem): string {
   if (item.type === 'MEAL') return MEAL_SLOT_LABEL[item.mealSlot ?? ''] ?? 'Comida';
-  if (item.type === 'RESERVATION') return 'Reserva';
+  if (item.type === 'RESERVATION') {
+    const slot = item.mealSlot ? MEAL_SLOT_LABEL[item.mealSlot] : null;
+    return slot ? `Reserva · ${slot}` : 'Reserva';
+  }
   if (item.type === 'ACTIVITY') return 'Actividad';
   if (item.type === 'ARRIVAL') return ARRIVAL_KIND_LABEL[item.arrivalKind ?? ''] ?? 'Llegada';
   return item.type;
+}
+
+function itemIcon(item: TripItineraryItem): IconName {
+  if (item.type === 'MEAL') {
+    if (item.mealSlot === 'BREAKFAST') return 'restaurant';
+    if (item.mealSlot === 'LUNCH') return 'restaurant';
+    return 'restaurant';
+  }
+  if (item.type === 'RESERVATION') return 'menu_book';
+  if (item.type === 'ACTIVITY') return 'local_activity';
+  if (item.type === 'ARRIVAL') {
+    if (item.arrivalKind === 'CHECK_OUT') return 'logout';
+    if (item.arrivalKind === 'FLIGHT') return 'flight';
+    if (item.arrivalKind === 'CAR') return 'directions_car';
+    return 'hotel';
+  }
+  return 'calendar_month';
 }
 
 function itemHeadline(item: TripItineraryItem): string {
@@ -60,29 +81,70 @@ function shortDayLabel(ymd: string): string {
   const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return ymd;
   const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12));
-  return d.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return d.toLocaleDateString('es-AR', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  });
+}
+
+function DetailLine({ label, value }: { label: string; value: string | null | undefined }) {
+  if (!value) return null;
+  return (
+    <p style={{ margin: '6px 0 0' }}>
+      <span className="hint">{label}</span>
+      <br />
+      {value}
+    </p>
+  );
 }
 
 export function ItineraryItemRow({
   item,
-  closed,
-  onEdit,
-  onDelete,
-  onOpenAlojamiento,
+  onOpen,
 }: {
   item: TripItineraryItem;
-  closed: boolean;
-  onEdit?: (item: TripItineraryItem) => void;
-  onDelete?: (item: TripItineraryItem) => void;
-  onOpenAlojamiento?: () => void;
+  onOpen: (item: TripItineraryItem) => void;
 }) {
   const time = timeInputValue(item.startTime);
-  const editable = !item.virtual && item.type !== 'ARRIVAL' && !closed;
 
   return (
-    <li className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
-      <div className="row-between" style={{ gap: 8 }}>
-        <div style={{ minWidth: 0 }}>
+    <li style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+      <button
+        type="button"
+        className="list-row trip-itinerary-row"
+        onClick={() => onOpen(item)}
+        style={{
+          width: '100%',
+          textAlign: 'left',
+          border: 'none',
+          background: 'transparent',
+          cursor: 'pointer',
+          display: 'flex',
+          gap: 12,
+          alignItems: 'flex-start',
+          padding: '10px 0',
+        }}
+      >
+        <span
+          className="trip-itinerary-icon"
+          style={{
+            flexShrink: 0,
+            width: 36,
+            height: 36,
+            borderRadius: 10,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'var(--md-sys-color-secondary-container, #cfe8de)',
+            color: 'var(--md-sys-color-on-secondary-container, #1e305e)',
+          }}
+          aria-hidden
+        >
+          <Icon name={itemIcon(item)} size="sm" />
+        </span>
+        <span style={{ minWidth: 0, flex: 1 }}>
           <p style={{ margin: 0 }}>
             {time ? <span className="hint">{time} · </span> : null}
             <strong>{itemHeadline(item)}</strong>
@@ -92,46 +154,169 @@ export function ItineraryItemRow({
             {item.type === 'MEAL' && item.inChargeMember
               ? ` · A cargo: ${item.inChargeMember.displayName}`
               : null}
-            {item.type === 'RESERVATION' && item.mealItem
-              ? ` · ${MEAL_SLOT_LABEL[item.mealItem.mealSlot ?? ''] ?? 'Comida'}`
-              : null}
             {item.type === 'ACTIVITY' && item.amount != null && item.amount > 0
               ? ` · ${fmtMoney(item.amount)}`
               : null}
           </p>
-          {item.type === 'MEAL' && item.menu && item.menu !== itemHeadline(item) && (
-            <p className="hint" style={{ margin: '2px 0 0' }}>
-              {item.menu}
-            </p>
-          )}
-          {item.type === 'RESERVATION' && item.address && (
-            <p className="hint" style={{ margin: '2px 0 0' }}>
-              {item.address}
-            </p>
-          )}
-          {item.type === 'ARRIVAL' && (item.placeName || item.notes) && (
-            <p className="hint" style={{ margin: '2px 0 0' }}>
-              {item.placeName || item.notes}
-            </p>
-          )}
-        </div>
-        {item.virtual && onOpenAlojamiento ? (
-          <button type="button" className="btn-link" onClick={onOpenAlojamiento}>
-            Alojamiento
-          </button>
-        ) : null}
-      </div>
-      {editable && (
-        <div className="row-between" style={{ gap: 8 }}>
-          <button type="button" className="btn-link" onClick={() => onEdit?.(item)}>
-            Editar
-          </button>
-          <button type="button" className="btn-link" onClick={() => onDelete?.(item)}>
-            Eliminar
-          </button>
-        </div>
-      )}
+        </span>
+        <Icon name="chevron_right" size="sm" className="hint" />
+      </button>
     </li>
+  );
+}
+
+function ItineraryDetailDialog({
+  item,
+  closed,
+  onClose,
+  onEdit,
+  onDelete,
+  onOpenAlojamiento,
+}: {
+  item: TripItineraryItem;
+  closed: boolean;
+  onClose: () => void;
+  onEdit: (item: TripItineraryItem) => void;
+  onDelete: (item: TripItineraryItem) => void;
+  onOpenAlojamiento?: () => void;
+}) {
+  const editable = !item.virtual && item.type !== 'ARRIVAL' && !closed;
+  const time = timeInputValue(item.startTime);
+
+  return (
+    <div className="md-dialog-overlay" role="presentation" onClick={onClose}>
+      <div
+        className="md-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="itinerary-detail-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="row-between" style={{ gap: 8, alignItems: 'center' }}>
+          <span
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'var(--md-sys-color-secondary-container, #cfe8de)',
+            }}
+            aria-hidden
+          >
+            <Icon name={itemIcon(item)} />
+          </span>
+          <h2 id="itinerary-detail-title" style={{ margin: 0, flex: 1 }}>
+            {itemHeadline(item)}
+          </h2>
+          <button type="button" className="btn-link" onClick={onClose} aria-label="Cerrar">
+            <Icon name="close" />
+          </button>
+        </div>
+
+        <div className="md-dialog-body">
+          <p className="hint" style={{ marginTop: 0 }}>
+            {typeLabel(item)}
+            {time ? ` · ${time}` : ''}
+          </p>
+          <DetailLine label="Fecha" value={fmtDate(item.dayDate)} />
+          {item.type === 'MEAL' && (
+            <>
+              <DetailLine label="Menú" value={item.menu} />
+              <DetailLine label="A cargo" value={item.inChargeMember?.displayName} />
+            </>
+          )}
+          {item.type === 'RESERVATION' && (
+            <>
+              <DetailLine
+                label="Tipo de comida"
+                value={item.mealSlot ? MEAL_SLOT_LABEL[item.mealSlot] : null}
+              />
+              <DetailLine label="Dirección" value={item.address} />
+              {item.link ? (
+                <p style={{ margin: '6px 0 0' }}>
+                  <span className="hint">Link</span>
+                  <br />
+                  <a href={item.link} target="_blank" rel="noreferrer">
+                    Abrir reserva
+                  </a>
+                </p>
+              ) : null}
+            </>
+          )}
+          {item.type === 'ACTIVITY' && (
+            <>
+              <DetailLine
+                label="Costo"
+                value={item.amount != null && item.amount > 0 ? fmtMoney(item.amount) : null}
+              />
+              <DetailLine label="Lugar" value={item.placeName || item.address} />
+              {item.link ? (
+                <p style={{ margin: '6px 0 0' }}>
+                  <span className="hint">Link</span>
+                  <br />
+                  <a href={item.link} target="_blank" rel="noreferrer">
+                    Ver más
+                  </a>
+                </p>
+              ) : null}
+            </>
+          )}
+          {item.type === 'ARRIVAL' && (
+            <>
+              <DetailLine label="Lugar" value={item.placeName} />
+              <DetailLine label="Dirección" value={item.address} />
+            </>
+          )}
+          <DetailLine label="Notas" value={item.notes} />
+        </div>
+
+        <div className="md-dialog-actions" style={{ flexWrap: 'wrap', gap: 8 }}>
+          {item.virtual && onOpenAlojamiento ? (
+            <Button
+              type="button"
+              variant="filled"
+              onClick={() => {
+                onClose();
+                onOpenAlojamiento();
+              }}
+            >
+              Ver alojamiento
+            </Button>
+          ) : null}
+          {editable ? (
+            <>
+              <Button
+                type="button"
+                variant="tonal"
+                onClick={() => {
+                  onClose();
+                  onEdit(item);
+                }}
+              >
+                Editar
+              </Button>
+              <Button
+                type="button"
+                variant="danger-text"
+                onClick={() => {
+                  if (window.confirm('¿Eliminar este ítem del itinerario?')) {
+                    onDelete(item);
+                    onClose();
+                  }
+                }}
+              >
+                Eliminar
+              </Button>
+            </>
+          ) : null}
+          <Button type="button" variant="text" onClick={onClose}>
+            Cerrar
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -152,18 +337,18 @@ export function TripItinerarioTab({
     () => initialDate || trip.startDate || today,
   );
   const [formOpen, setFormOpen] = useState(false);
+  const [detailItem, setDetailItem] = useState<TripItineraryItem | null>(null);
   const [editing, setEditing] = useState<TripItineraryItem | null>(null);
   const [createType, setCreateType] = useState<CreateType>('MEAL');
   const [error, setError] = useState<string | null>(null);
 
-  const [mealSlot, setMealSlot] = useState<TripMealSlot>('BREAKFAST');
+  const [mealSlot, setMealSlot] = useState<TripMealSlot | ''>('BREAKFAST');
   const [menu, setMenu] = useState('');
   const [inChargeMemberId, setInChargeMemberId] = useState('');
   const [title, setTitle] = useState('');
   const [placeName, setPlaceName] = useState('');
   const [address, setAddress] = useState('');
   const [link, setLink] = useState('');
-  const [mealItemId, setMealItemId] = useState('');
   const [amount, setAmount] = useState('');
   const [startTime, setStartTime] = useState('');
   const [notes, setNotes] = useState('');
@@ -178,11 +363,6 @@ export function TripItinerarioTab({
       ),
   });
 
-  const mealsForDay = useMemo(
-    () => items.filter((i) => i.type === 'MEAL' && !i.virtual),
-    [items],
-  );
-
   const resetForm = () => {
     setEditing(null);
     setCreateType('MEAL');
@@ -193,7 +373,6 @@ export function TripItinerarioTab({
     setPlaceName('');
     setAddress('');
     setLink('');
-    setMealItemId('');
     setAmount('');
     setStartTime('');
     setNotes('');
@@ -203,24 +382,26 @@ export function TripItinerarioTab({
   const openCreate = (type: CreateType) => {
     resetForm();
     setCreateType(type);
+    setMealSlot(type === 'RESERVATION' ? '' : 'BREAKFAST');
+    setDetailItem(null);
     setFormOpen(true);
   };
 
   const openEdit = (item: TripItineraryItem) => {
     setEditing(item);
     setCreateType(item.type as CreateType);
-    setMealSlot((item.mealSlot as TripMealSlot) || 'BREAKFAST');
+    setMealSlot((item.mealSlot as TripMealSlot) || (item.type === 'RESERVATION' ? '' : 'BREAKFAST'));
     setMenu(item.menu ?? '');
     setInChargeMemberId(item.inChargeMemberId ?? '');
     setTitle(item.title ?? '');
     setPlaceName(item.placeName ?? '');
     setAddress(item.address ?? '');
     setLink(item.link ?? '');
-    setMealItemId(item.mealItemId ?? '');
     setAmount(item.amount != null ? String(item.amount) : '');
     setStartTime(timeInputValue(item.startTime));
     setNotes(item.notes ?? '');
     setError(null);
+    setDetailItem(null);
     setFormOpen(true);
   };
 
@@ -246,6 +427,7 @@ export function TripItinerarioTab({
       };
 
       if (activeType === 'MEAL') {
+        if (!mealSlot) throw new ApiError(400, 'Indicá desayuno, almuerzo o cena');
         body.mealSlot = mealSlot;
         body.menu = menu.trim() || null;
         body.title = title.trim() || null;
@@ -255,7 +437,8 @@ export function TripItinerarioTab({
         body.title = title.trim() || placeName.trim() || null;
         body.address = address.trim() || null;
         body.link = link.trim() || null;
-        body.mealItemId = mealItemId || null;
+        body.mealSlot = mealSlot || null;
+        body.mealItemId = null;
       } else {
         body.title = title.trim() || null;
         body.amount = parsedAmount;
@@ -304,7 +487,10 @@ export function TripItinerarioTab({
 
   return (
     <>
-      <div className="trip-day-strip" style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 12 }}>
+      <div
+        className="trip-day-strip"
+        style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 12 }}
+      >
         {days.map((d) => (
           <Chip
             key={d}
@@ -312,6 +498,7 @@ export function TripItinerarioTab({
             onClick={() => {
               setSelectedDate(d);
               setFormOpen(false);
+              setDetailItem(null);
               resetForm();
             }}
           >
@@ -325,31 +512,8 @@ export function TripItinerarioTab({
         {selectedDate === today ? ' · Hoy' : ''}
       </p>
 
-      {isLoading ? (
-        <p className="hint">Cargando itinerario…</p>
-      ) : items.length === 0 ? (
-        <p className="empty-state">Nada planificado este día</p>
-      ) : (
-        <ul className="list-plain card" style={{ padding: '8px 12px' }}>
-          {items.map((item) => (
-            <ItineraryItemRow
-              key={item.id}
-              item={item}
-              closed={closed}
-              onEdit={openEdit}
-              onDelete={(it) => {
-                if (window.confirm('¿Eliminar este ítem del itinerario?')) {
-                  deleteMutation.mutate(it);
-                }
-              }}
-              onOpenAlojamiento={onOpenAlojamiento}
-            />
-          ))}
-        </ul>
-      )}
-
       {!closed && !formOpen && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
           <Button type="button" variant="filled" size="sm" onClick={() => openCreate('MEAL')}>
             + Comida
           </Button>
@@ -363,7 +527,7 @@ export function TripItinerarioTab({
       )}
 
       {formOpen && (
-        <form className="card promo-form" onSubmit={onSubmit} style={{ marginTop: 12 }}>
+        <form className="card promo-form" onSubmit={onSubmit} style={{ marginBottom: 12 }}>
           <h2 style={{ marginTop: 0 }}>
             {editing ? 'Editar' : 'Agregar'}{' '}
             {formType === 'MEAL' ? 'comida' : formType === 'RESERVATION' ? 'reserva' : 'actividad'}
@@ -374,7 +538,7 @@ export function TripItinerarioTab({
               <label>
                 Tipo
                 <select
-                  value={mealSlot}
+                  value={mealSlot || 'BREAKFAST'}
                   onChange={(e) => setMealSlot(e.target.value as TripMealSlot)}
                   disabled={Boolean(editing)}
                 >
@@ -421,26 +585,28 @@ export function TripItinerarioTab({
                 />
               </label>
               <label>
+                Tipo de comida
+                <select
+                  value={mealSlot}
+                  onChange={(e) => setMealSlot(e.target.value as TripMealSlot | '')}
+                >
+                  <option value="">Sin especificar</option>
+                  <option value="BREAKFAST">Desayuno</option>
+                  <option value="LUNCH">Almuerzo</option>
+                  <option value="DINNER">Cena</option>
+                </select>
+              </label>
+              <label>
                 Dirección
                 <input value={address} onChange={(e) => setAddress(e.target.value)} />
               </label>
               <label>
                 Link
-                <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" />
-              </label>
-              <label>
-                Comida vinculada
-                <select value={mealItemId} onChange={(e) => setMealItemId(e.target.value)}>
-                  <option value="">Ninguna</option>
-                  {mealsForDay
-                    .filter((m) => !editing || m.id !== editing.id)
-                    .map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {MEAL_SLOT_LABEL[m.mealSlot ?? ''] ?? 'Comida'}
-                        {m.menu ? ` — ${m.menu.slice(0, 40)}` : ''}
-                      </option>
-                    ))}
-                </select>
+                <input
+                  value={link}
+                  onChange={(e) => setLink(e.target.value)}
+                  placeholder="https://…"
+                />
               </label>
             </>
           )}
@@ -475,7 +641,11 @@ export function TripItinerarioTab({
               </label>
               <label>
                 Link
-                <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" />
+                <input
+                  value={link}
+                  onChange={(e) => setLink(e.target.value)}
+                  placeholder="https://…"
+                />
               </label>
             </>
           )}
@@ -508,6 +678,29 @@ export function TripItinerarioTab({
           </div>
         </form>
       )}
+
+      {isLoading ? (
+        <p className="hint">Cargando itinerario…</p>
+      ) : items.length === 0 ? (
+        <p className="empty-state">Nada planificado este día</p>
+      ) : (
+        <ul className="list-plain card" style={{ padding: '4px 12px' }}>
+          {items.map((item) => (
+            <ItineraryItemRow key={item.id} item={item} onOpen={setDetailItem} />
+          ))}
+        </ul>
+      )}
+
+      {detailItem && (
+        <ItineraryDetailDialog
+          item={detailItem}
+          closed={closed}
+          onClose={() => setDetailItem(null)}
+          onEdit={openEdit}
+          onDelete={(it) => deleteMutation.mutate(it)}
+          onOpenAlojamiento={onOpenAlojamiento}
+        />
+      )}
     </>
   );
 }
@@ -522,6 +715,7 @@ export function ResumenHoyItinerary({
   onOpenAlojamiento: () => void;
 }) {
   const today = todayYmdInTimeZone(trip.destinationTimezone);
+  const [detailItem, setDetailItem] = useState<TripItineraryItem | null>(null);
   const { data: items = [], isLoading } = useQuery({
     queryKey: ['trips', trip.id, 'itinerary', today],
     queryFn: () =>
@@ -551,14 +745,23 @@ export function ResumenHoyItinerary({
       ) : (
         <ul className="list-plain" style={{ margin: 0 }}>
           {items.map((item) => (
-            <ItineraryItemRow
-              key={item.id}
-              item={item}
-              closed
-              onOpenAlojamiento={onOpenAlojamiento}
-            />
+            <ItineraryItemRow key={item.id} item={item} onOpen={setDetailItem} />
           ))}
         </ul>
+      )}
+
+      {detailItem && (
+        <ItineraryDetailDialog
+          item={detailItem}
+          closed
+          onClose={() => setDetailItem(null)}
+          onEdit={() => {
+            setDetailItem(null);
+            onOpenItinerario();
+          }}
+          onDelete={() => setDetailItem(null)}
+          onOpenAlojamiento={onOpenAlojamiento}
+        />
       )}
     </section>
   );
