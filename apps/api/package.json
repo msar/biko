@@ -22,7 +22,7 @@
     "@biko/shared": "*",
     "@fastify/cors": "^10.0.0",
     "@fastify/jwt": "^9.0.0",
-    "@prisma/client": "^5.20.0",
+    "@prisma/client": "^5.22.0",
     "@simplewebauthn/server": "^13.3.2",
     "bcryptjs": "^2.4.3",
     "fastify": "^5.0.0",
