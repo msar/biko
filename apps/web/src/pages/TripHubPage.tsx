@@ -520,9 +520,7 @@ function TripForecastCard({ trip }: { trip: TripHub }) {
               {Math.round(day.tMax)}°{' '}
               <span className="hint">{Math.round(day.tMin)}°</span>
             </span>
-            {day.precipProb > 40 && (
-              <span className="trip-forecast-precip">{Math.round(day.precipProb)}%</span>
-            )}
+            <span className="trip-forecast-precip">{Math.round(day.precipProb)}%</span>
           </div>
         ))}
       </div>
