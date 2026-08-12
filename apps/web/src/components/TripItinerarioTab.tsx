@@ -740,30 +740,33 @@ export function ResumenHoyItinerary({
   onOpenItinerario: () => void;
   onOpenAlojamiento: () => void;
 }) {
-  const today = todayYmdInTimeZone(trip.destinationTimezone);
+  const firstDay =
+    trip.startDate || todayYmdInTimeZone(trip.destinationTimezone);
   const [detailItem, setDetailItem] = useState<TripItineraryItem | null>(null);
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ['trips', trip.id, 'itinerary', today],
+    queryKey: ['trips', trip.id, 'itinerary', firstDay],
     queryFn: () =>
-      api<TripItineraryItem[]>(`/trips/${trip.id}/itinerary?date=${encodeURIComponent(today)}`),
+      api<TripItineraryItem[]>(
+        `/trips/${trip.id}/itinerary?date=${encodeURIComponent(firstDay)}`,
+      ),
   });
 
   return (
     <section className="card">
       <div className="row-between">
-        <h2 style={{ margin: 0 }}>Hoy</h2>
+        <h2 style={{ margin: 0 }}>Itinerario</h2>
         <button type="button" className="btn-link" onClick={onOpenItinerario}>
-          Itinerario
+          Ver
         </button>
       </div>
       <p className="hint" style={{ margin: '4px 0 8px' }}>
-        {fmtDate(today)}
+        {fmtDate(firstDay)}
       </p>
       {isLoading ? (
         <p className="hint">Cargando…</p>
       ) : items.length === 0 ? (
         <p className="empty-state" style={{ margin: 0 }}>
-          Nada para hoy.{' '}
+          Nada planificado.{' '}
           <button type="button" className="btn-link" onClick={onOpenItinerario}>
             Planificar
           </button>

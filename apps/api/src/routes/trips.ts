@@ -150,13 +150,22 @@ const tripCategory = z.enum([
 ]);
 
 const expensePaymentSchema = z.object({
-  memberId: z.string().min(1),
-  amount: z.number().positive(),
+  memberId: z.string().min(1, 'Indicá un pagador'),
+  amount: z.number({ invalid_type_error: 'Monto de pago inválido' }).positive('El monto pagado debe ser mayor a 0'),
+});
+
+const splitValueEntrySchema = z.object({
+  memberId: z.string().min(1, 'Falta un viajero en el reparto'),
+  // 0 is valid (p.ej. 100% a uno, 0% al resto); allocation rejects negatives.
+  value: z
+    .number({ invalid_type_error: 'Valor de reparto inválido' })
+    .finite('Valor de reparto inválido')
+    .nonnegative('Los valores de reparto no pueden ser negativos'),
 });
 
 const expenseBodySchema = z
   .object({
-    amount: z.number().positive(),
+    amount: z.number({ invalid_type_error: 'Monto inválido' }).positive('El monto debe ser mayor a 0'),
     category: tripCategory,
     paidByMemberId: z.string().min(1).optional(),
     payments: z.array(expensePaymentSchema).min(1).optional(),
@@ -165,9 +174,7 @@ const expenseBodySchema = z
     currency: z.string().min(1).max(8).optional(),
     splitMode: z.enum(['EQUAL', 'ASSIGN', 'AMOUNT', 'SHARES', 'PERCENTAGE']).optional(),
     assignToMemberId: z.string().min(1).nullish(),
-    splitValues: z
-      .array(z.object({ memberId: z.string().min(1), value: z.number().positive() }))
-      .nullish(),
+    splitValues: z.array(splitValueEntrySchema).nullish(),
     participantMemberIds: z.array(z.string().min(1)).nullish(),
   })
   .refine((b) => Boolean(b.paidByMemberId) || (b.payments && b.payments.length > 0), {
@@ -176,7 +183,7 @@ const expenseBodySchema = z
   });
 
 const expensePatchSchema = z.object({
-  amount: z.number().positive().optional(),
+  amount: z.number({ invalid_type_error: 'Monto inválido' }).positive('El monto debe ser mayor a 0').optional(),
   category: tripCategory.optional(),
   paidByMemberId: z.string().min(1).optional(),
   payments: z.array(expensePaymentSchema).min(1).optional(),
@@ -185,9 +192,7 @@ const expensePatchSchema = z.object({
   currency: z.string().min(1).max(8).optional(),
   splitMode: z.enum(['EQUAL', 'ASSIGN', 'AMOUNT', 'SHARES', 'PERCENTAGE']).optional(),
   assignToMemberId: z.string().min(1).nullish(),
-  splitValues: z
-    .array(z.object({ memberId: z.string().min(1), value: z.number().positive() }))
-    .nullish(),
+  splitValues: z.array(splitValueEntrySchema).nullish(),
   participantMemberIds: z.array(z.string().min(1)).nullish(),
 });
 

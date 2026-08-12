@@ -1,6 +1,7 @@
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
 import { ZodError } from 'zod';
+import { formatZodError } from './lib/zod-error.js';
 import authPlugin from './plugins/auth.js';
 import prismaPlugin from './plugins/prisma.js';
 import authRoutes from './routes/auth.js';
@@ -30,7 +31,7 @@ export async function buildApp() {
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ZodError) {
-      return reply.code(400).send({ error: 'Datos inválidos', details: error.flatten() });
+      return reply.code(400).send({ error: formatZodError(error), details: error.flatten() });
     }
     app.log.error(error);
     const statusCode = (error as { statusCode?: unknown }).statusCode;

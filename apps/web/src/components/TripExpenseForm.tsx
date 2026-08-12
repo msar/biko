@@ -213,6 +213,31 @@ export default function TripExpenseForm({ mode, trip, expenseId, initial, title 
       }
     }
 
+    if (assignMode === 'all' && splitSubMode === 'SHARES') {
+      const values = members.map((m) => Number(String(splitValues[m.id] ?? '').replace(',', '.')));
+      if (values.some((v) => !Number.isFinite(v) || v < 0)) {
+        setError('Completá las partes de cada viajero (números ≥ 0)');
+        return;
+      }
+      if (values.reduce((s, v) => s + v, 0) <= 0) {
+        setError('La suma de partes debe ser mayor a 0');
+        return;
+      }
+    }
+
+    if (assignMode === 'all' && splitSubMode === 'PERCENTAGE') {
+      const values = members.map((m) => Number(String(splitValues[m.id] ?? '').replace(',', '.')));
+      if (values.some((v) => !Number.isFinite(v) || v < 0)) {
+        setError('Completá el % de cada viajero (números ≥ 0)');
+        return;
+      }
+      const sum = values.reduce((s, v) => s + v, 0);
+      if (Math.abs(sum - 100) > 0.05) {
+        setError('La suma de porcentajes debe ser 100');
+        return;
+      }
+    }
+
     const body: Record<string, unknown> = {
       amount: amountNum,
       category,
@@ -231,7 +256,7 @@ export default function TripExpenseForm({ mode, trip, expenseId, initial, title 
       body.splitMode = splitSubMode;
       body.splitValues = members.map((m) => ({
         memberId: m.id,
-        value: Number(splitValues[m.id] || '0'),
+        value: Number(String(splitValues[m.id] ?? '0').replace(',', '.')),
       }));
     }
 
