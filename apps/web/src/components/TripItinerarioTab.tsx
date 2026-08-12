@@ -21,6 +21,8 @@ import {
 
 type CreateType = 'MEAL' | 'RESERVATION' | 'ACTIVITY';
 
+const ALL_MEAL_SLOTS: TripMealSlot[] = ['BREAKFAST', 'LUNCH', 'DINNER'];
+
 function typeLabel(item: TripItineraryItem): string {
   if (item.type === 'MEAL') return MEAL_SLOT_LABEL[item.mealSlot ?? ''] ?? 'Comida';
   if (item.type === 'RESERVATION') {
@@ -389,10 +391,30 @@ export function TripItinerarioTab({
       ),
   });
 
+  const usedMealSlots = useMemo(() => {
+    const used = new Set<TripMealSlot>();
+    for (const item of items) {
+      if (item.type === 'MEAL' && item.mealSlot) used.add(item.mealSlot);
+    }
+    return used;
+  }, [items]);
+
+  const availableMealSlots = useMemo(
+    () => ALL_MEAL_SLOTS.filter((slot) => !usedMealSlots.has(slot)),
+    [usedMealSlots],
+  );
+
+  const mealSlotOptions = useMemo(() => {
+    if (editing?.type === 'MEAL' && editing.mealSlot) {
+      return [editing.mealSlot];
+    }
+    return availableMealSlots;
+  }, [editing, availableMealSlots]);
+
   const resetForm = () => {
     setEditing(null);
     setCreateType('MEAL');
-    setMealSlot('BREAKFAST');
+    setMealSlot(availableMealSlots[0] ?? '');
     setMenu('');
     setInChargeMemberId('');
     setTitle('');
@@ -406,9 +428,10 @@ export function TripItinerarioTab({
   };
 
   const openCreate = (type: CreateType) => {
+    if (type === 'MEAL' && availableMealSlots.length === 0) return;
     resetForm();
     setCreateType(type);
-    setMealSlot(type === 'RESERVATION' ? '' : 'BREAKFAST');
+    setMealSlot(type === 'RESERVATION' ? '' : (availableMealSlots[0] ?? ''));
     setDetailItem(null);
     setFormOpen(true);
   };
@@ -540,9 +563,11 @@ export function TripItinerarioTab({
 
       {!closed && !formOpen && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-          <Button type="button" variant="filled" size="sm" onClick={() => openCreate('MEAL')}>
-            + Comida
-          </Button>
+          {availableMealSlots.length > 0 && (
+            <Button type="button" variant="filled" size="sm" onClick={() => openCreate('MEAL')}>
+              + Comida
+            </Button>
+          )}
           <Button type="button" variant="tonal" size="sm" onClick={() => openCreate('RESERVATION')}>
             + Reserva
           </Button>
@@ -564,13 +589,16 @@ export function TripItinerarioTab({
               <label>
                 Tipo
                 <select
-                  value={mealSlot || 'BREAKFAST'}
+                  value={mealSlot || mealSlotOptions[0] || ''}
                   onChange={(e) => setMealSlot(e.target.value as TripMealSlot)}
-                  disabled={Boolean(editing)}
+                  disabled={Boolean(editing) || mealSlotOptions.length <= 1}
+                  required
                 >
-                  <option value="BREAKFAST">Desayuno</option>
-                  <option value="LUNCH">Almuerzo</option>
-                  <option value="DINNER">Cena</option>
+                  {mealSlotOptions.map((slot) => (
+                    <option key={slot} value={slot}>
+                      {MEAL_SLOT_LABEL[slot]}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label>
