@@ -651,6 +651,24 @@ async function findInviteByCodeOrSlug(db: Db, codeOrSlug: string) {
   });
 }
 
+/** Seats guests can claim: PENDING placeholders or JOINED guests without a linked account. */
+const claimableMemberWhere = {
+  userId: null as null,
+  inviteStatus: { in: ['PENDING', 'JOINED'] as Array<'PENDING' | 'JOINED'> },
+};
+
+/** Case/diacritic-insensitive display-name match for reclaiming orphan seats. */
+export function memberDisplayNamesMatch(a: string, b: string): boolean {
+  return a.trim().localeCompare(b.trim(), 'es', { sensitivity: 'base' }) === 0;
+}
+
+export function findClaimableMemberByDisplayName<T extends { displayName: string }>(
+  members: T[],
+  displayName: string,
+): T | undefined {
+  return members.find((m) => memberDisplayNamesMatch(m.displayName, displayName));
+}
+
 export async function getTripInvitePreview(db: Db, code: string) {
   const invite = await findInviteByCodeOrSlug(db, code);
   if (!invite) throw new TripNotFoundError('Código de invitación inválido');
@@ -661,8 +679,7 @@ export async function getTripInvitePreview(db: Db, code: string) {
   const unclaimedMembers = await db.tripMember.findMany({
     where: {
       tripId: invite.tripId,
-      inviteStatus: 'PENDING',
-      userId: null,
+      ...claimableMemberWhere,
     },
     select: memberSelect,
     orderBy: { displayName: 'asc' },
@@ -728,8 +745,7 @@ export async function joinTripByCode(
       where: {
         id: opts.claimMemberId,
         tripId: invite.tripId,
-        inviteStatus: 'PENDING',
-        userId: null,
+        ...claimableMemberWhere,
       },
     });
     if (!slot) {
@@ -749,6 +765,26 @@ export async function joinTripByCode(
   const displayName = opts?.displayName?.trim() || userName;
   if (!displayName) {
     throw new TripValidationError('Ingresá tu nombre');
+  }
+
+  // Reclaim an orphan guest / PENDING seat with the same display name instead of duplicating.
+  const claimable = await db.tripMember.findMany({
+    where: {
+      tripId: invite.tripId,
+      ...claimableMemberWhere,
+    },
+  });
+  const match = findClaimableMemberByDisplayName(claimable, displayName);
+  if (match) {
+    return db.tripMember.update({
+      where: { id: match.id },
+      data: {
+        userId: userId ?? null,
+        inviteStatus: 'JOINED',
+        displayName: match.displayName || displayName,
+      },
+      include: { trip: true },
+    });
   }
 
   return db.tripMember.create({
@@ -860,6 +896,162 @@ export async function deleteTripMember(
 
   // List-item assignee rows cascade on member delete.
   await db.tripMember.delete({ where: { id: memberId } });
+}
+
+/**
+ * Merge `sourceMemberId` into `intoMemberId`: reassign expenses/payments/allocations/
+ * settlements/itinerary ownership, coalescing unique pairs, then delete the source seat.
+ */
+export async function mergeTripMember(
+  db: PrismaClient,
+  tripId: string,
+  actorUserId: string,
+  sourceMemberId: string,
+  intoMemberId: string,
+) {
+  const actor = await requireTripOrganizer(db, tripId, actorUserId);
+  const trip = await db.trip.findUniqueOrThrow({ where: { id: tripId } });
+  assertTripWritable(trip.status);
+
+  if (sourceMemberId === intoMemberId) {
+    throw new TripValidationError('Elegí otra persona para fusionar');
+  }
+  if (sourceMemberId === actor.id) {
+    throw new TripValidationError('No podés fusionarte a vos mismo');
+  }
+
+  const [source, target] = await Promise.all([
+    db.tripMember.findFirst({ where: { id: sourceMemberId, tripId } }),
+    db.tripMember.findFirst({ where: { id: intoMemberId, tripId } }),
+  ]);
+  if (!source || !target) throw new TripNotFoundError('Miembro no encontrado');
+  if (source.role === 'ORGANIZER') {
+    throw new TripValidationError('No se puede fusionar a un organizador');
+  }
+
+  await db.$transaction(async (tx) => {
+    // Primary payer on expenses
+    await tx.tripExpense.updateMany({
+      where: { tripId, paidByMemberId: sourceMemberId },
+      data: { paidByMemberId: intoMemberId },
+    });
+
+    // Payments: coalesce per expense
+    const sourcePayments = await tx.tripExpensePayment.findMany({
+      where: { tripMemberId: sourceMemberId },
+    });
+    for (const pay of sourcePayments) {
+      const existing = await tx.tripExpensePayment.findFirst({
+        where: { tripExpenseId: pay.tripExpenseId, tripMemberId: intoMemberId },
+      });
+      if (existing) {
+        await tx.tripExpensePayment.update({
+          where: { id: existing.id },
+          data: { amount: round2(toNum(existing.amount) + toNum(pay.amount)) },
+        });
+        await tx.tripExpensePayment.delete({ where: { id: pay.id } });
+      } else {
+        await tx.tripExpensePayment.update({
+          where: { id: pay.id },
+          data: { tripMemberId: intoMemberId },
+        });
+      }
+    }
+
+    // Allocations: coalesce per expense
+    const sourceAllocs = await tx.tripExpenseAllocation.findMany({
+      where: { tripMemberId: sourceMemberId },
+    });
+    for (const alloc of sourceAllocs) {
+      const existing = await tx.tripExpenseAllocation.findFirst({
+        where: { tripExpenseId: alloc.tripExpenseId, tripMemberId: intoMemberId },
+      });
+      if (existing) {
+        await tx.tripExpenseAllocation.update({
+          where: { id: existing.id },
+          data: { amount: round2(toNum(existing.amount) + toNum(alloc.amount)) },
+        });
+        await tx.tripExpenseAllocation.delete({ where: { id: alloc.id } });
+      } else {
+        await tx.tripExpenseAllocation.update({
+          where: { id: alloc.id },
+          data: { tripMemberId: intoMemberId },
+        });
+      }
+    }
+
+    // Settlements involving source
+    const settlements = await tx.tripSettlement.findMany({
+      where: {
+        tripId,
+        OR: [{ fromMemberId: sourceMemberId }, { toMemberId: sourceMemberId }],
+      },
+    });
+    for (const s of settlements) {
+      const fromWasSource = s.fromMemberId === sourceMemberId;
+      const toWasSource = s.toMemberId === sourceMemberId;
+      const newFrom = fromWasSource ? intoMemberId : s.fromMemberId;
+      const newTo = toWasSource ? intoMemberId : s.toMemberId;
+
+      // Source ↔ target (or self after retarget) — drop the settlement
+      if (newFrom === newTo) {
+        await tx.tripSettlement.delete({ where: { id: s.id } });
+        continue;
+      }
+
+      const duplicate = await tx.tripSettlement.findFirst({
+        where: {
+          tripId,
+          fromMemberId: newFrom,
+          toMemberId: newTo,
+          NOT: { id: s.id },
+        },
+      });
+      if (duplicate) {
+        await tx.tripSettlement.update({
+          where: { id: duplicate.id },
+          data: { amount: round2(toNum(duplicate.amount) + toNum(s.amount)) },
+        });
+        await tx.tripSettlement.delete({ where: { id: s.id } });
+      } else {
+        await tx.tripSettlement.update({
+          where: { id: s.id },
+          data: { fromMemberId: newFrom, toMemberId: newTo },
+        });
+      }
+    }
+
+    // Itinerary in-charge
+    await tx.tripItineraryItem.updateMany({
+      where: { tripId, inChargeMemberId: sourceMemberId },
+      data: { inChargeMemberId: intoMemberId },
+    });
+
+    // List assignees: unique on (listItemId, memberId) — move or drop duplicates
+    const sourceAssignees = await tx.tripListItemAssignee.findMany({
+      where: { memberId: sourceMemberId },
+    });
+    for (const row of sourceAssignees) {
+      const existing = await tx.tripListItemAssignee.findFirst({
+        where: { listItemId: row.listItemId, memberId: intoMemberId },
+      });
+      if (existing) {
+        await tx.tripListItemAssignee.delete({ where: { id: row.id } });
+      } else {
+        await tx.tripListItemAssignee.update({
+          where: { id: row.id },
+          data: { memberId: intoMemberId },
+        });
+      }
+    }
+
+    await tx.tripMember.delete({ where: { id: sourceMemberId } });
+  });
+
+  return db.tripMember.findFirstOrThrow({
+    where: { id: intoMemberId, tripId },
+    select: memberSelect,
+  }).then(serializeMember);
 }
 
 export async function updateTripMember(

@@ -45,6 +45,7 @@ import {
   listTripListItemActivities,
   listTripListItems,
   listTripsForUser,
+  mergeTripMember,
   mintTripInvite,
   settleTrip,
   TripClosedError,
@@ -128,6 +129,10 @@ const memberPatchSchema = z.object({
   role: z.enum(['ORGANIZER', 'MEMBER']).optional(),
   displayName: z.string().min(1).max(100).optional(),
   tripHouseholdId: z.string().min(1).nullish(),
+});
+
+const mergeMemberSchema = z.object({
+  intoMemberId: z.string().min(1),
 });
 
 const createHouseholdSchema = z.object({
@@ -540,6 +545,18 @@ export default async function tripRoutes(app: FastifyInstance) {
       const userId = requireUserId(request.user);
       await deleteTripMember(app.prisma, tripId, userId, memberId);
       return reply.code(204).send();
+    } catch (error) {
+      return mapTripError(error, reply);
+    }
+  });
+
+  app.post('/trips/:tripId/members/:memberId/merge', { preHandler: [app.authenticate] }, async (request, reply) => {
+    const { tripId, memberId } = memberIdParams.parse(request.params);
+    const body = mergeMemberSchema.parse(request.body ?? {});
+    try {
+      const userId = requireUserId(request.user);
+      const member = await mergeTripMember(app.prisma, tripId, userId, memberId, body.intoMemberId);
+      return member;
     } catch (error) {
       return mapTripError(error, reply);
     }

@@ -32,9 +32,9 @@ export default function TripJoinPage() {
       setMode('other');
       return;
     }
-    setMode('claim');
     if (!claimMemberId || !unclaimed.some((m) => m.id === claimMemberId)) {
       setClaimMemberId(unclaimed[0]!.id);
+      setMode((prev) => (prev === 'other' ? prev : 'claim'));
     }
   }, [unclaimed, claimMemberId]);
 
@@ -121,6 +121,9 @@ export default function TripJoinPage() {
             {unclaimed.length > 0 && (
               <>
                 <p className="field-label">¿Quién sos?</p>
+                <p className="hint" style={{ marginTop: 0 }}>
+                  Si ya entraste antes y perdiste el acceso, elegí tu nombre de la lista.
+                </p>
                 <ul className="list-plain" style={{ marginBottom: 12 }}>
                   {unclaimed.map((m) => (
                     <li key={m.id} className="list-row">
@@ -140,7 +143,7 @@ export default function TripJoinPage() {
                   ))}
                   <li className="list-row">
                     <label className="row-between" style={{ width: '100%', cursor: 'pointer' }}>
-                      <span>Otro / no estoy en la lista</span>
+                      <span>Otro nombre (solo si no estás en la lista)</span>
                       <input
                         type="radio"
                         name="claim"

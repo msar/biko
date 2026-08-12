@@ -1510,6 +1510,7 @@ function PersonasTab({
   const [memberError, setMemberError] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingGroupName, setEditingGroupName] = useState('');
+  const [mergeIntoId, setMergeIntoId] = useState('');
 
   const members = [...trip.members].sort((a, b) =>
     a.displayName.localeCompare(b.displayName, 'es', { sensitivity: 'base' }),
@@ -1521,6 +1522,9 @@ function PersonasTab({
     id ? households.find((h) => h.id === id)?.name ?? null : null;
 
   const selected = selectedId ? members.find((m) => m.id === selectedId) ?? null : null;
+  const mergeTargets = selected
+    ? members.filter((m) => m.id !== selected.id)
+    : [];
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['trips', trip.id] });
@@ -1532,11 +1536,14 @@ function PersonasTab({
     setEditHouseholdId(m.tripHouseholdId ?? '');
     setEditRole(m.role);
     setMemberError(null);
+    const others = members.filter((x) => x.id !== m.id);
+    setMergeIntoId(others[0]?.id ?? '');
   };
 
   const closeMember = () => {
     setSelectedId(null);
     setMemberError(null);
+    setMergeIntoId('');
   };
 
   const addMember = useMutation({
@@ -1562,6 +1569,20 @@ function PersonasTab({
     },
     onError: (err) =>
       setMemberError(err instanceof Error ? err.message : 'No se pudo eliminar'),
+  });
+
+  const mergeMember = useMutation({
+    mutationFn: ({ memberId, intoMemberId }: { memberId: string; intoMemberId: string }) =>
+      api(`/trips/${trip.id}/members/${memberId}/merge`, {
+        method: 'POST',
+        body: JSON.stringify({ intoMemberId }),
+      }),
+    onSuccess: () => {
+      closeMember();
+      invalidate();
+    },
+    onError: (err) =>
+      setMemberError(err instanceof Error ? err.message : 'No se pudo fusionar'),
   });
 
   const patchMember = useMutation({
@@ -1916,27 +1937,75 @@ function PersonasTab({
                 </div>
               )}
               {memberError && <p className="error">{memberError}</p>}
+              {canEdit && canDeleteMember(trip, selected) && mergeTargets.length > 0 && (
+                <div className="personas-merge" style={{ marginTop: 12 }}>
+                  <p className="hint" style={{ margin: '0 0 8px' }}>
+                    Si es un duplicado (entró de nuevo sin acceso), fusioná sus gastos con la
+                    persona correcta y se elimina este asiento.
+                  </p>
+                  <label>
+                    Fusionar con
+                    <select
+                      value={mergeIntoId}
+                      onChange={(e) => setMergeIntoId(e.target.value)}
+                      disabled={mergeMember.isPending || deleteMember.isPending}
+                    >
+                      {mergeTargets.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.displayName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )}
             </div>
             <div className="md-dialog-actions personas-member-actions">
               {canEdit && canDeleteMember(trip, selected) && (
                 <Button
                   type="button"
                   variant="danger-text"
-                  disabled={deleteMember.isPending || patchMember.isPending}
+                  disabled={
+                    deleteMember.isPending || patchMember.isPending || mergeMember.isPending
+                  }
                   onClick={() => deleteMember.mutate(selected.id)}
                 >
                   {deleteMember.isPending ? 'Quitando…' : 'Quitar'}
                 </Button>
               )}
+              {canEdit && canDeleteMember(trip, selected) && mergeTargets.length > 0 && (
+                <Button
+                  type="button"
+                  variant="text"
+                  disabled={
+                    !mergeIntoId ||
+                    mergeMember.isPending ||
+                    deleteMember.isPending ||
+                    patchMember.isPending
+                  }
+                  onClick={() =>
+                    mergeMember.mutate({ memberId: selected.id, intoMemberId: mergeIntoId })
+                  }
+                >
+                  {mergeMember.isPending ? 'Fusionando…' : 'Fusionar'}
+                </Button>
+              )}
               <span className="personas-member-actions-spacer" />
-              <Button type="button" variant="text" disabled={patchMember.isPending} onClick={closeMember}>
+              <Button
+                type="button"
+                variant="text"
+                disabled={patchMember.isPending || mergeMember.isPending}
+                onClick={closeMember}
+              >
                 {canEdit ? 'Cancelar' : 'Cerrar'}
               </Button>
               {canEdit && (
                 <Button
                   type="button"
                   variant="tonal"
-                  disabled={patchMember.isPending || deleteMember.isPending}
+                  disabled={
+                    patchMember.isPending || deleteMember.isPending || mergeMember.isPending
+                  }
                   onClick={saveMember}
                 >
                   {patchMember.isPending ? 'Guardando…' : 'Guardar'}
