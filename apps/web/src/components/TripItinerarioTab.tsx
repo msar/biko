@@ -12,6 +12,8 @@ import type {
 import {
   ARRIVAL_KIND_LABEL,
   eachCalendarDay,
+  isGoogleMapsUrl,
+  isHttpUrl,
   MEAL_SLOT_LABEL,
   timeInputValue,
   todayYmdInTimeZone,
@@ -92,10 +94,33 @@ function shortDayLabel(ymd: string): string {
 function DetailLine({ label, value }: { label: string; value: string | null | undefined }) {
   if (!value) return null;
   return (
-    <p style={{ margin: '6px 0 0' }}>
+    <p style={{ margin: '6px 0 0', overflowWrap: 'anywhere' }}>
       <span className="hint">{label}</span>
       <br />
       {value}
+    </p>
+  );
+}
+
+function DetailAddress({ address }: { address: string | null | undefined }) {
+  if (!address?.trim()) return null;
+  const trimmed = address.trim();
+  const maps = isGoogleMapsUrl(trimmed);
+  return (
+    <p style={{ margin: '6px 0 0', overflowWrap: 'anywhere' }}>
+      <span className="hint">Dirección</span>
+      <br />
+      {maps ? (
+        <a href={trimmed} target="_blank" rel="noreferrer">
+          Abrir en Maps
+        </a>
+      ) : isHttpUrl(trimmed) ? (
+        <a href={trimmed} target="_blank" rel="noreferrer">
+          Abrir enlace
+        </a>
+      ) : (
+        trimmed
+      )}
     </p>
   );
 }
@@ -233,7 +258,7 @@ function ItineraryDetailDialog({
                 label="Tipo de comida"
                 value={item.mealSlot ? MEAL_SLOT_LABEL[item.mealSlot] : null}
               />
-              <DetailLine label="Dirección" value={item.address} />
+              <DetailAddress address={item.address} />
               {item.link ? (
                 <p style={{ margin: '6px 0 0' }}>
                   <span className="hint">Link</span>
@@ -251,7 +276,8 @@ function ItineraryDetailDialog({
                 label="Costo"
                 value={item.amount != null && item.amount > 0 ? fmtMoney(item.amount) : null}
               />
-              <DetailLine label="Lugar" value={item.placeName || item.address} />
+              <DetailLine label="Lugar" value={item.placeName} />
+              <DetailAddress address={item.address} />
               {item.link ? (
                 <p style={{ margin: '6px 0 0' }}>
                   <span className="hint">Link</span>
@@ -266,7 +292,7 @@ function ItineraryDetailDialog({
           {item.type === 'ARRIVAL' && (
             <>
               <DetailLine label="Lugar" value={item.placeName} />
-              <DetailLine label="Dirección" value={item.address} />
+              <DetailAddress address={item.address} />
             </>
           )}
           <DetailLine label="Notas" value={item.notes} />

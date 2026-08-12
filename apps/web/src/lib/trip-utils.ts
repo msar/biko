@@ -27,6 +27,24 @@ export function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value.trim());
 }
 
+/** True when the value is a Google Maps URL (maps.app.goo.gl, google.com/maps, …). */
+export function isGoogleMapsUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (!isHttpUrl(trimmed)) return false;
+  try {
+    const host = new URL(trimmed).hostname.toLowerCase();
+    return (
+      host === 'maps.app.goo.gl' ||
+      host === 'maps.google.com' ||
+      host === 'goo.gl' ||
+      host.endsWith('.google.com') && host.includes('maps') ||
+      (host === 'www.google.com' || host === 'google.com') && /\/maps\b/i.test(trimmed)
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Href for an accommodation address: use as-is if URL, else Google Maps search. */
 export function accommodationMapsHref(address: string): string {
   const trimmed = address.trim();
