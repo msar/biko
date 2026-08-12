@@ -172,3 +172,52 @@ const TRIP_SPLIT_MODE_LABEL: Record<string, string> = {
 export function tripExpenseSplitModeLabel(splitMode: string): string {
   return TRIP_SPLIT_MODE_LABEL[splitMode] ?? splitMode;
 }
+
+/** Normalize display names for merge suggestions (case/diacritic/space/digit-insensitive base). */
+export function normalizeMemberNameForMerge(name: string): string {
+  return name
+    .trim()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+/**
+ * Higher = better merge target for `fromName`.
+ * Prefers exact / near-duplicates (Gime ↔ Gime 2 / Gime2) over unrelated names.
+ */
+export function memberMergeNameScore(fromName: string, toName: string): number {
+  const from = fromName.trim();
+  const to = toName.trim();
+  if (!from || !to) return 0;
+  if (from.localeCompare(to, 'es', { sensitivity: 'base' }) === 0) return 100;
+
+  const na = normalizeMemberNameForMerge(from);
+  const nb = normalizeMemberNameForMerge(to);
+  if (!na || !nb) return 0;
+  if (na === nb) return 95;
+
+  const baseA = na.replace(/\d+$/, '');
+  const baseB = nb.replace(/\d+$/, '');
+  if (baseA && baseB && baseA === baseB) return 90;
+
+  if (na.startsWith(nb) || nb.startsWith(na)) return 80;
+  if (baseA && baseB && (baseA.startsWith(baseB) || baseB.startsWith(baseA))) return 75;
+  if (na.includes(nb) || nb.includes(na)) return 60;
+  return 0;
+}
+
+/** Sort merge candidates so matching / near-duplicate names come first. */
+export function rankMergeTargets<T extends { displayName: string }>(
+  sourceName: string,
+  targets: T[],
+): T[] {
+  return [...targets].sort((a, b) => {
+    const scoreDiff =
+      memberMergeNameScore(sourceName, b.displayName) -
+      memberMergeNameScore(sourceName, a.displayName);
+    if (scoreDiff !== 0) return scoreDiff;
+    return a.displayName.localeCompare(b.displayName, 'es', { sensitivity: 'base' });
+  });
+}

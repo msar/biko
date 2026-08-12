@@ -29,6 +29,7 @@ import {
   formatStayMoment,
   formatTripExpensePayers,
   isHttpUrl,
+  rankMergeTargets,
   timeInputValue,
   tripInviteUrl,
 } from '../lib/trip-utils';
@@ -1523,11 +1524,15 @@ function PersonasTab({
 
   const selected = selectedId ? members.find((m) => m.id === selectedId) ?? null : null;
   const mergeTargets = selected
-    ? members.filter((m) => m.id !== selected.id)
+    ? rankMergeTargets(
+        selected.displayName,
+        members.filter((m) => m.id !== selected.id),
+      )
     : [];
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['trips', trip.id] });
+    void queryClient.invalidateQueries({ queryKey: ['trips', trip.id, 'expenses'] });
   };
 
   const openMember = (m: TripMember) => {
@@ -1536,8 +1541,11 @@ function PersonasTab({
     setEditHouseholdId(m.tripHouseholdId ?? '');
     setEditRole(m.role);
     setMemberError(null);
-    const others = members.filter((x) => x.id !== m.id);
-    setMergeIntoId(others[0]?.id ?? '');
+    const ranked = rankMergeTargets(
+      m.displayName,
+      members.filter((x) => x.id !== m.id),
+    );
+    setMergeIntoId(ranked[0]?.id ?? '');
   };
 
   const closeMember = () => {
@@ -1940,8 +1948,8 @@ function PersonasTab({
               {canEdit && canDeleteMember(trip, selected) && mergeTargets.length > 0 && (
                 <div className="personas-merge" style={{ marginTop: 12 }}>
                   <p className="hint" style={{ margin: '0 0 8px' }}>
-                    Si es un duplicado (entró de nuevo sin acceso), fusioná sus gastos con la
-                    persona correcta y se elimina este asiento.
+                    Fusionar elimina a <strong>{selected.displayName}</strong> del viaje y pasa
+                    sus gastos y partes a la persona elegida.
                   </p>
                   <label>
                     Fusionar con
@@ -1987,7 +1995,7 @@ function PersonasTab({
                     mergeMember.mutate({ memberId: selected.id, intoMemberId: mergeIntoId })
                   }
                 >
-                  {mergeMember.isPending ? 'Fusionando…' : 'Fusionar'}
+                  {mergeMember.isPending ? 'Fusionando…' : 'Fusionar y quitar'}
                 </Button>
               )}
               <span className="personas-member-actions-spacer" />
