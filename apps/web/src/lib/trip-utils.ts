@@ -10,6 +10,17 @@ export const TRIP_CATEGORY_COLORS: Record<TripExpenseCategory, string> = {
   OTROS: '#888888',
 };
 
+/** Material Symbols names for trip expense categories. */
+export const TRIP_CATEGORY_ICONS: Record<TripExpenseCategory, string> = {
+  ALOJAMIENTO: 'hotel',
+  VUELOS: 'flight',
+  TRANSPORTE: 'directions_car',
+  COMIDA: 'shopping_cart',
+  RESTAURANTES: 'restaurant',
+  ACTIVIDADES: 'local_activity',
+  OTROS: 'payments',
+};
+
 export { TRIP_CATEGORY_LABELS };
 
 export const TRIP_STATUS_LABEL: Record<string, string> = {

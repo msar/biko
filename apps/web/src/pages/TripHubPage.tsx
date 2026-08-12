@@ -6,7 +6,7 @@ import NestedChecklist from '../components/NestedChecklist';
 import PieChart from '../components/charts/PieChart';
 import { ResumenHoyItinerary, TripItinerarioTab } from '../components/TripItinerarioTab';
 import { WeatherIcon } from '../components/WeatherIcon';
-import { Button, IconButton, Chip, ListItem } from '../components/ui';
+import { Button, Icon, IconButton, Chip, ListItem } from '../components/ui';
 import { ApiError, api, fmtDate, fmtMoney } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type {
@@ -22,6 +22,7 @@ import type {
 import type { SessionUser } from '../lib/types';
 import {
   TRIP_CATEGORY_COLORS,
+  TRIP_CATEGORY_ICONS,
   TRIP_CATEGORY_LABELS,
   TRIP_STATUS_LABEL,
   accommodationMapsHref,
@@ -881,8 +882,10 @@ function GastosTab({
         >
           <div
             className="expense-cat"
-            style={{ background: TRIP_CATEGORY_COLORS[e.category] ?? '#ddd' }}
-          />
+            style={{ background: TRIP_CATEGORY_COLORS[e.category] ?? '#ddd', color: '#fff' }}
+          >
+            <Icon name={TRIP_CATEGORY_ICONS[e.category] ?? 'payments'} size="sm" />
+          </div>
           <div className="expense-main">
             <strong>{TRIP_CATEGORY_LABELS[e.category]}</strong>
             <small>

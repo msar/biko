@@ -35,7 +35,8 @@ export type IconName =
   | 'menu_book'
   | 'login'
   | 'logout'
-  | 'directions_car';
+  | 'directions_car'
+  | 'shopping_cart';
 
 interface IconProps extends HTMLAttributes<HTMLSpanElement> {
   name: IconName | string;

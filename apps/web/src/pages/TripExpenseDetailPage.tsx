@@ -3,11 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { IconButton } from '../components/ui';
+import { Icon, IconButton } from '../components/ui';
 import { api, fmtDate, fmtMoney } from '../lib/api';
 import type { TripExpense, TripHub } from '../lib/trip-types';
 import {
   TRIP_CATEGORY_COLORS,
+  TRIP_CATEGORY_ICONS,
   accommodationMapsHref,
   isHttpUrl,
   tripExpenseSplitModeLabel,
@@ -95,7 +96,9 @@ export default function TripExpenseDetailPage() {
 
       <section className="card expense-detail-hero">
         <div className="expense-detail-hero-top">
-          <div className="expense-cat" style={{ background: catColor }} />
+          <div className="expense-cat" style={{ background: catColor, color: '#fff' }}>
+            <Icon name={TRIP_CATEGORY_ICONS[expense.category] ?? 'payments'} size="sm" />
+          </div>
           <div>
             <strong className="expense-detail-store">{TRIP_CATEGORY_LABELS[expense.category]}</strong>
             <small>{fmtDate(expense.date)}</small>
