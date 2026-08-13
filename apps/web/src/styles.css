@@ -2695,67 +2695,67 @@ label {
 }
 
 /*
- * Keep-like density: override global `label { flex-direction: column; gap; flex: 1 }`.
- * Checkboxes are excluded from the text-field `input` rule; still pin box size explicitly.
+ * Override global `label { flex-direction: column }` so checklist rows stay
+ * checkbox-left / title-right on both the hub list and the detail page.
  */
-.listas-list .listas-checklist-line {
+.listas-checklist-line {
   display: block;
   margin: 0;
   padding: 0;
   min-height: 0;
-  line-height: 1.15;
+  line-height: 1.35;
 }
 
-.listas-list .listas-checklist-line > label {
+.listas-checklist-line > label {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
-  gap: 6px;
+  gap: 10px;
   flex: 0 0 auto;
   width: auto;
   max-width: 100%;
-  min-height: 0;
+  min-height: 36px;
   height: auto;
   margin: 0;
-  padding: 0;
+  padding: 4px 0;
   cursor: pointer;
   color: var(--md-sys-color-on-surface);
   font-size: var(--md-sys-typescale-body-medium-size);
   font-weight: var(--md-sys-typescale-body-medium-weight, 400);
-  line-height: 1.15;
+  line-height: 1.35;
 }
 
-.listas-list .listas-checklist-line > label > input[type='checkbox'] {
+.listas-checklist-line > label > input[type='checkbox'] {
   box-sizing: border-box;
-  width: 14px;
-  height: 14px;
-  min-width: 14px;
-  min-height: 14px;
-  max-width: 14px;
-  max-height: 14px;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  max-width: 18px;
+  max-height: 18px;
   margin: 0;
   padding: 0;
   border: none;
   border-radius: 0;
-  flex: 0 0 14px;
+  flex: 0 0 18px;
   align-self: center;
   appearance: auto;
   background: transparent;
   accent-color: var(--md-sys-color-primary);
 }
 
-.listas-list .listas-checklist-line > label > input[type='checkbox']:focus {
+.listas-checklist-line > label > input[type='checkbox']:focus {
   outline: 2px solid var(--md-sys-color-primary);
   outline-offset: 1px;
   border: none;
   padding: 0;
 }
 
-.listas-list .listas-checklist-line > label > span {
+.listas-checklist-line > label > span {
   margin: 0;
   padding: 0;
-  line-height: 1.15;
+  line-height: 1.35;
 }
 
 .listas-checklist-line-done > span {
@@ -2956,24 +2956,15 @@ label {
   line-height: 1.45;
 }
 
-.listas-detail-checklist .listas-checklist {
-  margin-top: 4px;
+.listas-detail-card {
+  padding: 8px 16px 12px;
 }
 
-.listas-detail-checklist .listas-checklist-line > label {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
+.listas-detail-card .md-list-item {
+  cursor: default;
+  min-height: 52px;
   padding: 6px 0;
-  cursor: pointer;
-}
-
-.listas-detail-checklist .listas-checklist-line > label > input[type='checkbox'] {
-  width: 18px;
-  height: 18px;
-  margin-top: 2px;
-  flex-shrink: 0;
-  accent-color: var(--md-sys-color-primary, #1a3a5c);
+  align-items: flex-start;
 }
 
 .listas-activity-list {

@@ -3,7 +3,7 @@ import { useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NestedChecklist from '../components/NestedChecklist';
-import { IconButton } from '../components/ui';
+import { IconButton, ListItem } from '../components/ui';
 import { api, fmtDate } from '../lib/api';
 import {
   appendPackingChecklistItem,
@@ -239,54 +239,62 @@ export default function TripListItemDetailPage() {
         <span />
       </header>
 
-      <section className="card expense-detail-hero listas-detail-hero">
-        <div className="listas-detail-hero-top">
-          {!hasNestedChecklist && (
-            <input
-              type="checkbox"
-              className="listas-detail-status"
-              checked={item.status === 'DONE'}
-              disabled={closed || toggleMutation.isPending}
-              aria-label={item.status === 'DONE' ? 'Marcar pendiente' : 'Marcar hecho'}
-              onChange={() =>
-                toggleMutation.mutate(item.status === 'DONE' ? 'PENDING' : 'DONE')
-              }
-            />
-          )}
-          <div>
-            <strong
-              className={
-                item.status === 'DONE' && !hasNestedChecklist
-                  ? 'listas-detail-title listas-detail-title-done'
-                  : 'listas-detail-title'
-              }
-            >
-              {item.title}
-            </strong>
-            <small>
-              {typeLabel} · {assigneeLabel}
-            </small>
-          </div>
-        </div>
-      </section>
-
       {hasNestedChecklist && item.notes ? (
-        <section className="card listas-detail-checklist">
-          <h2>Ítems</h2>
-          <NestedChecklist
-            notes={item.notes}
-            closed={Boolean(closed)}
-            busy={checklistToggleMutation.isPending}
-            onToggleLine={toggleChecklistLine}
-            onAddItem={!closed ? addChecklistItem : undefined}
+        <section className="card listas-list listas-detail-card">
+          <ListItem
+            className="listas-item-multiline listas-item-checklist"
+            leading={<span className="listas-checklist-leading" aria-hidden />}
+            title={item.title}
+            support={
+              <NestedChecklist
+                notes={item.notes}
+                metaLabel={`${typeLabel} · ${assigneeLabel}`}
+                closed={Boolean(closed)}
+                busy={checklistToggleMutation.isPending}
+                onToggleLine={toggleChecklistLine}
+                onAddItem={!closed ? addChecklistItem : undefined}
+              />
+            }
           />
         </section>
-      ) : item.notes ? (
-        <section className="card">
-          <h2>Notas</h2>
-          <p className="listas-detail-notes">{item.notes}</p>
-        </section>
-      ) : null}
+      ) : (
+        <>
+          <section className="card expense-detail-hero listas-detail-hero">
+            <div className="listas-detail-hero-top">
+              <input
+                type="checkbox"
+                className="listas-detail-status"
+                checked={item.status === 'DONE'}
+                disabled={closed || toggleMutation.isPending}
+                aria-label={item.status === 'DONE' ? 'Marcar pendiente' : 'Marcar hecho'}
+                onChange={() =>
+                  toggleMutation.mutate(item.status === 'DONE' ? 'PENDING' : 'DONE')
+                }
+              />
+              <div>
+                <strong
+                  className={
+                    item.status === 'DONE'
+                      ? 'listas-detail-title listas-detail-title-done'
+                      : 'listas-detail-title'
+                  }
+                >
+                  {item.title}
+                </strong>
+                <small>
+                  {typeLabel} · {assigneeLabel}
+                </small>
+              </div>
+            </div>
+          </section>
+          {item.notes ? (
+            <section className="card">
+              <h2>Notas</h2>
+              <p className="listas-detail-notes">{item.notes}</p>
+            </section>
+          ) : null}
+        </>
+      )}
 
       <section className="card">
         <h2>Resumen</h2>
