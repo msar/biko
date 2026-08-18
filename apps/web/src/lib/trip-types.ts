@@ -277,6 +277,14 @@ export interface TripExportPreview {
     seedCategoryName: string;
     percent: number;
     amount: number;
+    members: Array<{
+      userId: string;
+      name: string;
+      paid: number;
+      share: number;
+    }>;
+    purchasesCount: number;
+    coveredByOthers: boolean;
   }>;
 }
 

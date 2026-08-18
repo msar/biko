@@ -669,6 +669,13 @@ body {
   margin: 4px 0;
 }
 
+.settle-confirm-members {
+  margin: 4px 0 8px;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .row-between {
   display: flex;
   justify-content: space-between;

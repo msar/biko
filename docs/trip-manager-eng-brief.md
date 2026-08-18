@@ -262,11 +262,11 @@ Spanish product copy: **Viajes / Gestor de viajes**, **Pasar a Biko**, **Liquida
 ## Pasar a Biko algorithm (sketch)
 
 1. Assert eligibility (organizer + household context + trip liquidated/closed + not already exported for that household).
-2. Compute exporter’s / household’s **net trip share** (product rule: typically the household members’ combined share of trip totals after trip settle—lock exact rule in implementation ticket; PRD: absolute amounts = that user’s / household’s net trip share).
-3. Bucket trip expenses by trip category → % of trip total.
-4. For each non-zero bucket, resolve seed category id via taxonomy map; create `Purchase`(s) scoped `HOUSEHOLD` with allocations consistent with household norms.
-5. Persist `TripExportBatch` + link ids; return summary.
-6. On retry with same batch key: no-op / return existing purchases.
+2. Slice trip expenses to **hogar members on the trip**: share = allocations, paid = payments, per trip category.
+3. Amount per category = hogar share in that category. Scale hogar payments so they sum to that share (friends’ remainder stays in trip settle).
+4. For each non-zero category, resolve seed category id via taxonomy map. Create `HOUSEHOLD` purchase(s) with `splitMode: AMOUNT` and `paidByUserId` from the scaled payers (Efectivo so the payer snapshot is honored). Multiple hogar payers in one category → one purchase per payer.
+5. Persist `TripExportBatch` + link ids; return summary (category mix includes per-member paid/share).
+6. On retry with same batch key / clientId: no-op / return existing purchases.
 
 Failure must not mutate trip status back from closed or undo settlements.
 

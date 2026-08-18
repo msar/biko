@@ -166,7 +166,7 @@ They **do** see: trip Resumen, Gastos (trip-scoped), Listas, Alojamiento, Person
 
 1. Trip members settle among themselves first (trip settlements are sufficient to close the trip).
 2. **Pasar a Biko** is optional. Shown only to eligible users (see boundaries above).
-3. Export creates household `Purchase`(s) scoped `HOUSEHOLD`, category group **Viajes**, preserving **% of total by trip category** (absolute amounts = that user’s / household’s net trip share).
+3. Export creates household `Purchase`(s) scoped `HOUSEHOLD` under the **Viajes** group. Amounts are the hogar members’ **consumed share by trip category** (not the whole trip’s mix %). **Share** (allocations) is each hogar member’s trip allocations in that category; members who were not on the trip get $0. **Paid** comes from those members’ trip payments in the category, scaled so household paid sums to household share (friends’ over/under-pay stays in trip settle). A purchase has a single payer, so two hogar payers in the same category become two purchases in that Viajes subcategory.
 4. Expand Viajes into a **Viajes group** with subcategories (see [Viajes taxonomy](#viajes-taxonomy-seed--category-groups)) so household dashboards still roll up Viajes while mix stays queryable.
 5. Export is idempotent (link exported purchases; don’t double-count). Unexported / never-exported trips remain valid forever as trip-only records.
 6. Failure or skip of export **must not** block closing the trip or undoing trip settle.
@@ -261,7 +261,11 @@ Household dashboards continue to roll up all of these under **Viajes**; drill-do
 
 ### Pasar a Biko mapping
 
-When exporting, for each trip expense category bucket, create (or aggregate into) household purchase(s) whose `categoryId` resolves to the seed name above. Absolute amounts = the exporting user’s / household’s **net trip share**, split by **% of trip total by category**.
+When exporting, for each trip expense category the **hogar actually consumed**, create household purchase(s) whose `categoryId` resolves to the seed name above.
+
+- Absolute amount per category = sum of allocations of hogar members on the trip in that category (not trip-wide % × net share).
+- Split = `AMOUNT` with each hogar user’s share (including $0 for members not on the trip).
+- Payer = the hogar member(s) who paid that category on the trip (payments scaled to the hogar share). Multiple payers → one purchase per payer, same subcategory. If nobody in the hogar paid, still record consumption with the exporter as payer.
 
 | Trip category (UI) | → Household category name | → Group |
 |--------------------|---------------------------|---------|
@@ -349,7 +353,7 @@ flowchart LR
   L[Liquidar / cerrado] --> E{¿Elegible?}
   E -->|No| X[Fin — trip-only]
   E -->|Sí| P[Pasar a Biko]
-  P --> M[Confirmar mix % por categoría]
+  P --> M[Confirmar gastó y pagó por persona]
   M --> W[Purchases HOUSEHOLD bajo Viajes]
   W --> H[Opcional: settle hogar]
 ```
@@ -357,7 +361,7 @@ flowchart LR
 **Step list**
 
 1. After **Liquidar viaje** (or from a closed trip), eligible organizer sees secondary CTA **Pasar a Biko**.
-2. Confirm preview: household share amount, category % mix → seed subcategory mapping.
+2. Confirm preview: household share, per-category amount, and each hogar member’s **pagó / gastó**.
 3. Create idempotent `HOUSEHOLD` purchases under Viajes group; link export metadata on the trip.
 4. User may later use normal household settle-up; that is independent of trip settle.
 5. Skip / failure → trip remains valid; no double-count on retry.

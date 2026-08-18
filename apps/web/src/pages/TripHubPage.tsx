@@ -293,13 +293,31 @@ export default function TripHubPage() {
             ) : (
               <div>
                 <p>
-                  Se va a registrar tu parte del hogar ({fmtMoney(exportPreview.data?.netShare ?? 0)})
-                  bajo Viajes, respetando el mix de categorías.
+                  Se va a registrar la parte del hogar ({fmtMoney(exportPreview.data?.netShare ?? 0)})
+                  bajo Viajes, con lo que cada uno pagó y gastó.
                 </p>
                 <ul className="settle-confirm-list">
                   {exportPreview.data?.categoryMix.map((c) => (
                     <li key={c.category}>
-                      {c.seedCategoryName}: {fmtMoney(c.amount)} ({c.percent}%)
+                      <strong>
+                        {c.seedCategoryName}: {fmtMoney(c.amount)}
+                      </strong>
+                      {c.percent > 0 ? ` (${c.percent}%)` : ''}
+                      {c.coveredByOthers && (
+                        <span className="hint">
+                          {' '}
+                          · nadie del hogar pagó esta categoría en el viaje (lo cubrió el grupo)
+                        </span>
+                      )}
+                      {c.members && c.members.length > 0 && (
+                        <ul className="settle-confirm-members">
+                          {c.members.map((m) => (
+                            <li key={m.userId}>
+                              {m.name}: pagó {fmtMoney(m.paid)} · gastó {fmtMoney(m.share)}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </li>
                   ))}
                 </ul>

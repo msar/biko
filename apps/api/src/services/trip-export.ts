@@ -1,17 +1,23 @@
-import { tripCategorySeedName, type TripExpenseCategory } from '@biko/shared';
+import type { TripExpenseCategory } from '@biko/shared';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { createPurchaseWithAllocations, ExpenseValidationError } from './expense-purchase.js';
+import { ensureDefaultPaymentMethods } from './household-defaults.js';
+import { requireTripOrganizer, TripForbiddenError, TripValidationError } from './trip.js';
 import {
-  computeCategoryTotals,
-  requireTripOrganizer,
-  TripForbiddenError,
-  TripValidationError,
-} from './trip.js';
+  planTripHouseholdExport,
+  type TripExportCategoryMix,
+  type TripExportPurchaseSpec,
+  type TripHouseholdExportPlan,
+} from './trip-export-plan.js';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-function round2(v: number): number {
-  return Math.round(v * 100) / 100;
+function toNum(value: unknown): number {
+  if (value == null) return 0;
+  if (typeof value === 'object' && value !== null && 'toNumber' in value) {
+    return (value as { toNumber(): number }).toNumber();
+  }
+  return Number(value);
 }
 
 export interface TripExportPreview {
@@ -21,28 +27,38 @@ export interface TripExportPreview {
   householdId: string;
   netShare: number;
   alreadyExported: boolean;
-  categoryMix: Array<{
-    category: TripExpenseCategory;
-    seedCategoryName: string;
-    percent: number;
-    amount: number;
-  }>;
+  categoryMix: TripExportCategoryMix[];
 }
 
-/**
- * Net trip share for the exporter's household members on the trip
- * = sum of allocation shares for trip members who belong to this household.
- */
-async function computeHouseholdNetShare(
+function emptyPreview(
+  tripId: string,
+  householdId: string,
+  extra: Partial<TripExportPreview>,
+): TripExportPreview {
+  return {
+    eligible: false,
+    tripId,
+    householdId,
+    netShare: 0,
+    alreadyExported: false,
+    categoryMix: [],
+    ...extra,
+  };
+}
+
+async function loadExportPlan(
   db: Db,
   tripId: string,
   householdId: string,
-): Promise<{ netShare: number; householdMemberIdsOnTrip: string[]; householdUserIds: string[] }> {
+  exporterUserId: string,
+): Promise<TripHouseholdExportPlan> {
   const householdUsers = await db.user.findMany({
     where: { householdId },
-    select: { id: true },
+    select: { id: true, name: true },
+    orderBy: { id: 'asc' },
   });
   const householdUserIds = householdUsers.map((u) => u.id);
+  const householdUserNames = new Map(householdUsers.map((u) => [u.id, u.name]));
 
   const tripMembers = await db.tripMember.findMany({
     where: {
@@ -52,31 +68,57 @@ async function computeHouseholdNetShare(
     },
     select: { id: true, userId: true },
   });
-
-  const householdMemberIdsOnTrip = tripMembers.map((m) => m.id);
-  if (householdMemberIdsOnTrip.length === 0) {
-    return { netShare: 0, householdMemberIdsOnTrip, householdUserIds };
-  }
-
-  const allocations = await db.tripExpenseAllocation.findMany({
-    where: {
-      tripMemberId: { in: householdMemberIdsOnTrip },
-      tripExpense: { tripId },
-    },
-    select: { amount: true },
-  });
-
-  const netShare = round2(
-    allocations.reduce((s, a) => {
-      const n =
-        typeof a.amount === 'object' && a.amount !== null && 'toNumber' in a.amount
-          ? (a.amount as { toNumber(): number }).toNumber()
-          : Number(a.amount);
-      return s + n;
-    }, 0),
+  const tripMemberToUserId = new Map(
+    tripMembers
+      .filter((m): m is { id: string; userId: string } => Boolean(m.userId))
+      .map((m) => [m.id, m.userId]),
   );
 
-  return { netShare, householdMemberIdsOnTrip, householdUserIds };
+  const expenses = await db.tripExpense.findMany({
+    where: { tripId },
+    select: {
+      category: true,
+      payments: { select: { tripMemberId: true, amount: true } },
+      allocations: { select: { tripMemberId: true, amount: true } },
+    },
+  });
+
+  return planTripHouseholdExport({
+    expenses: expenses.map((e) => ({
+      category: e.category as TripExpenseCategory,
+      payments: e.payments.map((p) => ({
+        tripMemberId: p.tripMemberId,
+        amount: toNum(p.amount),
+      })),
+      allocations: e.allocations.map((a) => ({
+        tripMemberId: a.tripMemberId,
+        amount: toNum(a.amount),
+      })),
+    })),
+    tripMemberToUserId,
+    householdUserIds,
+    householdUserNames,
+    exporterUserId,
+  });
+}
+
+async function resolveCashPaymentMethodId(db: Db, householdId: string): Promise<string | null> {
+  const findCash = () =>
+    db.paymentMethod.findFirst({
+      where: {
+        householdId,
+        ownerUserId: null,
+        definition: { type: 'CASH' },
+      },
+      select: { id: true },
+    });
+
+  const existing = await findCash();
+  if (existing) return existing.id;
+
+  await ensureDefaultPaymentMethods(db, householdId);
+  const created = await findCash();
+  return created?.id ?? null;
 }
 
 export async function previewTripExport(
@@ -89,15 +131,9 @@ export async function previewTripExport(
   try {
     organizer = await requireTripOrganizer(db, tripId, userId);
   } catch {
-    return {
-      eligible: false,
+    return emptyPreview(tripId, householdId, {
       reason: 'Solo el organizador puede pasar el viaje a Biko',
-      tripId,
-      householdId,
-      netShare: 0,
-      alreadyExported: false,
-      categoryMix: [],
-    };
+    });
   }
 
   const trip = organizer.trip;
@@ -105,68 +141,32 @@ export async function previewTripExport(
     where: { tripId_householdId: { tripId, householdId } },
   });
   if (existing || trip.exportHouseholdId === householdId) {
-    return {
-      eligible: false,
+    return emptyPreview(tripId, householdId, {
       reason: 'Este viaje ya fue pasado a Biko',
-      tripId,
-      householdId,
-      netShare: 0,
       alreadyExported: true,
-      categoryMix: [],
-    };
+    });
   }
 
   if (trip.status !== 'CLOSED') {
-    return {
-      eligible: false,
+    return emptyPreview(tripId, householdId, {
       reason: 'Liquidá el viaje antes de pasarlo a Biko',
-      tripId,
-      householdId,
-      netShare: 0,
-      alreadyExported: false,
-      categoryMix: [],
-    };
+    });
   }
 
-  const { netShare } = await computeHouseholdNetShare(db, tripId, householdId);
-  if (netShare <= 0) {
-    return {
-      eligible: false,
+  const plan = await loadExportPlan(db, tripId, householdId, userId);
+  if (plan.netShare <= 0) {
+    return emptyPreview(tripId, householdId, {
       reason: 'No hay parte del hogar para exportar',
-      tripId,
-      householdId,
-      netShare: 0,
-      alreadyExported: false,
-      categoryMix: [],
-    };
-  }
-
-  const totals = await computeCategoryTotals(db, tripId);
-  const categoryMix = totals.map((t) => ({
-    category: t.category as TripExpenseCategory,
-    seedCategoryName: tripCategorySeedName(t.category as TripExpenseCategory),
-    percent: t.percent,
-    amount: round2((netShare * t.percent) / 100),
-  }));
-
-  // Fix rounding drift on last bucket
-  if (categoryMix.length > 0) {
-    const sum = round2(categoryMix.reduce((s, c) => s + c.amount, 0));
-    const drift = round2(netShare - sum);
-    if (Math.abs(drift) >= 0.01) {
-      categoryMix[categoryMix.length - 1]!.amount = round2(
-        categoryMix[categoryMix.length - 1]!.amount + drift,
-      );
-    }
+    });
   }
 
   return {
     eligible: true,
     tripId,
     householdId,
-    netShare,
+    netShare: plan.netShare,
     alreadyExported: false,
-    categoryMix: categoryMix.filter((c) => c.amount > 0),
+    categoryMix: plan.categoryMix,
   };
 }
 
@@ -192,15 +192,13 @@ export async function exportTripToHousehold(
   }
 
   const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId } });
-  const paymentMethod = await prisma.paymentMethod.findFirst({
-    where: { householdId, OR: [{ ownerUserId: userId }, { ownerUserId: null }] },
-    orderBy: { id: 'asc' },
-  });
-  if (!paymentMethod) {
+  const paymentMethodId = await resolveCashPaymentMethodId(prisma, householdId);
+  if (!paymentMethodId) {
     throw new TripValidationError('No hay medio de pago en el hogar para registrar el gasto');
   }
 
-  const seedNames = [...new Set(preview.categoryMix.map((c) => c.seedCategoryName))];
+  const plan = await loadExportPlan(prisma, tripId, householdId, userId);
+  const seedNames = [...new Set(plan.purchases.map((p) => p.seedCategoryName))];
   const categories = await prisma.category.findMany({
     where: { householdId: null, name: { in: seedNames } },
   });
@@ -211,87 +209,94 @@ export async function exportTripToHousehold(
     }
   }
 
-  const householdUsers = await prisma.user.findMany({
-    where: { householdId },
-    select: { id: true },
-    orderBy: { id: 'asc' },
-  });
-  const memberIds = householdUsers.map((u) => u.id);
-
-  const purchaseIds: string[] = [];
   const purchaseDate = trip.endDate ?? trip.startDate ?? new Date();
   const storeLabel = trip.destination
     ? `Viaje: ${trip.name} (${trip.destination})`
     : `Viaje: ${trip.name}`;
 
-  await prisma.$transaction(async (tx) => {
-    for (const bucket of preview.categoryMix) {
-      if (bucket.amount <= 0) continue;
-      const categoryId = categoryByName.get(bucket.seedCategoryName)!;
-      const clientId = `trip-export:${tripId}:${householdId}:${bucket.category}`;
+  await prisma
+    .$transaction(async (tx) => {
+      const purchaseIds: string[] = [];
+      for (const spec of plan.purchases) {
+        if (spec.amount <= 0) continue;
+        const categoryId = categoryByName.get(spec.seedCategoryName)!;
+        const clientId = purchaseClientId(tripId, householdId, spec);
 
-      const existing = await tx.purchase.findUnique({ where: { clientId } });
-      if (existing) {
-        purchaseIds.push(existing.id);
-        continue;
+        const existing = await tx.purchase.findUnique({ where: { clientId } });
+        if (existing) {
+          purchaseIds.push(existing.id);
+          continue;
+        }
+
+        const purchase = await createPurchaseWithAllocations(
+          tx as Prisma.TransactionClient,
+          householdId,
+          userId,
+          {
+            paymentMethodId,
+            categoryId,
+            store: storeLabel,
+            description: purchaseDescription(spec),
+            purchaseDate,
+            grossAmount: spec.amount,
+            installmentsCount: 1,
+            promotionMode: 'off',
+            scope: 'HOUSEHOLD',
+            splitMode: 'AMOUNT',
+            splitValues: spec.splitValues,
+            currency: 'ARS',
+            paidByUserId: spec.paidByUserId,
+          },
+          clientId,
+        );
+        purchaseIds.push(purchase.id);
       }
 
-      const purchase = await createPurchaseWithAllocations(
-        tx as Prisma.TransactionClient,
-        householdId,
-        userId,
-        {
-          paymentMethodId: paymentMethod.id,
-          categoryId,
-          store: storeLabel,
-          description: `Pasar a Biko · ${bucket.seedCategoryName}`,
-          purchaseDate,
-          grossAmount: bucket.amount,
-          installmentsCount: 1,
-          promotionMode: 'off',
-          scope: 'HOUSEHOLD',
-          splitMode: 'EQUAL',
-          currency: 'ARS',
-          paidByUserId: userId,
+      const batch = await tx.tripExportBatch.create({
+        data: {
+          tripId,
+          householdId,
+          exportedByUserId: userId,
+          purchaseIds,
         },
-        clientId,
-      );
-      purchaseIds.push(purchase.id);
-    }
+      });
 
-    // Ensure EQUAL allocations across household even if create used them —
-    // createPurchaseWithAllocations already splits by household members.
-    void memberIds;
+      await tx.trip.update({
+        where: { id: tripId },
+        data: {
+          exportHouseholdId: householdId,
+          exportBatchId: batch.id,
+          exportedAt: new Date(),
+        },
+      });
 
-    const batch = await tx.tripExportBatch.create({
-      data: {
-        tripId,
-        householdId,
-        exportedByUserId: userId,
-        purchaseIds,
-      },
+      return batch;
+    })
+    .catch((error) => {
+      if (error instanceof ExpenseValidationError) {
+        throw new TripValidationError(error.message);
+      }
+      throw error;
     });
-
-    await tx.trip.update({
-      where: { id: tripId },
-      data: {
-        exportHouseholdId: householdId,
-        exportBatchId: batch.id,
-        exportedAt: new Date(),
-      },
-    });
-
-    return batch;
-  }).catch((error) => {
-    if (error instanceof ExpenseValidationError) {
-      throw new TripValidationError(error.message);
-    }
-    throw error;
-  });
 
   const batch = await prisma.tripExportBatch.findUniqueOrThrow({
     where: { tripId_householdId: { tripId, householdId } },
   });
 
   return { batch, purchaseIds: batch.purchaseIds, preview };
+}
+
+function purchaseClientId(
+  tripId: string,
+  householdId: string,
+  spec: TripExportPurchaseSpec,
+): string {
+  return `trip-export:${tripId}:${householdId}:${spec.category}:${spec.paidByUserId}:${spec.index}`;
+}
+
+function purchaseDescription(spec: TripExportPurchaseSpec): string {
+  if (spec.coveredByOthers) {
+    return `Pasar a Biko · ${spec.seedCategoryName} (lo pagó el grupo)`;
+  }
+  return `Pasar a Biko · ${spec.seedCategoryName}`;
 }
