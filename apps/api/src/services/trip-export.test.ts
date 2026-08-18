@@ -230,4 +230,37 @@ describe('planTripHouseholdExport', () => {
     expect(plan.purchases[0]!.paidByUserId).toBe(bob);
     expect(plan.purchases[0]!.amount).toBe(90);
   });
+
+  it('keeps split values non-negative and summing to each purchase amount', () => {
+    const plan = planTripHouseholdExport({
+      exporterUserId: ana,
+      householdUserIds: [ana, bob, cara],
+      householdUserNames: names(),
+      tripMemberToUserId: new Map([
+        ['m-ana', ana],
+        ['m-bob', bob],
+      ]),
+      expenses: [
+        {
+          category: 'COMIDA',
+          payments: [
+            { tripMemberId: 'm-ana', amount: 70.01 },
+            { tripMemberId: 'm-bob', amount: 29.99 },
+          ],
+          allocations: [
+            { tripMemberId: 'm-ana', amount: 40.33 },
+            { tripMemberId: 'm-bob', amount: 59.67 },
+          ],
+        },
+      ],
+    });
+
+    expect(plan.purchases.length).toBeGreaterThan(0);
+    for (const p of plan.purchases) {
+      const sum = p.splitValues.reduce((s, v) => s + v.value, 0);
+      expect(Math.abs(sum - p.amount)).toBeLessThan(0.015);
+      for (const v of p.splitValues) expect(v.value).toBeGreaterThanOrEqual(0);
+      expect(p.splitValues.map((s) => s.userId).sort()).toEqual([ana, bob, cara].sort());
+    }
+  });
 });

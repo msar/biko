@@ -71,6 +71,8 @@ export interface ExpenseInput {
   exchangeRateDate?: Date | null;
   /** Who paid — only used when the payment method has no owner. */
   paidByUserId?: string | null;
+  /** Skip partner push/in-app notify (e.g. bulk trip export). */
+  skipPartnerNotify?: boolean;
 }
 
 interface ResolvedDiscount {
@@ -412,15 +414,17 @@ export async function createPurchaseWithAllocations(
     await ensureFavoriteForPromotionId(tx, householdId, discount.promotionId);
   }
 
-  await notifyExpensePartners(tx, {
-    householdId,
-    actorUserId: userId,
-    kind: 'CREATED',
-    scopes: [created.scope],
-    purchaseId: created.id,
-    store: created.store,
-    description: created.description,
-  });
+  if (!body.skipPartnerNotify) {
+    await notifyExpensePartners(tx, {
+      householdId,
+      actorUserId: userId,
+      kind: 'CREATED',
+      scopes: [created.scope],
+      purchaseId: created.id,
+      store: created.store,
+      description: created.description,
+    });
+  }
 
   return created;
 }

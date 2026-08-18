@@ -60,8 +60,9 @@ function sumMap(values: Map<string, number>): number {
   return round2([...values.values()].reduce((s, v) => s + v, 0));
 }
 
-function splitFrom(householdUserIds: string[], alloc: Map<string, number>) {
-  return householdUserIds.map((userId) => ({ userId, value: alloc.get(userId) ?? 0 }));
+function splitFrom(householdUserIds: string[], alloc: Map<string, number>, amount: number) {
+  const normalized = normalizeAllocToAmount(householdUserIds, alloc, amount);
+  return householdUserIds.map((userId) => ({ userId, value: normalized.get(userId) ?? 0 }));
 }
 
 function addAmount(map: Map<string, number>, userId: string, amount: number) {
@@ -129,7 +130,7 @@ function allocatePurchaseAmount(
     alloc.set(id, value);
     allocatedPartners = round2(allocatedPartners + value);
   }
-  return alloc;
+  return normalizeAllocToAmount(householdUserIds, alloc, amount);
 }
 
 function subtractAlloc(remaining: Map<string, number>, alloc: Map<string, number>) {
@@ -144,18 +145,39 @@ function remainingAsAlloc(
   amount: number,
 ): Map<string, number> {
   const alloc = emptyAmounts(householdUserIds);
-  let allocated = 0;
-  for (let i = 0; i < householdUserIds.length; i++) {
-    const id = householdUserIds[i]!;
-    if (i === householdUserIds.length - 1) {
-      alloc.set(id, round2(amount - allocated));
-    } else {
-      const value = round2(Math.max(0, remainingShare.get(id) ?? 0));
-      alloc.set(id, value);
-      allocated = round2(allocated + value);
+  for (const id of householdUserIds) {
+    alloc.set(id, Math.max(0, round2(remainingShare.get(id) ?? 0)));
+  }
+  return normalizeAllocToAmount(householdUserIds, alloc, amount);
+}
+
+function normalizeAllocToAmount(
+  householdUserIds: string[],
+  alloc: Map<string, number>,
+  amount: number,
+): Map<string, number> {
+  const next = emptyAmounts(householdUserIds);
+  for (const id of householdUserIds) {
+    next.set(id, Math.max(0, round2(alloc.get(id) ?? 0)));
+  }
+  const drift = round2(amount - sumMap(next));
+  if (Math.abs(drift) < 0.005) return next;
+
+  const ordered = [...householdUserIds].sort(
+    (a, b) => (next.get(b) ?? 0) - (next.get(a) ?? 0) || a.localeCompare(b),
+  );
+  for (const id of ordered) {
+    const adjusted = round2((next.get(id) ?? 0) + drift);
+    if (adjusted >= 0) {
+      next.set(id, adjusted);
+      return next;
     }
   }
-  return alloc;
+  if (householdUserIds[0]) {
+    next.set(householdUserIds[0], amount);
+    for (let i = 1; i < householdUserIds.length; i++) next.set(householdUserIds[i]!, 0);
+  }
+  return next;
 }
 
 function purchasesForCategory(
@@ -178,7 +200,7 @@ function purchasesForCategory(
           seedCategoryName,
           amount: shareTotal,
           paidByUserId: exporterUserId,
-          splitValues: splitFrom(householdUserIds, shareByUser),
+          splitValues: splitFrom(householdUserIds, shareByUser, shareTotal),
           index: 0,
           coveredByOthers: true,
         },
@@ -203,7 +225,7 @@ function purchasesForCategory(
           seedCategoryName,
           amount: shareTotal,
           paidByUserId: payers[0]!,
-          splitValues: splitFrom(householdUserIds, shareByUser),
+          splitValues: splitFrom(householdUserIds, shareByUser, shareTotal),
           index: 0,
           coveredByOthers: false,
         },
@@ -225,7 +247,7 @@ function purchasesForCategory(
       seedCategoryName,
       amount,
       paidByUserId: payerId,
-      splitValues: splitFrom(householdUserIds, alloc),
+      splitValues: splitFrom(householdUserIds, alloc, amount),
       index: pIndex,
       coveredByOthers: false,
     });

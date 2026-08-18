@@ -214,76 +214,97 @@ export async function exportTripToHousehold(
     ? `Viaje: ${trip.name} (${trip.destination})`
     : `Viaje: ${trip.name}`;
 
-  await prisma
-    .$transaction(async (tx) => {
-      const purchaseIds: string[] = [];
-      for (const spec of plan.purchases) {
-        if (spec.amount <= 0) continue;
-        const categoryId = categoryByName.get(spec.seedCategoryName)!;
-        const clientId = purchaseClientId(tripId, householdId, spec);
+  const purchaseIds: string[] = [];
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        for (const spec of plan.purchases) {
+          if (spec.amount <= 0) continue;
+          const categoryId = categoryByName.get(spec.seedCategoryName)!;
+          const clientId = purchaseClientId(tripId, householdId, spec);
 
-        const existing = await tx.purchase.findUnique({ where: { clientId } });
-        if (existing) {
-          purchaseIds.push(existing.id);
-          continue;
+          const existing = await tx.purchase.findUnique({ where: { clientId } });
+          if (existing) {
+            purchaseIds.push(existing.id);
+            continue;
+          }
+
+          const purchase = await createPurchaseWithAllocations(
+            tx as Prisma.TransactionClient,
+            householdId,
+            userId,
+            {
+              paymentMethodId,
+              categoryId,
+              store: storeLabel,
+              description: purchaseDescription(spec),
+              purchaseDate,
+              grossAmount: spec.amount,
+              installmentsCount: 1,
+              promotionMode: 'off',
+              scope: 'HOUSEHOLD',
+              splitMode: 'AMOUNT',
+              splitValues: spec.splitValues,
+              skipPartnerNotify: true,
+              currency: 'ARS',
+              paidByUserId: spec.paidByUserId,
+            },
+            clientId,
+          );
+          purchaseIds.push(purchase.id);
         }
 
-        const purchase = await createPurchaseWithAllocations(
-          tx as Prisma.TransactionClient,
-          householdId,
-          userId,
-          {
-            paymentMethodId,
-            categoryId,
-            store: storeLabel,
-            description: purchaseDescription(spec),
-            purchaseDate,
-            grossAmount: spec.amount,
-            installmentsCount: 1,
-            promotionMode: 'off',
-            scope: 'HOUSEHOLD',
-            splitMode: 'AMOUNT',
-            splitValues: spec.splitValues,
-            currency: 'ARS',
-            paidByUserId: spec.paidByUserId,
+        const batch = await tx.tripExportBatch.create({
+          data: {
+            tripId,
+            householdId,
+            exportedByUserId: userId,
+            purchaseIds,
           },
-          clientId,
-        );
-        purchaseIds.push(purchase.id);
-      }
+        });
 
-      const batch = await tx.tripExportBatch.create({
-        data: {
-          tripId,
-          householdId,
-          exportedByUserId: userId,
-          purchaseIds,
-        },
-      });
+        await tx.trip.update({
+          where: { id: tripId },
+          data: {
+            exportHouseholdId: householdId,
+            exportBatchId: batch.id,
+            exportedAt: new Date(),
+          },
+        });
 
-      await tx.trip.update({
-        where: { id: tripId },
-        data: {
-          exportHouseholdId: householdId,
-          exportBatchId: batch.id,
-          exportedAt: new Date(),
-        },
-      });
-
-      return batch;
-    })
-    .catch((error) => {
-      if (error instanceof ExpenseValidationError) {
-        throw new TripValidationError(error.message);
-      }
-      throw error;
-    });
+        return batch;
+      },
+      { timeout: 20_000 },
+    );
+  } catch (error) {
+    throw wrapExportError(error);
+  }
 
   const batch = await prisma.tripExportBatch.findUniqueOrThrow({
     where: { tripId_householdId: { tripId, householdId } },
   });
 
   return { batch, purchaseIds: batch.purchaseIds, preview };
+}
+
+function wrapExportError(error: unknown): Error {
+  const nested =
+    error instanceof Error && error.cause instanceof Error ? error.cause : error;
+  if (nested instanceof ExpenseValidationError) {
+    return new TripValidationError(nested.message);
+  }
+  if (error instanceof ExpenseValidationError) {
+    return new TripValidationError(error.message);
+  }
+  const message = error instanceof Error ? error.message : '';
+  if (message.includes('La suma de montos') || message.includes('montos no pueden')) {
+    return new TripValidationError(message);
+  }
+  if (typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'P2028') {
+    return new TripValidationError('La exportación tardó demasiado. Probá de nuevo.');
+  }
+  if (error instanceof Error) return error;
+  return new Error('No se pudo pasar el viaje a Biko');
 }
 
 function purchaseClientId(

@@ -219,7 +219,14 @@ export default function TripHubPage() {
           trip={trip}
           closed={closed}
           onSettle={() => setSettleOpen(true)}
-          onExport={guest ? undefined : () => setExportOpen(true)}
+          onExport={
+            guest
+              ? undefined
+              : () => {
+                  exportMutation.reset();
+                  setExportOpen(true);
+                }
+          }
           onOpenAlojamiento={() => changeTab('alojamiento')}
           onOpenItinerario={() => changeTab('itinerario')}
         />
@@ -321,6 +328,13 @@ export default function TripHubPage() {
                     </li>
                   ))}
                 </ul>
+                {exportMutation.isError && (
+                  <p className="error">
+                    {exportMutation.error instanceof Error
+                      ? exportMutation.error.message
+                      : 'No se pudo pasar el viaje a Biko'}
+                  </p>
+                )}
               </div>
             )
           }
