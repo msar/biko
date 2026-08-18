@@ -3364,6 +3364,23 @@ code {
   border-bottom: none;
 }
 
+.trip-spend-unit-toggle {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.trip-spend-unit-toggle .group-chevron {
+  margin-right: 4px;
+}
+
 .trip-spend-figures {
   margin: 2px 0 0;
   font-size: var(--text-xs);

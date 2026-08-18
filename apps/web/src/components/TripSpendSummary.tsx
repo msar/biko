@@ -183,6 +183,32 @@ function TripBalancesCard({ trip }: { trip: TripHub }) {
   );
   const memberOwes = useMemo(() => tripMemberOwes(perMember), [perMember]);
   const hasHouseholds = perUnit.some((u) => u.kind === 'HOUSEHOLD');
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const [oweView, setOweView] = useState<'group' | 'person'>('group');
+
+  const toggleUnit = (unitId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(unitId)) next.delete(unitId);
+      else next.add(unitId);
+      return next;
+    });
+  };
+
+  const oweRows =
+    hasHouseholds && oweView === 'group'
+      ? trip.balance.transfers.map((t) => ({
+          key: `${t.fromUnitId}-${t.toUnitId}`,
+          fromName: t.fromName,
+          toName: t.toName,
+          amount: t.amount,
+        }))
+      : memberOwes.map((t) => ({
+          key: `${t.fromMemberId}-${t.toMemberId}`,
+          fromName: t.fromName,
+          toName: t.toName,
+          amount: t.amount,
+        }));
 
   return (
     <section className="card">
@@ -202,10 +228,17 @@ function TripBalancesCard({ trip }: { trip: TripHub }) {
                       a.displayName.localeCompare(b.displayName, 'es', { sensitivity: 'base' }),
                     )
                 : [];
-            return (
-              <li key={u.unitId} className="trip-spend-unit">
+            const collapsible = householdMembers.length > 0;
+            const open = expandedIds.has(u.unitId);
+            const header = (
+              <>
                 <div className="row-between">
                   <span>
+                    {collapsible && (
+                      <span className="group-chevron" aria-hidden>
+                        {open ? '▾' : '▸'}
+                      </span>
+                    )}
                     {u.displayName}
                     {u.kind === 'HOUSEHOLD' && <span className="hint"> · grupo</span>}
                   </span>
@@ -217,59 +250,79 @@ function TripBalancesCard({ trip }: { trip: TripHub }) {
                 <p className="trip-spend-figures">
                   Gastado {fmtMoney(u.share)} · Pagó {fmtMoney(u.paid)}
                 </p>
-                {householdMembers.map((m) => (
-                  <div key={m.memberId} className="trip-spend-member">
-                    <div className="row-between">
-                      <span>{m.displayName}</span>
-                      <span className={m.balance >= 0 ? 'balance-pos' : 'balance-neg'}>
-                        {m.balance >= 0 ? '+' : ''}
-                        {fmtMoney(m.balance)}
-                      </span>
+              </>
+            );
+            return (
+              <li key={u.unitId} className="trip-spend-unit">
+                {collapsible ? (
+                  <button
+                    type="button"
+                    className="trip-spend-unit-toggle"
+                    aria-expanded={open}
+                    onClick={() => toggleUnit(u.unitId)}
+                  >
+                    {header}
+                  </button>
+                ) : (
+                  header
+                )}
+                {collapsible &&
+                  open &&
+                  householdMembers.map((m) => (
+                    <div key={m.memberId} className="trip-spend-member">
+                      <div className="row-between">
+                        <span>{m.displayName}</span>
+                        <span className={m.balance >= 0 ? 'balance-pos' : 'balance-neg'}>
+                          {m.balance >= 0 ? '+' : ''}
+                          {fmtMoney(m.balance)}
+                        </span>
+                      </div>
+                      <p className="trip-spend-figures">
+                        Gastó {fmtMoney(m.share)} · Pagó {fmtMoney(m.paid)}
+                      </p>
                     </div>
-                    <p className="trip-spend-figures">
-                      Gastó {fmtMoney(m.share)} · Pagó {fmtMoney(m.paid)}
-                    </p>
-                  </div>
-                ))}
+                  ))}
               </li>
             );
           })}
         </ul>
       )}
 
-      {memberOwes.length > 0 && (
+      {(hasHouseholds || memberOwes.length > 0 || trip.balance.transfers.length > 0) && (
         <div className="settle-transfers">
           <p className="field-label">Quién le debe a quién</p>
-          {memberOwes.map((t) => (
-            <div key={`${t.fromMemberId}-${t.toMemberId}`} className="settle-transfer">
-              <span>
-                <strong>{t.fromName}</strong> le debe a <strong>{t.toName}</strong>
-                {' · '}
-                <strong>{fmtMoney(t.amount)}</strong>
-              </span>
-            </div>
-          ))}
+          {hasHouseholds && (
+            <SegmentedButton
+              options={[
+                { id: 'group', label: 'Grupo' },
+                { id: 'person', label: 'Persona' },
+              ]}
+              value={oweView}
+              onChange={setOweView}
+              label="Ver deudas por"
+              className="trip-spend-toggle"
+            />
+          )}
+          {oweRows.length === 0 ? (
+            <p className="settle-even">Están a mano</p>
+          ) : (
+            oweRows.map((t) => (
+              <div key={t.key} className="settle-transfer">
+                <span>
+                  <strong>{t.fromName}</strong> le debe a <strong>{t.toName}</strong>
+                  {' · '}
+                  <strong>{fmtMoney(t.amount)}</strong>
+                </span>
+              </div>
+            ))
+          )}
         </div>
       )}
 
-      {hasHouseholds && trip.balance.transfers.length > 0 && (
-        <div className="settle-transfers">
-          <p className="field-label">Entre grupos (para liquidar)</p>
-          {trip.balance.transfers.map((t) => (
-            <div key={`${t.fromUnitId}-${t.toUnitId}`} className="settle-transfer">
-              <span>
-                <strong>{t.fromName}</strong> → {t.toName}
-                {' · '}
-                <strong>{fmtMoney(t.amount)}</strong>
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {memberOwes.length === 0 && trip.balance.transfers.length === 0 && trip.totalSpent > 0 && (
-        <p className="settle-even">Están a mano</p>
-      )}
+      {!hasHouseholds &&
+        memberOwes.length === 0 &&
+        trip.balance.transfers.length === 0 &&
+        trip.totalSpent > 0 && <p className="settle-even">Están a mano</p>}
     </section>
   );
 }
