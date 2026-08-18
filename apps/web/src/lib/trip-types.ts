@@ -110,6 +110,14 @@ export interface TripCategoryTotal {
   percent: number;
 }
 
+export interface TripCategorySpendByParty {
+  id: string;
+  kind: 'MEMBER' | 'HOUSEHOLD';
+  displayName: string;
+  total: number;
+  categories: TripCategoryTotal[];
+}
+
 export interface TripHub {
   id: string;
   createdByUserId: string;
@@ -143,6 +151,8 @@ export interface TripHub {
     settlements: TripSettlement[];
   };
   categoryTotals: TripCategoryTotal[];
+  categoryTotalsByMember: TripCategorySpendByParty[];
+  categoryTotalsByUnit: TripCategorySpendByParty[];
   totalSpent: number;
 }
 

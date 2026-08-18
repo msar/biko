@@ -1,4 +1,4 @@
-import { TRIP_CATEGORY_LABELS, type TripExpenseCategory } from '@biko/shared';
+import { computeSettleTransfers, TRIP_CATEGORY_LABELS, type TripExpenseCategory } from '@biko/shared';
 
 export const TRIP_CATEGORY_COLORS: Record<TripExpenseCategory, string> = {
   ALOJAMIENTO: '#4a7fb5',
@@ -231,4 +231,28 @@ export function rankMergeTargets<T extends { displayName: string }>(
     if (scoreDiff !== 0) return scoreDiff;
     return a.displayName.localeCompare(b.displayName, 'es', { sensitivity: 'base' });
   });
+}
+
+export interface TripMemberOweTransfer {
+  fromMemberId: string;
+  fromName: string;
+  toMemberId: string;
+  toName: string;
+  amount: number;
+}
+
+/** Minimal transfers so each member settles their paid vs share. */
+export function tripMemberOwes(
+  perMember: Array<{ memberId: string; displayName: string; balance: number }>,
+): TripMemberOweTransfer[] {
+  const names = new Map(perMember.map((m) => [m.memberId, m.displayName]));
+  return computeSettleTransfers(
+    perMember.map((m) => ({ userId: m.memberId, balance: m.balance })),
+  ).map((t) => ({
+    fromMemberId: t.fromUserId,
+    fromName: names.get(t.fromUserId) ?? t.fromUserId,
+    toMemberId: t.toUserId,
+    toName: names.get(t.toUserId) ?? t.toUserId,
+    amount: t.amount,
+  }));
 }

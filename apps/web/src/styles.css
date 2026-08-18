@@ -1835,6 +1835,13 @@ label {
   width: 100%;
 }
 
+.chart-legend-item.chart-legend-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+}
+
 .chart-legend-toggle:hover,
 .chart-legend-toggle.selected {
   background: rgba(30, 48, 94, 0.06);
@@ -3327,5 +3334,38 @@ code {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.trip-spend-toggle {
+  margin: 8px 0 12px;
+}
+
+.trip-spend-picker {
+  margin: 0 0 8px;
+}
+
+.trip-spend-scope-hint {
+  margin: 0 0 8px;
+}
+
+.trip-spend-unit {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.trip-spend-unit:last-child {
+  border-bottom: none;
+}
+
+.trip-spend-figures {
+  margin: 2px 0 0;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.trip-spend-member {
+  margin: 8px 0 0;
+  padding: 6px 0 0 12px;
+  border-left: 2px solid var(--border);
 }
 

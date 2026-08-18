@@ -3,8 +3,8 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NestedChecklist from '../components/NestedChecklist';
-import PieChart from '../components/charts/PieChart';
 import { ResumenHoyItinerary, TripItinerarioTab } from '../components/TripItinerarioTab';
+import TripSpendSummary from '../components/TripSpendSummary';
 import { WeatherIcon } from '../components/WeatherIcon';
 import { Button, Icon, IconButton, Chip, ListItem } from '../components/ui';
 import { ApiError, api, fmtDate, fmtMoney } from '../lib/api';
@@ -679,17 +679,6 @@ function ResumenTab({
   onOpenAlojamiento: () => void;
   onOpenItinerario: () => void;
 }) {
-  const slices = useMemo(
-    () =>
-      trip.categoryTotals.map((c) => ({
-        id: c.category,
-        name: TRIP_CATEGORY_LABELS[c.category],
-        color: TRIP_CATEGORY_COLORS[c.category],
-        value: c.total,
-      })),
-    [trip.categoryTotals],
-  );
-
   const acc = trip.accommodation;
   const checkInLabel = acc ? formatStayMoment(acc.checkIn, acc.checkInTime, fmtDate) : null;
   const checkOutLabel = acc ? formatStayMoment(acc.checkOut, acc.checkOutTime, fmtDate) : null;
@@ -757,65 +746,7 @@ function ResumenTab({
         )}
       </section>
 
-      {slices.length > 0 && (
-        <section className="card">
-          <h2>Por categoría</h2>
-          <div className="pie-chart-wrap">
-            <PieChart slices={slices} formatValue={fmtMoney} />
-          </div>
-          <div className="chart-legend">
-            {slices.map((s) => (
-              <div key={s.id} className="chart-legend-item">
-                <span className="chart-legend-dot" style={{ background: s.color }} />
-                {s.name}
-                <span className="chart-legend-amount">{fmtMoney(s.value)}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section className="card">
-        <h2>Balances</h2>
-        <p className="hint">Por grupo del viaje o viajero suelto</p>
-        {(trip.balance.perUnit?.length ?? 0) === 0 ? (
-          <p className="empty-state">Todavía no hay gastos</p>
-        ) : (
-          <ul className="list-plain">
-            {trip.balance.perUnit.map((u) => (
-              <li key={u.unitId} className="row-between list-row">
-                <span>
-                  {u.displayName}
-                  {u.kind === 'HOUSEHOLD' && <span className="hint"> · grupo</span>}
-                </span>
-                <span className={u.balance >= 0 ? 'balance-pos' : 'balance-neg'}>
-                  {u.balance >= 0 ? '+' : ''}
-                  {fmtMoney(u.balance)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {trip.balance.transfers.length > 0 && (
-          <div className="settle-transfers" style={{ marginTop: 12 }}>
-            <p className="field-label">Quién le paga a quién</p>
-            {trip.balance.transfers.map((t) => (
-              <div key={`${t.fromUnitId}-${t.toUnitId}`} className="settle-transfer">
-                <span>
-                  <strong>{t.fromName}</strong> → {t.toName}
-                  {' · '}
-                  <strong>{fmtMoney(t.amount)}</strong>
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {trip.balance.transfers.length === 0 && trip.totalSpent > 0 && (
-          <p className="settle-even">Están a mano</p>
-        )}
-      </section>
+      <TripSpendSummary trip={trip} />
 
       {!closed && (
         <button type="button" className="btn-primary" onClick={onSettle}>

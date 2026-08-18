@@ -3,6 +3,7 @@ import {
   memberMergeNameScore,
   normalizeMemberNameForMerge,
   rankMergeTargets,
+  tripMemberOwes,
 } from './trip-utils';
 
 describe('merge name ranking', () => {
@@ -29,5 +30,28 @@ describe('merge name ranking', () => {
       { id: '4', displayName: 'Gime 3' },
     ]);
     expect(ranked.map((m) => m.displayName)).toEqual(['Gime', 'Gime 3', 'Brasil', 'Marian']);
+  });
+});
+
+describe('tripMemberOwes', () => {
+  it('nets who owes whom from paid vs share', () => {
+    const transfers = tripMemberOwes([
+      { memberId: 'ana', displayName: 'Ana', balance: 30 },
+      { memberId: 'bob', displayName: 'Bob', balance: -10 },
+      { memberId: 'carlos', displayName: 'Carlos', balance: -20 },
+    ]);
+    expect(transfers).toEqual([
+      { fromMemberId: 'carlos', fromName: 'Carlos', toMemberId: 'ana', toName: 'Ana', amount: 20 },
+      { fromMemberId: 'bob', fromName: 'Bob', toMemberId: 'ana', toName: 'Ana', amount: 10 },
+    ]);
+  });
+
+  it('returns empty when everyone is even', () => {
+    expect(
+      tripMemberOwes([
+        { memberId: 'ana', displayName: 'Ana', balance: 0 },
+        { memberId: 'bob', displayName: 'Bob', balance: 0 },
+      ]),
+    ).toEqual([]);
   });
 });

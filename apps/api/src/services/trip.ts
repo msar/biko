@@ -321,8 +321,11 @@ export async function getTripHub(
     );
   }
 
-  const balance = await computeTripBalance(db, tripId);
-  const categoryTotals = await computeCategoryTotals(db, tripId);
+  const [balance, spend] = await Promise.all([
+    computeTripBalance(db, tripId),
+    computeCategorySpendBreakdown(db, tripId),
+  ]);
+  const categoryTotals = spend.totals;
   const totalSpent = round2(categoryTotals.reduce((s, c) => s + c.total, 0));
 
   const isOrganizer = me.role === 'ORGANIZER';
@@ -350,6 +353,8 @@ export async function getTripHub(
       settlements: balance.settlements,
     },
     categoryTotals,
+    categoryTotalsByMember: spend.byMember,
+    categoryTotalsByUnit: spend.byUnit,
     totalSpent,
   };
 }
@@ -1823,23 +1828,184 @@ export async function computeTripBalance(db: Db, tripId: string): Promise<TripBa
   return { perMember, perUnit, transfers, settlements };
 }
 
-export async function computeCategoryTotals(db: Db, tripId: string) {
-  const expenses = await db.tripExpense.findMany({
-    where: { tripId },
-    select: { category: true, amount: true },
-  });
-  const byCat = new Map<TripExpenseCategory, number>();
-  for (const e of expenses) {
-    byCat.set(e.category, round2((byCat.get(e.category) ?? 0) + toNum(e.amount)));
-  }
+export interface TripCategoryTotalRow {
+  category: TripExpenseCategory;
+  total: number;
+  percent: number;
+}
+
+export interface TripCategorySpendByParty {
+  id: string;
+  kind: 'MEMBER' | 'HOUSEHOLD';
+  displayName: string;
+  total: number;
+  categories: TripCategoryTotalRow[];
+}
+
+export interface TripCategorySpendBreakdown {
+  totals: TripCategoryTotalRow[];
+  byMember: TripCategorySpendByParty[];
+  byUnit: TripCategorySpendByParty[];
+}
+
+function toCategoryRows(byCat: Map<TripExpenseCategory, number>): TripCategoryTotalRow[] {
   const total = [...byCat.values()].reduce((s, v) => s + v, 0);
   return [...byCat.entries()]
+    .filter(([, amount]) => amount > 0)
     .map(([category, amount]) => ({
       category,
       total: amount,
       percent: total > 0 ? round2((amount / total) * 100) : 0,
     }))
     .sort((a, b) => b.total - a.total);
+}
+
+function emptyCategoryMap(): Map<TripExpenseCategory, number> {
+  return new Map();
+}
+
+function addCategoryAmount(
+  byCat: Map<TripExpenseCategory, number>,
+  category: TripExpenseCategory,
+  amount: number,
+) {
+  if (amount === 0) return;
+  byCat.set(category, round2((byCat.get(category) ?? 0) + amount));
+}
+
+/** Pure: trip-wide category totals plus spend (allocations) per member and per group. */
+export function buildCategorySpendBreakdown(input: {
+  expenses: Array<{
+    category: TripExpenseCategory;
+    amount: number;
+    allocations: Array<{ tripMemberId: string; amount: number }>;
+  }>;
+  members: Array<{ id: string; displayName: string; tripHouseholdId: string | null }>;
+  households: Array<{ id: string; name: string }>;
+}): TripCategorySpendBreakdown {
+  const tripByCat = emptyCategoryMap();
+  const memberByCat = new Map<string, Map<TripExpenseCategory, number>>();
+  for (const m of input.members) {
+    memberByCat.set(m.id, emptyCategoryMap());
+  }
+
+  for (const expense of input.expenses) {
+    addCategoryAmount(tripByCat, expense.category, toNum(expense.amount));
+    for (const alloc of expense.allocations) {
+      let map = memberByCat.get(alloc.tripMemberId);
+      if (!map) {
+        map = emptyCategoryMap();
+        memberByCat.set(alloc.tripMemberId, map);
+      }
+      addCategoryAmount(map, expense.category, toNum(alloc.amount));
+    }
+  }
+
+  const membersById = new Map(input.members.map((m) => [m.id, m]));
+  const householdNames = new Map(input.households.map((h) => [h.id, h.name]));
+
+  const byMember: TripCategorySpendByParty[] = input.members.map((m) => {
+    const categories = toCategoryRows(memberByCat.get(m.id) ?? emptyCategoryMap());
+    return {
+      id: m.id,
+      kind: 'MEMBER' as const,
+      displayName: m.displayName,
+      total: round2(categories.reduce((s, c) => s + c.total, 0)),
+      categories,
+    };
+  });
+  byMember.sort((a, b) => b.total - a.total || a.displayName.localeCompare(b.displayName, 'es'));
+
+  const unitMembers = new Map<string, typeof input.members>();
+  for (const m of input.members) {
+    const unitId = m.tripHouseholdId ? `household:${m.tripHouseholdId}` : `member:${m.id}`;
+    const list = unitMembers.get(unitId) ?? [];
+    list.push(m);
+    unitMembers.set(unitId, list);
+  }
+
+  const byUnit: TripCategorySpendByParty[] = [];
+  for (const [unitId, unitMemberList] of unitMembers) {
+    const first = unitMemberList[0]!;
+    const isHousehold = Boolean(first.tripHouseholdId);
+    const unitCats = emptyCategoryMap();
+    for (const m of unitMemberList) {
+      const map = memberByCat.get(m.id);
+      if (!map) continue;
+      for (const [category, amount] of map) {
+        addCategoryAmount(unitCats, category, amount);
+      }
+    }
+    const categories = toCategoryRows(unitCats);
+    byUnit.push({
+      id: unitId,
+      kind: isHousehold ? 'HOUSEHOLD' : 'MEMBER',
+      displayName: isHousehold
+        ? (householdNames.get(first.tripHouseholdId!) ?? 'Grupo')
+        : first.displayName,
+      total: round2(categories.reduce((s, c) => s + c.total, 0)),
+      categories,
+    });
+  }
+  byUnit.sort((a, b) => b.total - a.total || a.displayName.localeCompare(b.displayName, 'es'));
+
+  // Keep totals even for members who only appear on allocations (defensive).
+  for (const [memberId, map] of memberByCat) {
+    if (membersById.has(memberId)) continue;
+    const categories = toCategoryRows(map);
+    if (categories.length === 0) continue;
+    byMember.push({
+      id: memberId,
+      kind: 'MEMBER',
+      displayName: 'Viajero',
+      total: round2(categories.reduce((s, c) => s + c.total, 0)),
+      categories,
+    });
+  }
+
+  return { totals: toCategoryRows(tripByCat), byMember, byUnit };
+}
+
+export async function computeCategoryTotals(db: Db, tripId: string) {
+  const breakdown = await computeCategorySpendBreakdown(db, tripId);
+  return breakdown.totals;
+}
+
+export async function computeCategorySpendBreakdown(
+  db: Db,
+  tripId: string,
+): Promise<TripCategorySpendBreakdown> {
+  const [members, households, expenses] = await Promise.all([
+    db.tripMember.findMany({
+      where: { tripId, inviteStatus: { in: ['JOINED', 'PENDING'] } },
+      select: { id: true, displayName: true, tripHouseholdId: true },
+    }),
+    db.tripHousehold.findMany({
+      where: { tripId },
+      select: { id: true, name: true },
+    }),
+    db.tripExpense.findMany({
+      where: { tripId },
+      select: {
+        category: true,
+        amount: true,
+        allocations: { select: { tripMemberId: true, amount: true } },
+      },
+    }),
+  ]);
+
+  return buildCategorySpendBreakdown({
+    expenses: expenses.map((e) => ({
+      category: e.category,
+      amount: toNum(e.amount),
+      allocations: e.allocations.map((a) => ({
+        tripMemberId: a.tripMemberId,
+        amount: toNum(a.amount),
+      })),
+    })),
+    members,
+    households,
+  });
 }
 
 export async function settleTrip(
