@@ -676,6 +676,28 @@ body {
   color: var(--muted);
 }
 
+.trip-export-summary {
+  margin-top: 12px;
+}
+
+.trip-export-breakdown .trip-export-subtitle {
+  margin: 12px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.trip-export-breakdown .trip-export-totals + .trip-export-categories {
+  margin-top: 4px;
+}
+
+.expense-export-label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 2px;
+}
+
 .row-between {
   display: flex;
   justify-content: space-between;

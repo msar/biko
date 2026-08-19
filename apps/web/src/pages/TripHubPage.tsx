@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
+import TripExportBreakdown from '../components/TripExportBreakdown';
 import NestedChecklist from '../components/NestedChecklist';
 import { ResumenHoyItinerary, TripItinerarioTab } from '../components/TripItinerarioTab';
 import TripSpendSummary from '../components/TripSpendSummary';
@@ -65,6 +66,7 @@ export default function TripHubPage() {
   const [tab, setTab] = useState<HubTab>(() => parseTab(searchParams.get('tab')));
   const [settleOpen, setSettleOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportSuccess, setExportSuccess] = useState<TripExportPreview | null>(null);
   const [copied, setCopied] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -105,12 +107,25 @@ export default function TripHubPage() {
   });
 
   const exportMutation = useMutation({
-    mutationFn: () => api(`/trips/${id}/export`, { method: 'POST', body: '{}' }),
-    onSuccess: () => {
+    mutationFn: () =>
+      api<{
+        batchId: string;
+        purchaseIds: string[];
+        netShare: number;
+        categoryMix: TripExportPreview['categoryMix'];
+      }>(`/trips/${id}/export`, { method: 'POST', body: '{}' }),
+    onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: ['trips', id] });
       void queryClient.invalidateQueries({ queryKey: ['expenses'] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      setExportOpen(false);
+      setExportSuccess({
+        eligible: false,
+        alreadyExported: true,
+        tripId: id!,
+        householdId: '',
+        netShare: data.netShare,
+        categoryMix: data.categoryMix,
+      });
     },
   });
 
@@ -224,6 +239,7 @@ export default function TripHubPage() {
               ? undefined
               : () => {
                   exportMutation.reset();
+                  setExportSuccess(null);
                   setExportOpen(true);
                 }
           }
@@ -287,47 +303,30 @@ export default function TripHubPage() {
       {!guest && (
         <ConfirmDialog
           open={exportOpen}
-          title="Pasar a Biko"
+          title={exportSuccess ? 'Pasado a Biko' : 'Pasar a Biko'}
           variant="primary"
-          confirmLabel="Pasar a Biko"
+          confirmLabel={exportSuccess ? 'Listo' : 'Pasar a Biko'}
+          singleAction={Boolean(exportSuccess)}
           loadingLabel="Exportando…"
           loading={exportMutation.isPending}
           message={
-            exportPreview.isLoading ? (
+            exportSuccess ? (
+              <TripExportBreakdown
+                netShare={exportSuccess.netShare}
+                categoryMix={exportSuccess.categoryMix}
+                mode="success"
+              />
+            ) : exportPreview.isLoading ? (
               <p>Calculando…</p>
             ) : exportPreview.data && !exportPreview.data.eligible ? (
               <p>{exportPreview.data.reason ?? 'No disponible'}</p>
             ) : (
               <div>
-                <p>
-                  Se va a registrar la parte del hogar ({fmtMoney(exportPreview.data?.netShare ?? 0)})
-                  bajo Viajes, con lo que cada uno pagó y gastó.
-                </p>
-                <ul className="settle-confirm-list">
-                  {exportPreview.data?.categoryMix.map((c) => (
-                    <li key={c.category}>
-                      <strong>
-                        {c.seedCategoryName}: {fmtMoney(c.amount)}
-                      </strong>
-                      {c.percent > 0 ? ` (${c.percent}%)` : ''}
-                      {c.coveredByOthers && (
-                        <span className="hint">
-                          {' '}
-                          · nadie del hogar pagó esta categoría en el viaje (lo cubrió el grupo)
-                        </span>
-                      )}
-                      {c.members && c.members.length > 0 && (
-                        <ul className="settle-confirm-members">
-                          {c.members.map((m) => (
-                            <li key={m.userId}>
-                              {m.name}: pagó {fmtMoney(m.paid)} · gastó {fmtMoney(m.share)}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                <TripExportBreakdown
+                  netShare={exportPreview.data?.netShare ?? 0}
+                  categoryMix={exportPreview.data?.categoryMix ?? []}
+                  mode="preview"
+                />
                 {exportMutation.isError && (
                   <p className="error">
                     {exportMutation.error instanceof Error
@@ -339,10 +338,18 @@ export default function TripHubPage() {
             )
           }
           onConfirm={() => {
+            if (exportSuccess) {
+              setExportOpen(false);
+              setExportSuccess(null);
+              return;
+            }
             if (exportPreview.data?.eligible) exportMutation.mutate();
             else setExportOpen(false);
           }}
-          onCancel={() => setExportOpen(false)}
+          onCancel={() => {
+            setExportOpen(false);
+            setExportSuccess(null);
+          }}
         />
       )}
     </div>
@@ -696,6 +703,39 @@ function TripDetailsDialog({
   );
 }
 
+function TripExportSummaryCard({ tripId }: { tripId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['trips', tripId, 'export-summary'],
+    queryFn: () => api<TripExportPreview>(`/trips/${tripId}/export/preview`),
+  });
+
+  if (isLoading) {
+    return (
+      <section className="card trip-export-summary">
+        <p className="hint">Cargando resumen en Biko…</p>
+      </section>
+    );
+  }
+
+  if (!data?.categoryMix.length) {
+    return (
+      <section className="card trip-export-summary">
+        <h2 style={{ margin: 0 }}>En Biko</h2>
+        <p className="hint" style={{ margin: '8px 0 0' }}>
+          Ya pasado a Biko
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card trip-export-summary">
+      <h2 style={{ margin: 0 }}>En Biko</h2>
+      <TripExportBreakdown netShare={data.netShare} categoryMix={data.categoryMix} mode="summary" />
+    </section>
+  );
+}
+
 function ResumenTab({
   trip,
   closed,
@@ -796,9 +836,7 @@ function ResumenTab({
         </button>
       )}
 
-      {trip.alreadyExported && (
-        <p className="hint center">Ya pasado a Biko</p>
-      )}
+      {trip.alreadyExported && <TripExportSummaryCard tripId={trip.id} />}
     </>
   );
 }

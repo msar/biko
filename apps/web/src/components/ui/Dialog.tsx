@@ -10,6 +10,8 @@ interface DialogProps {
   loadingLabel?: string;
   variant?: 'danger' | 'primary';
   loading?: boolean;
+  /** When true, only the confirm button is shown (e.g. success acknowledgement). */
+  singleAction?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -23,6 +25,7 @@ export default function Dialog({
   loadingLabel,
   variant = 'danger',
   loading = false,
+  singleAction = false,
   onConfirm,
   onCancel,
 }: DialogProps) {
@@ -43,9 +46,11 @@ export default function Dialog({
         <h2 id="md-dialog-title">{title}</h2>
         <div className="md-dialog-body confirm-message">{children}</div>
         <div className="md-dialog-actions confirm-actions">
-          <Button variant="text" disabled={loading} onClick={onCancel}>
-            {cancelLabel}
-          </Button>
+          {!singleAction && (
+            <Button variant="text" disabled={loading} onClick={onCancel}>
+              {cancelLabel}
+            </Button>
+          )}
           <Button
             variant={variant === 'primary' ? 'tonal' : 'danger'}
             disabled={loading}

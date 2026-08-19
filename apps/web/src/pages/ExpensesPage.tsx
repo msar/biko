@@ -6,6 +6,7 @@ import { Button, Icon, IconButton } from '../components/ui';
 import { api, fmtARS, fmtDate, fmtMoneyExact, toArsDisplay } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { expensePayerLabel, expenseSplitLabel } from '../lib/expense-labels';
+import { isTripExportDescription } from '../lib/trip-export-ui';
 import { getOutbox, onOutboxChange, OutboxExpense } from '../lib/outbox';
 import type { Purchase } from '../lib/types';
 
@@ -127,6 +128,9 @@ export default function ExpensesPage() {
             </div>
             <div className="expense-main">
               <strong>{exp.store}</strong>
+              {isTripExportDescription(exp.description) && (
+                <small className="expense-export-label">{exp.description}</small>
+              )}
               <small>
                 {fmtDate(exp.purchaseDate)} · cargó {exp.user.name} ·{' '}
                 {exp.paymentMethod.nickname ?? exp.paymentMethod.definition.name}

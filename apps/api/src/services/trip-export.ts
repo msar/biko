@@ -141,9 +141,12 @@ export async function previewTripExport(
     where: { tripId_householdId: { tripId, householdId } },
   });
   if (existing || trip.exportHouseholdId === householdId) {
+    const plan = await loadExportPlan(db, tripId, householdId, userId);
     return emptyPreview(tripId, householdId, {
       reason: 'Este viaje ya fue pasado a Biko',
       alreadyExported: true,
+      netShare: plan.netShare,
+      categoryMix: plan.categoryMix,
     });
   }
 
