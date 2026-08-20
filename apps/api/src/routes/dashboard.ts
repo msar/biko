@@ -9,7 +9,7 @@ import {
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { computeHouseholdBalance } from '../services/household-balance.js';
-import { resolvePurchasePayer } from '../services/purchase-payer.js';
+import { resolvePurchasePayer, splitPaidAcrossPayers } from '../services/purchase-payer.js';
 
 export type DashboardScope = 'household' | 'personal' | 'all';
 
@@ -152,6 +152,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
               include: { definition: { include: { entity: true } }, owner: { select: { id: true, name: true } } },
             },
             allocations: { include: { user: { select: { id: true, name: true } } } },
+            payments: { include: { user: { select: { id: true, name: true } } } },
             debt: { select: { id: true, contact: { select: { name: true } }, direction: true } },
           },
         },
@@ -242,7 +243,13 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       if (includeSettle && isHousehold && !hasContactDebt) {
         const payer = resolvePurchasePayer(purchase);
         memberNames.set(payer.id, payer.name);
-        paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + amount);
+        const paymentRows = (purchase.payments ?? []).map((p) => {
+          memberNames.set(p.userId, p.user.name);
+          return { userId: p.userId, amount: p.amount.toNumber() };
+        });
+        for (const slice of splitPaidAcrossPayers(amount, paymentRows, payer.id, netAmount)) {
+          paidByUser.set(slice.userId, (paidByUser.get(slice.userId) ?? 0) + slice.amount);
+        }
       }
 
       if (hasContactDebt) continue;

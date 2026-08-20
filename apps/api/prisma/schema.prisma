@@ -275,6 +275,7 @@ model User {
   paidPurchases Purchase[] @relation("PurchasePayer")
   ownedMethods PaymentMethod[] @relation("MethodOwner")
   allocations  PurchaseAllocation[]
+  purchasePayments PurchasePayment[]
   recurringPayments RecurringPayment[] @relation("RecurringCreator")
   amountHistories RecurringAmountHistory[]
   notifications Notification[]
@@ -512,8 +513,13 @@ model Purchase {
   splitMode SplitMode @default(EQUAL)
 
   // Snapshot de quién pagó al momento de la compra (dueño del medio, o quien cargó).
+  // Con varios PurchasePayment, es el pagador primario (mayor monto).
   paidByUserId String?
   paidBy       User?   @relation("PurchasePayer", fields: [paidByUserId], references: [id])
+
+  /// When set, this purchase was created by Pasar a Biko from that trip.
+  sourceTripId String?
+  sourceTrip   Trip?   @relation("TripSourcePurchases", fields: [sourceTripId], references: [id], onDelete: SetNull)
 
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -524,15 +530,31 @@ model Purchase {
 
   installments   Installment[]
   allocations    PurchaseAllocation[]
+  payments       PurchasePayment[]
   recurringOccurrence RecurringOccurrence?
   statementImportLines StatementImportLine[]
   // Si hay deuda externa vinculada, el gasto no cuenta en dashboards de gastos del hogar.
   debt           Debt?
 
+  @@unique([householdId, sourceTripId])
   @@index([householdId, statementFingerprint])
   @@index([householdId, purchaseDate])
   @@index([categoryId])
   @@index([paidByUserId])
+  @@index([sourceTripId])
+}
+
+// Quién pagó hacia un gasto del hogar (filas deben sumar netAmount).
+model PurchasePayment {
+  id         String   @id @default(cuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  amount     Decimal  @db.Decimal(12, 2)
+
+  @@unique([purchaseId, userId])
+  @@index([userId])
 }
 
 // Reparto del netAmount entre miembros del hogar (para dashboard "por persona").
@@ -883,6 +905,7 @@ model Trip {
   accommodation   TripAccommodation?
   exportBatches   TripExportBatch[]
   forecastCache   TripForecastCache?
+  sourcePurchases Purchase[]         @relation("TripSourcePurchases")
 
   @@index([createdByUserId, status])
   @@index([status, updatedAt])

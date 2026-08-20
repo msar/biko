@@ -5,7 +5,7 @@ import {
   installmentCountsForSettleUp,
 } from '@biko/shared';
 import type { PrismaClient } from '@prisma/client';
-import { resolvePurchasePayer } from './purchase-payer.js';
+import { resolvePurchasePayer, splitPaidAcrossPayers } from './purchase-payer.js';
 
 function rateToArs(value: unknown): number {
   if (value == null) return 1;
@@ -77,6 +77,7 @@ export async function computeHouseholdBalance(
         paidBy: { select: { id: true, name: true } },
         paymentMethod: { select: { owner: { select: { id: true, name: true } } } },
         allocations: { include: { user: { select: { id: true, name: true } } } },
+        payments: { include: { user: { select: { id: true, name: true } } } },
         installments: true,
       },
     }),
@@ -104,11 +105,17 @@ export async function computeHouseholdBalance(
     for (const allocation of purchase.allocations) {
       memberNames.set(allocation.userId, allocation.user.name);
     }
+    const paymentRows = purchase.payments.map((p) => {
+      memberNames.set(p.userId, p.user.name);
+      return { userId: p.userId, amount: p.amount.toNumber() };
+    });
 
     for (const inst of purchase.installments) {
       if (!installmentCountsForSettleUp(inst, asOf)) continue;
       const amount = inst.amount.toNumber() * rate;
-      paidByUser.set(payer.id, (paidByUser.get(payer.id) ?? 0) + amount);
+      for (const slice of splitPaidAcrossPayers(amount, paymentRows, payer.id, netAmount)) {
+        paidByUser.set(slice.userId, (paidByUser.get(slice.userId) ?? 0) + slice.amount);
+      }
 
       for (const allocation of purchase.allocations) {
         const shareNative = allocationShareForInstallment(

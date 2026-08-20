@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { Button, Icon, IconButton } from '../components/ui';
 import { api, fmtARS, fmtDate, fmtMoneyExact, toArsDisplay } from '../lib/api';
@@ -130,6 +130,16 @@ export default function ExpensesPage() {
               <strong>{exp.store}</strong>
               {isTripExportDescription(exp.description) && (
                 <small className="expense-export-label">{exp.description}</small>
+              )}
+              {exp.sourceTrip && (
+                <small className="expense-export-label">
+                  <Link
+                    to={`/viajes/${exp.sourceTrip.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Ver viaje: {exp.sourceTrip.name}
+                  </Link>
+                </small>
               )}
               <small>
                 {fmtDate(exp.purchaseDate)} · cargó {exp.user.name} ·{' '}

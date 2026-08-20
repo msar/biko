@@ -5,7 +5,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { IconButton } from '../components/ui';
 import { api, fmtARS, fmtDate, fmtMoneyExact, toArsDisplay } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { expensePayerDisplayName, expenseSplitLabel } from '../lib/expense-labels';
+import { expensePayerDisplayName, expensePaymentRows, expenseSplitLabel } from '../lib/expense-labels';
 import { paymentMethodDisplayName } from '../lib/payment-method-catalog';
 import type { Purchase } from '../lib/types';
 
@@ -66,6 +66,7 @@ export default function ExpenseDetailPage() {
   const discount = Number(purchase.discountAmount);
   const split = expenseSplitLabel(purchase, user.id);
   const payerName = expensePayerDisplayName(purchase, user.id);
+  const paymentRows = expensePaymentRows(purchase);
 
   return (
     <div className="page">
@@ -108,6 +109,11 @@ export default function ExpenseDetailPage() {
         <DetailRow label="Tipo">{purchase.scope === 'PERSONAL' ? 'Personal' : 'Hogar'}</DetailRow>
         {split && <DetailRow label="Reparto">{split}</DetailRow>}
         <DetailRow label="Pagó">{payerName}</DetailRow>
+        {purchase.sourceTrip && (
+          <DetailRow label="Viaje">
+            <Link to={`/viajes/${purchase.sourceTrip.id}`}>{purchase.sourceTrip.name}</Link>
+          </DetailRow>
+        )}
         <DetailRow label="Cargó">{purchase.user.name}</DetailRow>
         {discount > 0 && (
           <DetailRow label="Descuento">
@@ -122,6 +128,17 @@ export default function ExpenseDetailPage() {
           </DetailRow>
         )}
       </section>
+
+      {paymentRows.length > 1 && (
+        <section className="card">
+          <h2>Pagos</h2>
+          {paymentRows.map((p) => (
+            <DetailRow key={p.userId} label={p.userId === user.id ? 'Vos' : p.name}>
+              {fmtMoneyExact(p.amount, currency)}
+            </DetailRow>
+          ))}
+        </section>
+      )}
 
       {purchase.allocations?.length > 0 && purchase.scope === 'HOUSEHOLD' && (
         <section className="card">

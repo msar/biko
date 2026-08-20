@@ -155,6 +155,10 @@ export interface ExpenseFormInitial {
   loggedByName?: string;
   /** Who paid — for unowned payment methods. */
   paidByUserId?: string;
+  /** single = one payer chips; multi = amounts per member */
+  payerMode?: 'single' | 'multi';
+  myPaidAmount?: string;
+  partnerPaidAmount?: string;
 }
 
 function initialFromPurchase(purchase: Purchase, userId: string): ExpenseFormInitial {
@@ -188,6 +192,13 @@ function initialFromPurchase(purchase: Purchase, userId: string): ExpenseFormIni
   const myPct = netAmount > 0 ? Math.round((myAmount / netAmount) * 1000) / 10 : 50;
   const partnerPct = Math.round((100 - myPct) * 10) / 10;
 
+  const paymentRows = (purchase.payments ?? [])
+    .map((p) => ({ userId: p.userId, amount: Number(p.amount) }))
+    .filter((p) => p.amount > 0.005);
+  const multiPayer = paymentRows.length > 1;
+  const myPaid = paymentRows.find((p) => p.userId === userId)?.amount ?? 0;
+  const partnerPaid = paymentRows.find((p) => p.userId !== userId)?.amount ?? 0;
+
   return {
     amount: String(Number(purchase.grossAmount)),
     categoryId: purchase.category.id,
@@ -208,6 +219,9 @@ function initialFromPurchase(purchase: Purchase, userId: string): ExpenseFormIni
     loggedByUserId: purchase.user.id,
     loggedByName: purchase.user.name,
     paidByUserId: resolveExpensePayer(purchase).id,
+    payerMode: multiPayer ? 'multi' : 'single',
+    myPaidAmount: multiPayer ? String(Math.round(myPaid * 100) / 100) : '',
+    partnerPaidAmount: multiPayer ? String(Math.round(partnerPaid * 100) / 100) : '',
   };
 }
 
@@ -245,6 +259,9 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
   const [myPct, setMyPct] = useState(initial?.myPct ?? '50');
   const [partnerPct, setPartnerPct] = useState(initial?.partnerPct ?? '50');
   const [paidByUserId, setPaidByUserId] = useState<string | null>(initial?.paidByUserId ?? null);
+  const [payerMode, setPayerMode] = useState<'single' | 'multi'>(initial?.payerMode ?? 'single');
+  const [myPaidAmount, setMyPaidAmount] = useState(initial?.myPaidAmount ?? '');
+  const [partnerPaidAmount, setPartnerPaidAmount] = useState(initial?.partnerPaidAmount ?? '');
   const [error, setError] = useState<string | null>(null);
   const [savedOffline, setSavedOffline] = useState(false);
 
@@ -536,7 +553,12 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
         }
       }
     }
-    if (!methodHasOwner && paidByUserId) {
+    if (!methodHasOwner && payerMode === 'multi' && user?.id && partner) {
+      payload.payments = [
+        { userId: user.id, amount: parseMoneyInput(myPaidAmount) },
+        { userId: partner.id, amount: parseMoneyInput(partnerPaidAmount) },
+      ];
+    } else if (!methodHasOwner && paidByUserId) {
       payload.paidByUserId = paidByUserId;
     }
     return payload;
@@ -944,22 +966,139 @@ export default function ExpenseForm({ mode, purchaseId, initial, title }: Expens
             <span> (dueño del medio)</span>
           </p>
         )}
-        {selectedMethod && !selectedMethod.owner && members.length > 1 && (
+        {selectedMethod && !selectedMethod.owner && members.length > 1 && partner && (
           <div className="payer-picker">
             <h2 className="field-label">Quién pagó</h2>
             <div className="segmented">
-              {members.map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  className={paidByUserId === m.id ? 'active' : ''}
-                  onClick={() => setPaidByUserId(m.id)}
-                >
-                  {m.id === user?.id ? 'Yo' : m.name}
-                </button>
-              ))}
+              <button
+                type="button"
+                className={payerMode === 'single' ? 'active' : ''}
+                onClick={() => setPayerMode('single')}
+              >
+                Uno
+              </button>
+              <button
+                type="button"
+                className={payerMode === 'multi' ? 'active' : ''}
+                onClick={() => setPayerMode('multi')}
+              >
+                Varios
+              </button>
             </div>
-            <p className="hint">Este medio no tiene dueño (efectivo, transferencia, etc.).</p>
+            {payerMode === 'single' ? (
+              <>
+                <div className="segmented">
+                  {members.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className={paidByUserId === m.id ? 'active' : ''}
+                      onClick={() => setPaidByUserId(m.id)}
+                    >
+                      {m.id === user?.id ? 'Yo' : m.name}
+                    </button>
+                  ))}
+                </div>
+                <p className="hint">Este medio no tiene dueño (efectivo, transferencia, etc.).</p>
+              </>
+            ) : (
+              <>
+                <div className="split-amount-row">
+                  <label>
+                    Pagó {user?.id ? 'vos' : 'vos'}
+                    <div className="trip-payer-amount-wrap">
+                      <input
+                        inputMode="decimal"
+                        value={myPaidAmount}
+                        onChange={(e) => setMyPaidAmount(e.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                    {remainingBalance(
+                      moneyRemaining(estimatedNet, [
+                        parseMoneyInput(myPaidAmount),
+                        parseMoneyInput(partnerPaidAmount),
+                      ]),
+                    ) === 'short' && (
+                      <button
+                        type="button"
+                        className="btn-link amount-resto-btn"
+                        onClick={() =>
+                          setMyPaidAmount(
+                            applyRemainingToAmount(
+                              myPaidAmount,
+                              moneyRemaining(estimatedNet, [
+                                parseMoneyInput(myPaidAmount),
+                                parseMoneyInput(partnerPaidAmount),
+                              ]),
+                            ),
+                          )
+                        }
+                      >
+                        Usar resto
+                      </button>
+                    )}
+                  </label>
+                  <label>
+                    Pagó {partner.name}
+                    <div className="trip-payer-amount-wrap">
+                      <input
+                        inputMode="decimal"
+                        value={partnerPaidAmount}
+                        onChange={(e) => setPartnerPaidAmount(e.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                    {remainingBalance(
+                      moneyRemaining(estimatedNet, [
+                        parseMoneyInput(myPaidAmount),
+                        parseMoneyInput(partnerPaidAmount),
+                      ]),
+                    ) === 'short' && (
+                      <button
+                        type="button"
+                        className="btn-link amount-resto-btn"
+                        onClick={() =>
+                          setPartnerPaidAmount(
+                            applyRemainingToAmount(
+                              partnerPaidAmount,
+                              moneyRemaining(estimatedNet, [
+                                parseMoneyInput(myPaidAmount),
+                                parseMoneyInput(partnerPaidAmount),
+                              ]),
+                            ),
+                          )
+                        }
+                      >
+                        Usar resto
+                      </button>
+                    )}
+                  </label>
+                </div>
+                {estimatedNet > 0 && (
+                  <p
+                    className={`hint ${
+                      remainingBalance(
+                        moneyRemaining(estimatedNet, [
+                          parseMoneyInput(myPaidAmount),
+                          parseMoneyInput(partnerPaidAmount),
+                        ]),
+                      ) !== 'ok'
+                        ? 'error'
+                        : ''
+                    }`}
+                  >
+                    {remainingHintLabel(
+                      moneyRemaining(estimatedNet, [
+                        parseMoneyInput(myPaidAmount),
+                        parseMoneyInput(partnerPaidAmount),
+                      ]),
+                    )}{' '}
+                    · total {fmtARS.format(estimatedNet)}
+                  </p>
+                )}
+              </>
+            )}
           </div>
         )}
         {selectedMethod && !selectedMethod.owner && members.length <= 1 && (

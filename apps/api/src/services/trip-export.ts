@@ -6,6 +6,7 @@ import { requireTripOrganizer, TripForbiddenError, TripValidationError } from '.
 import {
   planTripHouseholdExport,
   type TripExportCategoryMix,
+  type TripExportPlanMember,
   type TripExportPurchaseSpec,
   type TripHouseholdExportPlan,
 } from './trip-export-plan.js';
@@ -28,6 +29,9 @@ export interface TripExportPreview {
   netShare: number;
   alreadyExported: boolean;
   categoryMix: TripExportCategoryMix[];
+  members: TripExportPlanMember[];
+  /** Household purchase id when already exported (single Viaje). */
+  purchaseId?: string | null;
 }
 
 function emptyPreview(
@@ -42,6 +46,25 @@ function emptyPreview(
     netShare: 0,
     alreadyExported: false,
     categoryMix: [],
+    members: [],
+    ...extra,
+  };
+}
+
+function previewFromPlan(
+  tripId: string,
+  householdId: string,
+  plan: TripHouseholdExportPlan,
+  extra: Partial<TripExportPreview> = {},
+): TripExportPreview {
+  return {
+    eligible: false,
+    tripId,
+    householdId,
+    netShare: plan.netShare,
+    alreadyExported: false,
+    categoryMix: plan.categoryMix,
+    members: plan.members,
     ...extra,
   };
 }
@@ -121,6 +144,21 @@ async function resolveCashPaymentMethodId(db: Db, householdId: string): Promise<
   return created?.id ?? null;
 }
 
+async function findExportedPurchaseId(
+  db: Db,
+  tripId: string,
+  householdId: string,
+  batchPurchaseIds: string[],
+): Promise<string | null> {
+  const bySource = await db.purchase.findFirst({
+    where: { householdId, sourceTripId: tripId },
+    select: { id: true },
+  });
+  if (bySource) return bySource.id;
+  if (batchPurchaseIds.length === 1) return batchPurchaseIds[0]!;
+  return batchPurchaseIds[0] ?? null;
+}
+
 export async function previewTripExport(
   db: Db,
   tripId: string,
@@ -142,11 +180,13 @@ export async function previewTripExport(
   });
   if (existing || trip.exportHouseholdId === householdId) {
     const plan = await loadExportPlan(db, tripId, householdId, userId);
-    return emptyPreview(tripId, householdId, {
+    const purchaseId = existing
+      ? await findExportedPurchaseId(db, tripId, householdId, existing.purchaseIds)
+      : null;
+    return previewFromPlan(tripId, householdId, plan, {
       reason: 'Este viaje ya fue pasado a Biko',
       alreadyExported: true,
-      netShare: plan.netShare,
-      categoryMix: plan.categoryMix,
+      purchaseId,
     });
   }
 
@@ -163,14 +203,10 @@ export async function previewTripExport(
     });
   }
 
-  return {
+  return previewFromPlan(tripId, householdId, plan, {
     eligible: true,
-    tripId,
-    householdId,
-    netShare: plan.netShare,
     alreadyExported: false,
-    categoryMix: plan.categoryMix,
-  };
+  });
 }
 
 export async function exportTripToHousehold(
@@ -178,67 +214,84 @@ export async function exportTripToHousehold(
   tripId: string,
   userId: string,
   householdId: string,
+  opts?: { replace?: boolean },
 ) {
+  const replace = opts?.replace === true;
   const preview = await previewTripExport(prisma, tripId, userId, householdId);
+
   if (!preview.eligible) {
-    if (preview.alreadyExported) {
+    if (preview.alreadyExported && !replace) {
       const batch = await prisma.tripExportBatch.findUnique({
         where: { tripId_householdId: { tripId, householdId } },
       });
       if (batch) return { batch, purchaseIds: batch.purchaseIds, preview };
       throw new TripValidationError(preview.reason ?? 'No se puede exportar');
     }
-    if (preview.reason?.includes('organizador')) {
-      throw new TripForbiddenError(preview.reason);
+    if (!preview.alreadyExported) {
+      if (preview.reason?.includes('organizador')) {
+        throw new TripForbiddenError(preview.reason);
+      }
+      throw new TripValidationError(preview.reason ?? 'No se puede exportar');
     }
-    throw new TripValidationError(preview.reason ?? 'No se puede exportar');
   }
 
+  await requireTripOrganizer(prisma, tripId, userId);
+
   const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId } });
+  if (trip.status !== 'CLOSED') {
+    throw new TripValidationError('Liquidá el viaje antes de pasarlo a Biko');
+  }
+
   const paymentMethodId = await resolveCashPaymentMethodId(prisma, householdId);
   if (!paymentMethodId) {
     throw new TripValidationError('No hay medio de pago en el hogar para registrar el gasto');
   }
 
   const plan = await loadExportPlan(prisma, tripId, householdId, userId);
-  const seedNames = [...new Set(plan.purchases.map((p) => p.seedCategoryName))];
-  const categories = await prisma.category.findMany({
-    where: { householdId: null, name: { in: seedNames } },
+  if (plan.netShare <= 0 || plan.purchases.length === 0) {
+    throw new TripValidationError('No hay parte del hogar para exportar');
+  }
+
+  const spec = plan.purchases[0]!;
+  const category = await prisma.category.findFirst({
+    where: { householdId: null, name: spec.seedCategoryName },
   });
-  const categoryByName = new Map(categories.map((c) => [c.name, c.id]));
-  for (const name of seedNames) {
-    if (!categoryByName.has(name)) {
-      throw new TripValidationError(`Falta la categoría global "${name}". Corré el seed.`);
-    }
+  if (!category) {
+    throw new TripValidationError(`Falta la categoría global "${spec.seedCategoryName}". Corré el seed.`);
   }
 
   const purchaseDate = trip.endDate ?? trip.startDate ?? new Date();
   const storeLabel = trip.destination
     ? `Viaje: ${trip.name} (${trip.destination})`
     : `Viaje: ${trip.name}`;
+  const clientId = purchaseClientId(tripId, householdId);
 
-  const purchaseIds: string[] = [];
+  const resultPreview = previewFromPlan(tripId, householdId, plan, {
+    eligible: false,
+    alreadyExported: true,
+  });
+
   try {
-    await prisma.$transaction(
+    const batch = await prisma.$transaction(
       async (tx) => {
-        for (const spec of plan.purchases) {
-          if (spec.amount <= 0) continue;
-          const categoryId = categoryByName.get(spec.seedCategoryName)!;
-          const clientId = purchaseClientId(tripId, householdId, spec);
+        if (replace) {
+          await clearPreviousExport(tx, tripId, householdId);
+        }
 
-          const existing = await tx.purchase.findUnique({ where: { clientId } });
-          if (existing) {
-            purchaseIds.push(existing.id);
-            continue;
-          }
+        const existingByClient = await tx.purchase.findUnique({ where: { clientId } });
+        const existingBySource = await tx.purchase.findFirst({
+          where: { householdId, sourceTripId: tripId },
+        });
+        let purchaseId = existingByClient?.id ?? existingBySource?.id ?? null;
 
+        if (!purchaseId) {
           const purchase = await createPurchaseWithAllocations(
             tx as Prisma.TransactionClient,
             householdId,
             userId,
             {
               paymentMethodId,
-              categoryId,
+              categoryId: category.id,
               store: storeLabel,
               description: purchaseDescription(spec),
               purchaseDate,
@@ -248,19 +301,27 @@ export async function exportTripToHousehold(
               scope: 'HOUSEHOLD',
               splitMode: 'AMOUNT',
               splitValues: spec.splitValues,
+              payments: spec.payments,
+              paidByUserId: spec.paidByUserId,
+              sourceTripId: tripId,
               skipPartnerNotify: true,
               currency: 'ARS',
-              paidByUserId: spec.paidByUserId,
             },
             clientId,
           );
-          purchaseIds.push(purchase.id);
+          purchaseId = purchase.id;
         }
 
-        const batch = await tx.tripExportBatch.create({
-          data: {
+        const purchaseIds = [purchaseId];
+        const batch = await tx.tripExportBatch.upsert({
+          where: { tripId_householdId: { tripId, householdId } },
+          create: {
             tripId,
             householdId,
+            exportedByUserId: userId,
+            purchaseIds,
+          },
+          update: {
             exportedByUserId: userId,
             purchaseIds,
           },
@@ -279,15 +340,58 @@ export async function exportTripToHousehold(
       },
       { timeout: 20_000 },
     );
+
+    return {
+      batch,
+      purchaseIds: batch.purchaseIds,
+      preview: { ...resultPreview, purchaseId: batch.purchaseIds[0] ?? null },
+    };
   } catch (error) {
     throw wrapExportError(error);
   }
+}
 
-  const batch = await prisma.tripExportBatch.findUniqueOrThrow({
+async function clearPreviousExport(
+  tx: Prisma.TransactionClient,
+  tripId: string,
+  householdId: string,
+) {
+  const batch = await tx.tripExportBatch.findUnique({
     where: { tripId_householdId: { tripId, householdId } },
   });
+  const ids = new Set<string>(batch?.purchaseIds ?? []);
+  const linked = await tx.purchase.findMany({
+    where: { householdId, sourceTripId: tripId },
+    select: { id: true },
+  });
+  for (const p of linked) ids.add(p.id);
 
-  return { batch, purchaseIds: batch.purchaseIds, preview };
+  // Also remove legacy multi-purchase exports by clientId prefix.
+  const legacy = await tx.purchase.findMany({
+    where: {
+      householdId,
+      clientId: { startsWith: `trip-export:${tripId}:${householdId}` },
+    },
+    select: { id: true },
+  });
+  for (const p of legacy) ids.add(p.id);
+
+  if (ids.size > 0) {
+    await tx.purchase.deleteMany({ where: { id: { in: [...ids] } } });
+  }
+
+  if (batch) {
+    await tx.tripExportBatch.delete({ where: { id: batch.id } });
+  }
+
+  await tx.trip.update({
+    where: { id: tripId },
+    data: {
+      exportHouseholdId: null,
+      exportBatchId: null,
+      exportedAt: null,
+    },
+  });
 }
 
 function wrapExportError(error: unknown): Error {
@@ -300,27 +404,32 @@ function wrapExportError(error: unknown): Error {
     return new TripValidationError(error.message);
   }
   const message = error instanceof Error ? error.message : '';
-  if (message.includes('La suma de montos') || message.includes('montos no pueden')) {
+  if (
+    message.includes('La suma de montos') ||
+    message.includes('montos no pueden') ||
+    message.includes('suma de lo pagado')
+  ) {
     return new TripValidationError(message);
   }
-  if (typeof error === 'object' && error !== null && 'code' in error && (error as { code: string }).code === 'P2028') {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code: string }).code === 'P2028'
+  ) {
     return new TripValidationError('La exportación tardó demasiado. Probá de nuevo.');
   }
   if (error instanceof Error) return error;
   return new Error('No se pudo pasar el viaje a Biko');
 }
 
-function purchaseClientId(
-  tripId: string,
-  householdId: string,
-  spec: TripExportPurchaseSpec,
-): string {
-  return `trip-export:${tripId}:${householdId}:${spec.category}:${spec.paidByUserId}:${spec.index}`;
+function purchaseClientId(tripId: string, householdId: string): string {
+  return `trip-export:${tripId}:${householdId}`;
 }
 
 function purchaseDescription(spec: TripExportPurchaseSpec): string {
   if (spec.coveredByOthers) {
-    return `Pasar a Biko · ${spec.seedCategoryName} (lo pagó el grupo)`;
+    return 'Pasar a Biko · Viaje (lo pagó el grupo)';
   }
-  return `Pasar a Biko · ${spec.seedCategoryName}`;
+  return 'Pasar a Biko · Viaje';
 }

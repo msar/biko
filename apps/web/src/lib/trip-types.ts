@@ -272,6 +272,13 @@ export interface TripExportPreview {
   householdId: string;
   netShare: number;
   alreadyExported: boolean;
+  purchaseId?: string | null;
+  members?: Array<{
+    userId: string;
+    name: string;
+    paid: number;
+    share: number;
+  }>;
   categoryMix: Array<{
     category: TripExpenseCategory;
     seedCategoryName: string;

@@ -1,13 +1,13 @@
+import { Link } from 'react-router-dom';
 import { fmtMoney } from '../lib/api';
-import {
-  aggregateExportMemberTotals,
-  totalExportPurchases,
-  type TripExportCategoryMix,
-} from '../lib/trip-export-ui';
+import { aggregateExportMemberTotals, type TripExportCategoryMix, type TripExportMember } from '../lib/trip-export-ui';
 
 interface TripExportBreakdownProps {
   netShare: number;
   categoryMix: TripExportCategoryMix[];
+  members?: TripExportMember[] | null;
+  tripId?: string;
+  purchaseId?: string | null;
   /** Post-export reconciliation copy vs pre-export confirm copy */
   mode?: 'preview' | 'summary' | 'success';
 }
@@ -15,37 +15,30 @@ interface TripExportBreakdownProps {
 export default function TripExportBreakdown({
   netShare,
   categoryMix,
+  members,
+  tripId,
+  purchaseId,
   mode = 'preview',
 }: TripExportBreakdownProps) {
-  const memberTotals = aggregateExportMemberTotals(categoryMix);
-  const purchaseCount = totalExportPurchases(categoryMix);
+  const memberTotals = aggregateExportMemberTotals(categoryMix, members);
 
   return (
     <div className="trip-export-breakdown">
       {mode === 'summary' && (
         <p className="hint" style={{ marginTop: 0 }}>
-          Esto es lo que quedó registrado en el hogar. Si varios pagaron la misma categoría, verás
-          más de un gasto con el mismo nombre del viaje; la categoría aparece en cada fila.
+          Un gasto Viaje en el hogar ({fmtMoney(netShare)}) con lo que cada uno pagó y gastó. El
+          detalle por categoría está en el viaje.
         </p>
       )}
       {mode === 'success' && (
         <p className="hint" style={{ marginTop: 0 }}>
-          Se crearon {purchaseCount} {purchaseCount === 1 ? 'gasto' : 'gastos'} en el hogar bajo
-          Viajes ({fmtMoney(netShare)} en total).
+          Se registró un gasto Viaje en el hogar por {fmtMoney(netShare)}.
         </p>
       )}
       {mode === 'preview' && (
         <p>
-          Se va a registrar la parte del hogar ({fmtMoney(netShare)}) bajo Viajes, con lo que cada
-          uno pagó y gastó.
-          {purchaseCount > categoryMix.length && (
-            <>
-              {' '}
-              <span className="hint">
-                ({purchaseCount} gastos: cuando ambos pagaron una categoría, se crea uno por pagador)
-              </span>
-            </>
-          )}
+          Se va a registrar un solo gasto Viaje por la parte del hogar ({fmtMoney(netShare)}), con
+          lo que cada uno pagó y gastó. El desglose por categoría queda en el viaje.
         </p>
       )}
 
@@ -62,37 +55,43 @@ export default function TripExportBreakdown({
         </section>
       )}
 
-      <section className="trip-export-categories">
-        <h3 className="trip-export-subtitle">Por categoría</h3>
-        <ul className="settle-confirm-list">
-          {categoryMix.map((c) => (
-            <li key={c.category}>
-              <strong>
-                {c.seedCategoryName}: {fmtMoney(c.amount)}
-              </strong>
-              {c.percent > 0 ? ` (${c.percent}%)` : ''}
-              {c.purchasesCount > 1 && (
-                <span className="hint"> · {c.purchasesCount} gastos en Biko</span>
-              )}
-              {c.coveredByOthers && (
-                <span className="hint">
-                  {' '}
-                  · nadie del hogar pagó esta categoría en el viaje (lo cubrió el grupo)
-                </span>
-              )}
-              {c.members.length > 0 && (
-                <ul className="settle-confirm-members">
-                  {c.members.map((m) => (
-                    <li key={m.userId}>
-                      {m.name}: pagó {fmtMoney(m.paid)} · gastó {fmtMoney(m.share)}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          ))}
-        </ul>
-      </section>
+      {mode === 'preview' && categoryMix.length > 0 && (
+        <section className="trip-export-categories">
+          <h3 className="trip-export-subtitle">Consumo por categoría (solo referencia)</h3>
+          <ul className="settle-confirm-list">
+            {categoryMix.map((c) => (
+              <li key={c.category}>
+                <strong>
+                  {c.seedCategoryName}: {fmtMoney(c.amount)}
+                </strong>
+                {c.percent > 0 ? ` (${c.percent}%)` : ''}
+                {c.coveredByOthers && (
+                  <span className="hint">
+                    {' '}
+                    · nadie del hogar pagó esta categoría en el viaje (lo cubrió el grupo)
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {(mode === 'summary' || mode === 'success') && (tripId || purchaseId) && (
+        <p className="trip-export-links" style={{ marginTop: 12 }}>
+          {purchaseId && (
+            <Link to={`/gastos/${purchaseId}`} className="btn-link">
+              Ver gasto
+            </Link>
+          )}
+          {purchaseId && tripId && ' · '}
+          {tripId && (
+            <Link to={`/viajes/${tripId}`} className="btn-link">
+              Ver viaje
+            </Link>
+          )}
+        </p>
+      )}
     </div>
   );
 }

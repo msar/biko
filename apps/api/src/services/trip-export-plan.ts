@@ -18,12 +18,12 @@ export interface TripExportPlanMember {
 }
 
 export interface TripExportPurchaseSpec {
-  category: TripExpenseCategory;
+  /** Seed category under Viajes (single purchase uses "Viajes"). */
   seedCategoryName: string;
   amount: number;
   paidByUserId: string;
   splitValues: Array<{ userId: string; value: number }>;
-  index: number;
+  payments: Array<{ userId: string; amount: number }>;
   coveredByOthers: boolean;
 }
 
@@ -40,7 +40,10 @@ export interface TripExportCategoryMix {
 export interface TripHouseholdExportPlan {
   netShare: number;
   categoryMix: TripExportCategoryMix[];
+  /** Always 0 or 1 purchase for the household trip export. */
   purchases: TripExportPurchaseSpec[];
+  /** Aggregate paid/share per household member (payments scaled to netShare). */
+  members: TripExportPlanMember[];
 }
 
 export interface PlanTripHouseholdExportInput {
@@ -60,17 +63,16 @@ function sumMap(values: Map<string, number>): number {
   return round2([...values.values()].reduce((s, v) => s + v, 0));
 }
 
-function splitFrom(householdUserIds: string[], alloc: Map<string, number>, amount: number) {
-  const normalized = normalizeAllocToAmount(householdUserIds, alloc, amount);
-  return householdUserIds.map((userId) => ({ userId, value: normalized.get(userId) ?? 0 }));
-}
-
 function addAmount(map: Map<string, number>, userId: string, amount: number) {
   if (!userId || amount === 0) return;
   map.set(userId, round2((map.get(userId) ?? 0) + amount));
 }
 
-function scalePaidToShare(
+/**
+ * Scale household members' trip payments so they sum to shareTotal,
+ * preserving relative contribution. Empty paid → all zeros.
+ */
+export function scalePaidToShare(
   paidByUser: Map<string, number>,
   householdUserIds: string[],
   shareTotal: number,
@@ -92,63 +94,6 @@ function scalePaidToShare(
     }
   }
   return scaled;
-}
-
-function allocatePurchaseAmount(
-  householdUserIds: string[],
-  remainingShare: Map<string, number>,
-  payerId: string,
-  amount: number,
-): Map<string, number> {
-  const alloc = emptyAmounts(householdUserIds);
-  let left = amount;
-
-  const own = Math.max(0, remainingShare.get(payerId) ?? 0);
-  const toOwn = round2(Math.min(own, left));
-  alloc.set(payerId, toOwn);
-  left = round2(left - toOwn);
-  if (left <= 0.005) return alloc;
-
-  const partners = householdUserIds.filter((id) => id !== payerId);
-  const leftoverOthers = round2(
-    partners.reduce((s, id) => s + Math.max(0, remainingShare.get(id) ?? 0), 0),
-  );
-  if (leftoverOthers <= 0.005) {
-    alloc.set(payerId, round2((alloc.get(payerId) ?? 0) + left));
-    return alloc;
-  }
-
-  const withRemain = partners.filter((id) => (remainingShare.get(id) ?? 0) > 0.005);
-  let allocatedPartners = 0;
-  for (let i = 0; i < withRemain.length; i++) {
-    const id = withRemain[i]!;
-    const rem = Math.max(0, remainingShare.get(id) ?? 0);
-    const isLast = i === withRemain.length - 1;
-    const value = isLast
-      ? round2(left - allocatedPartners)
-      : round2(Math.min(rem, (rem / leftoverOthers) * left));
-    alloc.set(id, value);
-    allocatedPartners = round2(allocatedPartners + value);
-  }
-  return normalizeAllocToAmount(householdUserIds, alloc, amount);
-}
-
-function subtractAlloc(remaining: Map<string, number>, alloc: Map<string, number>) {
-  for (const [id, value] of alloc) {
-    remaining.set(id, round2((remaining.get(id) ?? 0) - value));
-  }
-}
-
-function remainingAsAlloc(
-  householdUserIds: string[],
-  remainingShare: Map<string, number>,
-  amount: number,
-): Map<string, number> {
-  const alloc = emptyAmounts(householdUserIds);
-  for (const id of householdUserIds) {
-    alloc.set(id, Math.max(0, round2(remainingShare.get(id) ?? 0)));
-  }
-  return normalizeAllocToAmount(householdUserIds, alloc, amount);
 }
 
 function normalizeAllocToAmount(
@@ -173,87 +118,13 @@ function normalizeAllocToAmount(
       return next;
     }
   }
-  if (householdUserIds[0]) {
-    next.set(householdUserIds[0], amount);
-    for (let i = 1; i < householdUserIds.length; i++) next.set(householdUserIds[i]!, 0);
-  }
+  if (ordered[0]) next.set(ordered[0], round2(amount));
   return next;
 }
 
-function purchasesForCategory(
-  category: TripExpenseCategory,
-  householdUserIds: string[],
-  shareByUser: Map<string, number>,
-  scaledPaid: Map<string, number>,
-  exporterUserId: string,
-): { specs: TripExportPurchaseSpec[]; coveredByOthers: boolean } {
-  const shareTotal = sumMap(shareByUser);
-  const seedCategoryName = tripCategorySeedName(category);
-  const paidTotal = sumMap(scaledPaid);
-
-  if (paidTotal <= 0) {
-    return {
-      coveredByOthers: true,
-      specs: [
-        {
-          category,
-          seedCategoryName,
-          amount: shareTotal,
-          paidByUserId: exporterUserId,
-          splitValues: splitFrom(householdUserIds, shareByUser, shareTotal),
-          index: 0,
-          coveredByOthers: true,
-        },
-      ],
-    };
-  }
-
-  const payers = householdUserIds
-    .filter((id) => (scaledPaid.get(id) ?? 0) > 0.005)
-    .sort((a, b) => {
-      const diff = (scaledPaid.get(b) ?? 0) - (scaledPaid.get(a) ?? 0);
-      if (diff !== 0) return diff;
-      return a.localeCompare(b);
-    });
-
-  if (payers.length === 1) {
-    return {
-      coveredByOthers: false,
-      specs: [
-        {
-          category,
-          seedCategoryName,
-          amount: shareTotal,
-          paidByUserId: payers[0]!,
-          splitValues: splitFrom(householdUserIds, shareByUser, shareTotal),
-          index: 0,
-          coveredByOthers: false,
-        },
-      ],
-    };
-  }
-
-  const remaining = new Map(shareByUser);
-  const specs: TripExportPurchaseSpec[] = [];
-  for (let pIndex = 0; pIndex < payers.length; pIndex++) {
-    const payerId = payers[pIndex]!;
-    const amount = scaledPaid.get(payerId)!;
-    const alloc =
-      pIndex === payers.length - 1
-        ? remainingAsAlloc(householdUserIds, remaining, amount)
-        : allocatePurchaseAmount(householdUserIds, remaining, payerId, amount);
-    specs.push({
-      category,
-      seedCategoryName,
-      amount,
-      paidByUserId: payerId,
-      splitValues: splitFrom(householdUserIds, alloc, amount),
-      index: pIndex,
-      coveredByOthers: false,
-    });
-    subtractAlloc(remaining, alloc);
-  }
-  return { coveredByOthers: false, specs };
+function splitFrom(householdUserIds: string[], alloc: Map<string, number>, amount: number) {
+  const normalized = normalizeAllocToAmount(householdUserIds, alloc, amount);
+  return householdUserIds.map((userId) => ({ userId, value: normalized.get(userId) ?? 0 }));
 }
 
 function mixMembers(
@@ -272,7 +143,22 @@ function mixMembers(
     .filter((m) => m.paid > 0.005 || m.share > 0.005);
 }
 
-/** Pure: hogar consumption by category, scaled paid, and purchase specs. */
+function primaryPayerId(
+  scaledPaid: Map<string, number>,
+  householdUserIds: string[],
+  exporterUserId: string,
+): string {
+  const payers = householdUserIds
+    .filter((id) => (scaledPaid.get(id) ?? 0) > 0.005)
+    .sort((a, b) => {
+      const diff = (scaledPaid.get(b) ?? 0) - (scaledPaid.get(a) ?? 0);
+      if (diff !== 0) return diff;
+      return a.localeCompare(b);
+    });
+  return payers[0] ?? exporterUserId;
+}
+
+/** Pure: hogar consumption by category (preview) + one Viaje purchase with global scaled payments. */
 export function planTripHouseholdExport(
   input: PlanTripHouseholdExportInput,
 ): TripHouseholdExportPlan {
@@ -281,6 +167,8 @@ export function planTripHouseholdExport(
 
   const shareByCat = new Map<TripExpenseCategory, Map<string, number>>();
   const paidByCat = new Map<TripExpenseCategory, Map<string, number>>();
+  const shareGlobal = emptyAmounts(householdUserIds);
+  const paidGlobal = emptyAmounts(householdUserIds);
 
   const ensureCat = (category: TripExpenseCategory) => {
     if (!shareByCat.has(category)) shareByCat.set(category, emptyAmounts(householdUserIds));
@@ -293,37 +181,36 @@ export function planTripHouseholdExport(
     const paid = paidByCat.get(expense.category)!;
     for (const alloc of expense.allocations) {
       const userId = tripMemberToUserId.get(alloc.tripMemberId);
-      if (userId) addAmount(share, userId, alloc.amount);
+      if (userId) {
+        addAmount(share, userId, alloc.amount);
+        addAmount(shareGlobal, userId, alloc.amount);
+      }
     }
     for (const payment of expense.payments) {
       const userId = tripMemberToUserId.get(payment.tripMemberId);
-      if (userId) addAmount(paid, userId, payment.amount);
+      if (userId) {
+        addAmount(paid, userId, payment.amount);
+        addAmount(paidGlobal, userId, payment.amount);
+      }
     }
   }
 
-  const purchases: TripExportPurchaseSpec[] = [];
   const categoryMix: TripExportCategoryMix[] = [];
-
   for (const [category, shareByUser] of shareByCat) {
     const shareTotal = sumMap(shareByUser);
     if (shareTotal <= 0) continue;
     const rawPaid = paidByCat.get(category) ?? emptyAmounts(householdUserIds);
-    const scaledPaid = scalePaidToShare(rawPaid, householdUserIds, shareTotal);
-    const { specs, coveredByOthers } = purchasesForCategory(
-      category,
-      householdUserIds,
-      shareByUser,
-      scaledPaid,
-      exporterUserId,
-    );
-    purchases.push(...specs);
+    const paidTotal = sumMap(rawPaid);
+    const coveredByOthers = paidTotal <= 0;
+    // Preview only: show raw category paid (not scaled per category) so we don't invent
+    // paid-per-category that disagrees with the single purchase payments.
     categoryMix.push({
       category,
       seedCategoryName: tripCategorySeedName(category),
       percent: 0,
       amount: shareTotal,
-      members: mixMembers(householdUserIds, householdUserNames, scaledPaid, shareByUser),
-      purchasesCount: specs.length,
+      members: mixMembers(householdUserIds, householdUserNames, rawPaid, shareByUser),
+      purchasesCount: 0,
       coveredByOthers,
     });
   }
@@ -342,5 +229,49 @@ export function planTripHouseholdExport(
     }
   }
 
-  return { netShare, categoryMix, purchases };
+  if (netShare <= 0) {
+    return { netShare: 0, categoryMix, purchases: [], members: [] };
+  }
+
+  const scaledPaid = scalePaidToShare(paidGlobal, householdUserIds, netShare);
+  const coveredByOthers = sumMap(paidGlobal) <= 0;
+  if (coveredByOthers) {
+    scaledPaid.set(exporterUserId, netShare);
+    for (const id of householdUserIds) {
+      if (id !== exporterUserId) scaledPaid.set(id, 0);
+    }
+  }
+
+  const paidByUserId = primaryPayerId(scaledPaid, householdUserIds, exporterUserId);
+  const payments = householdUserIds
+    .map((userId) => ({ userId, amount: scaledPaid.get(userId) ?? 0 }))
+    .filter((p) => p.amount > 0.005);
+
+  // Ensure payments sum exactly to netShare.
+  if (payments.length === 0) {
+    payments.push({ userId: exporterUserId, amount: netShare });
+  } else {
+    const paySum = round2(payments.reduce((s, p) => s + p.amount, 0));
+    const drift = round2(netShare - paySum);
+    if (Math.abs(drift) >= 0.005) {
+      payments.sort((a, b) => b.amount - a.amount || a.userId.localeCompare(b.userId));
+      payments[0]!.amount = round2(payments[0]!.amount + drift);
+    }
+  }
+
+  const members = mixMembers(householdUserIds, householdUserNames, scaledPaid, shareGlobal);
+  for (const row of categoryMix) {
+    row.purchasesCount = 1;
+  }
+
+  const purchase: TripExportPurchaseSpec = {
+    seedCategoryName: 'Viajes',
+    amount: netShare,
+    paidByUserId,
+    splitValues: splitFrom(householdUserIds, shareGlobal, netShare),
+    payments,
+    coveredByOthers,
+  };
+
+  return { netShare, categoryMix, purchases: [purchase], members };
 }

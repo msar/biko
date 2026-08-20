@@ -38,8 +38,12 @@ const expenseFieldsSchema = z.object({
   splitMode: z.enum(['EQUAL', 'ASSIGN', 'AMOUNT', 'SHARES', 'PERCENTAGE']).optional(),
   assignToUserId: z.string().optional(),
   splitValues: z.array(splitValueSchema).optional(),
-  /** Who paid — honored only when the payment method has no owner. */
+  /** Who paid — honored only when the payment method has no owner and payments omitted. */
   paidByUserId: z.string().optional(),
+  /** Multi-payer amounts (must sum to net). Honored when payment method has no owner. */
+  payments: z
+    .array(z.object({ userId: z.string(), amount: z.number() }))
+    .optional(),
 });
 
 function validatePromotionMode(

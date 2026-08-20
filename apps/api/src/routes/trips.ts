@@ -904,13 +904,21 @@ export default async function tripRoutes(app: FastifyInstance) {
     if (!user.householdId) {
       return reply.code(400).send({ error: 'Necesitás un hogar para Pasar a Biko' });
     }
+    const body = z
+      .object({ replace: z.boolean().optional() })
+      .passthrough()
+      .parse(typeof request.body === 'object' && request.body != null ? request.body : {});
     try {
-      const result = await exportTripToHousehold(app.prisma, tripId, user.userId, user.householdId);
+      const result = await exportTripToHousehold(app.prisma, tripId, user.userId, user.householdId, {
+        replace: body.replace === true,
+      });
       return {
         batchId: result.batch.id,
         purchaseIds: result.purchaseIds,
+        purchaseId: result.purchaseIds[0] ?? null,
         netShare: result.preview.netShare,
         categoryMix: result.preview.categoryMix,
+        members: result.preview.members,
       };
     } catch (error) {
       return mapTripError(error, reply);

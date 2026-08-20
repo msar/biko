@@ -1,6 +1,7 @@
 import type { TripExportPreview } from './trip-types';
 
 export type TripExportCategoryMix = TripExportPreview['categoryMix'][number];
+export type TripExportMember = NonNullable<TripExportPreview['members']>[number];
 
 export interface TripExportMemberTotals {
   userId: string;
@@ -9,9 +10,14 @@ export interface TripExportMemberTotals {
   share: number;
 }
 
+/** Prefer plan.members (scaled to netShare); fall back to summing category rows. */
 export function aggregateExportMemberTotals(
   categoryMix: TripExportCategoryMix[],
+  members?: TripExportMember[] | null,
 ): TripExportMemberTotals[] {
+  if (members && members.length > 0) {
+    return [...members].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }
   const byUser = new Map<string, TripExportMemberTotals>();
   for (const category of categoryMix) {
     for (const member of category.members) {
@@ -30,10 +36,6 @@ export function aggregateExportMemberTotals(
     }
   }
   return [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
-}
-
-export function totalExportPurchases(categoryMix: TripExportCategoryMix[]): number {
-  return categoryMix.reduce((sum, c) => sum + c.purchasesCount, 0);
 }
 
 export function isTripExportDescription(description: string | null | undefined): boolean {

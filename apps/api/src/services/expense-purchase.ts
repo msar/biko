@@ -9,7 +9,7 @@ import {
 } from './promotion-suggestion.js';
 import { ensureFavoriteForPromotionId } from './promo-favorites.js';
 import { notifyExpensePartners } from './expense-notifications.js';
-import { resolvePaidByUserId } from './purchase-payer.js';
+import { resolvePaidByUserId, primaryPayerUserId } from './purchase-payer.js';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -17,6 +17,7 @@ export const purchaseInclude = {
   category: true,
   user: { select: { id: true, name: true } },
   paidBy: { select: { id: true, name: true } },
+  sourceTrip: { select: { id: true, name: true, shareSlug: true } },
   paymentMethod: {
     include: {
       definition: { include: { entity: true } },
@@ -26,6 +27,7 @@ export const purchaseInclude = {
   promotion: { include: { entity: true } },
   installments: { orderBy: { number: 'asc' as const } },
   allocations: { include: { user: { select: { id: true, name: true } } } },
+  payments: { include: { user: { select: { id: true, name: true } } } },
   debt: {
     select: {
       id: true,
@@ -69,8 +71,12 @@ export interface ExpenseInput {
   exchangeRateToArs?: number;
   exchangeRateSource?: string | null;
   exchangeRateDate?: Date | null;
-  /** Who paid — only used when the payment method has no owner. */
+  /** Who paid — only used when the payment method has no owner and payments omitted. */
   paidByUserId?: string | null;
+  /** Multi-payer amounts (must sum to netAmount). When set, overrides single paidByUserId. */
+  payments?: Array<{ userId: string; amount: number }>;
+  /** Trip that produced this purchase via Pasar a Biko. */
+  sourceTripId?: string | null;
   /** Skip partner push/in-app notify (e.g. bulk trip export). */
   skipPartnerNotify?: boolean;
 }
@@ -142,6 +148,53 @@ function buildAllocationsForExpense(
   } catch (error) {
     throw new ExpenseValidationError(error instanceof Error ? error.message : 'Reparto inválido');
   }
+}
+
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+
+/** Validate/normalize payment rows; default to single primary payer when omitted. */
+function resolvePaymentEntries(
+  body: ExpenseInput,
+  memberIds: string[],
+  netAmount: number,
+  primaryPaidByUserId: string,
+): Array<{ userId: string; amount: number }> {
+  if (body.payments != null) {
+    if (body.payments.length === 0) {
+      throw new ExpenseValidationError('Indicá al menos un pagador');
+    }
+    const byUser = new Map<string, number>();
+    for (const entry of body.payments) {
+      if (!memberIds.includes(entry.userId)) {
+        throw new ExpenseValidationError('Un pagador no pertenece al hogar');
+      }
+      if (entry.amount < -0.005) {
+        throw new ExpenseValidationError('Los montos pagados no pueden ser negativos');
+      }
+      byUser.set(entry.userId, round2((byUser.get(entry.userId) ?? 0) + entry.amount));
+    }
+    const rows = [...byUser.entries()]
+      .map(([userId, amount]) => ({ userId, amount }))
+      .filter((r) => r.amount > 0.005);
+    if (rows.length === 0) {
+      throw new ExpenseValidationError('Indicá al menos un pagador');
+    }
+    const sum = round2(rows.reduce((s, r) => s + r.amount, 0));
+    if (Math.abs(sum - netAmount) > 0.02) {
+      throw new ExpenseValidationError('La suma de lo pagado debe coincidir con el total');
+    }
+    // Absorb rounding drift into the largest payer.
+    const drift = round2(netAmount - sum);
+    if (Math.abs(drift) >= 0.005) {
+      rows.sort((a, b) => b.amount - a.amount || a.userId.localeCompare(b.userId));
+      rows[0]!.amount = round2(rows[0]!.amount + drift);
+    }
+    return rows;
+  }
+
+  return [{ userId: primaryPaidByUserId, amount: round2(netAmount) }];
 }
 
 export function resolvePromotionMode(body: Pick<ExpenseInput, 'promotionMode' | 'applyPromotion'>): PromotionApplyMode {
@@ -350,11 +403,25 @@ export async function createPurchaseWithAllocations(
   if (body.paidByUserId && !memberIds.includes(body.paidByUserId)) {
     throw new ExpenseValidationError('Quién pagó debe pertenecer al hogar');
   }
-  const paidByUserId = resolvePaidByUserId({
-    paymentMethodOwnerUserId: paymentMethod.ownerUserId,
-    loggerUserId: userId,
-    paidByUserId: body.paidByUserId,
-  });
+  const resolvedPaidBy =
+    body.payments && body.payments.length > 0
+      ? primaryPayerUserId(body.payments) ?? userId
+      : resolvePaidByUserId({
+          paymentMethodOwnerUserId: paymentMethod.ownerUserId,
+          loggerUserId: userId,
+          paidByUserId: body.paidByUserId,
+        });
+  // Owned payment method still forces a single payer (method owner).
+  const paidByUserId = paymentMethod.ownerUserId
+    ? resolvePaidByUserId({
+        paymentMethodOwnerUserId: paymentMethod.ownerUserId,
+        loggerUserId: userId,
+        paidByUserId: body.paidByUserId,
+      })
+    : resolvedPaidBy;
+  const paymentEntries = paymentMethod.ownerUserId
+    ? [{ userId: paidByUserId, amount: round2(discount.netAmount) }]
+    : resolvePaymentEntries(body, memberIds, discount.netAmount, paidByUserId);
 
   const installments = generateInstallments(discount.netAmount, body.installmentsCount, body.purchaseDate, {
     type: paymentMethod.definition.type,
@@ -369,6 +436,7 @@ export async function createPurchaseWithAllocations(
       householdId,
       userId,
       paidByUserId,
+      sourceTripId: body.sourceTripId ?? null,
       paymentMethodId: paymentMethod.id,
       categoryId: category.id,
       store: body.store,
@@ -402,6 +470,12 @@ export async function createPurchaseWithAllocations(
         create: allocationEntries.map((a) => ({
           userId: a.userId,
           amount: a.amount,
+        })),
+      },
+      payments: {
+        create: paymentEntries.map((p) => ({
+          userId: p.userId,
+          amount: p.amount,
         })),
       },
     },
@@ -451,6 +525,7 @@ export async function updatePurchaseWithAllocations(
   });
   await tx.installment.deleteMany({ where: { purchaseId } });
   await tx.purchaseAllocation.deleteMany({ where: { purchaseId } });
+  await tx.purchasePayment.deleteMany({ where: { purchaseId } });
 
   const paymentMethod = await tx.paymentMethod.findFirst({
     where: { id: body.paymentMethodId, householdId },
@@ -489,11 +564,24 @@ export async function updatePurchaseWithAllocations(
     throw new ExpenseValidationError('Quién pagó debe pertenecer al hogar');
   }
   // Logger stays the original creator; payer can be overridden for unowned methods via paidByUserId.
-  const paidByUserId = resolvePaidByUserId({
-    paymentMethodOwnerUserId: paymentMethod.ownerUserId,
-    loggerUserId: existing.userId,
-    paidByUserId: body.paidByUserId ?? existing.paidByUserId,
-  });
+  const resolvedPaidBy =
+    body.payments && body.payments.length > 0
+      ? primaryPayerUserId(body.payments) ?? existing.userId
+      : resolvePaidByUserId({
+          paymentMethodOwnerUserId: paymentMethod.ownerUserId,
+          loggerUserId: existing.userId,
+          paidByUserId: body.paidByUserId ?? existing.paidByUserId,
+        });
+  const paidByUserId = paymentMethod.ownerUserId
+    ? resolvePaidByUserId({
+        paymentMethodOwnerUserId: paymentMethod.ownerUserId,
+        loggerUserId: existing.userId,
+        paidByUserId: body.paidByUserId ?? existing.paidByUserId,
+      })
+    : resolvedPaidBy;
+  const paymentEntries = paymentMethod.ownerUserId
+    ? [{ userId: paidByUserId, amount: round2(discount.netAmount) }]
+    : resolvePaymentEntries(body, memberIds, discount.netAmount, paidByUserId);
 
   const installments = generateInstallments(discount.netAmount, body.installmentsCount, body.purchaseDate, {
     type: paymentMethod.definition.type,
@@ -521,6 +609,7 @@ export async function updatePurchaseWithAllocations(
       scope: body.scope,
       splitMode,
       paidByUserId,
+      sourceTripId: body.sourceTripId !== undefined ? body.sourceTripId : existing.sourceTripId,
       installments: {
         create: installments.map((inst) => ({
           householdId,
@@ -535,6 +624,12 @@ export async function updatePurchaseWithAllocations(
         create: allocationEntries.map((a) => ({
           userId: a.userId,
           amount: a.amount,
+        })),
+      },
+      payments: {
+        create: paymentEntries.map((p) => ({
+          userId: p.userId,
+          amount: p.amount,
         })),
       },
     },

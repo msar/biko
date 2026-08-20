@@ -156,6 +156,12 @@ export interface PurchaseAllocation {
   amount: string;
 }
 
+export interface PurchasePayment {
+  userId: string;
+  user: { id: string; name: string };
+  amount: string;
+}
+
 export interface Purchase {
   id: string;
   clientId: string | null;
@@ -182,6 +188,9 @@ export interface Purchase {
   promotion: (Promotion & { entity: Entity }) | null;
   installments: Installment[];
   allocations: PurchaseAllocation[];
+  payments?: PurchasePayment[];
+  sourceTripId?: string | null;
+  sourceTrip?: { id: string; name: string; shareSlug: string } | null;
   debt?: {
     id: string;
     direction: DebtDirection;

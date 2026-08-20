@@ -26,13 +26,39 @@ export function resolveExpensePayer(exp: Purchase): { id: string; name: string }
   return exp.paidBy ?? exp.user;
 }
 
-export function expensePayerLabel(exp: Purchase, userId: string): string | null {
+/** Positive payment rows on a purchase (multi-payer). */
+export function expensePaymentRows(
+  exp: Purchase,
+): Array<{ userId: string; name: string; amount: number }> {
+  const rows = (exp.payments ?? [])
+    .map((p) => ({
+      userId: p.userId,
+      name: p.user.name,
+      amount: Number(p.amount),
+    }))
+    .filter((p) => p.amount > 0.005);
+  if (rows.length > 0) return rows;
   const payer = resolveExpensePayer(exp);
-  if (payer.id === exp.user.id) return null;
-  return payer.id === userId ? 'Pagó: vos' : `Pagó: ${payer.name}`;
+  return [{ userId: payer.id, name: payer.name, amount: Number(exp.netAmount) }];
+}
+
+export function expensePayerLabel(exp: Purchase, userId: string): string | null {
+  const rows = expensePaymentRows(exp);
+  if (rows.length > 1) {
+    const names = rows.map((r) => (r.userId === userId ? 'vos' : r.name));
+    if (names.length === 2) return `Pagaron: ${names[0]} y ${names[1]}`;
+    return `Pagaron: ${names.join(', ')}`;
+  }
+  const payer = rows[0]!;
+  if (payer.userId === exp.user.id) return null;
+  return payer.userId === userId ? 'Pagó: vos' : `Pagó: ${payer.name}`;
 }
 
 export function expensePayerDisplayName(exp: Purchase, viewerUserId: string): string {
-  const payer = resolveExpensePayer(exp);
-  return payer.id === viewerUserId ? 'Vos' : payer.name;
+  const rows = expensePaymentRows(exp);
+  if (rows.length > 1) {
+    return rows.map((r) => (r.userId === viewerUserId ? 'Vos' : r.name)).join(' y ');
+  }
+  const payer = rows[0]!;
+  return payer.userId === viewerUserId ? 'Vos' : payer.name;
 }

@@ -28,6 +28,7 @@ export interface OutboxExpense {
   splitValues?: { userId: string; value: number }[];
   /** Who paid — only when the payment method has no owner. */
   paidByUserId?: string;
+  payments?: Array<{ userId: string; amount: number }>;
   createdAt: string;
 }
 

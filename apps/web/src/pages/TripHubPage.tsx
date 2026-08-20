@@ -66,6 +66,7 @@ export default function TripHubPage() {
   const [tab, setTab] = useState<HubTab>(() => parseTab(searchParams.get('tab')));
   const [settleOpen, setSettleOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportReplace, setExportReplace] = useState(false);
   const [exportSuccess, setExportSuccess] = useState<TripExportPreview | null>(null);
   const [copied, setCopied] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -107,15 +108,21 @@ export default function TripHubPage() {
   });
 
   const exportMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (opts?: { replace?: boolean }) =>
       api<{
         batchId: string;
         purchaseIds: string[];
+        purchaseId: string | null;
         netShare: number;
         categoryMix: TripExportPreview['categoryMix'];
-      }>(`/trips/${id}/export`, { method: 'POST', body: '{}' }),
+        members: TripExportPreview['members'];
+      }>(`/trips/${id}/export`, {
+        method: 'POST',
+        body: JSON.stringify({ replace: opts?.replace === true }),
+      }),
     onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: ['trips', id] });
+      void queryClient.invalidateQueries({ queryKey: ['trips', id, 'export-summary'] });
       void queryClient.invalidateQueries({ queryKey: ['expenses'] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       setExportSuccess({
@@ -125,7 +132,10 @@ export default function TripHubPage() {
         householdId: '',
         netShare: data.netShare,
         categoryMix: data.categoryMix,
+        members: data.members,
+        purchaseId: data.purchaseId,
       });
+      setExportReplace(false);
     },
   });
 
@@ -240,6 +250,17 @@ export default function TripHubPage() {
               : () => {
                   exportMutation.reset();
                   setExportSuccess(null);
+                  setExportReplace(false);
+                  setExportOpen(true);
+                }
+          }
+          onRegenerateExport={
+            guest
+              ? undefined
+              : () => {
+                  exportMutation.reset();
+                  setExportSuccess(null);
+                  setExportReplace(true);
                   setExportOpen(true);
                 }
           }
@@ -303,9 +324,17 @@ export default function TripHubPage() {
       {!guest && (
         <ConfirmDialog
           open={exportOpen}
-          title={exportSuccess ? 'Pasado a Biko' : 'Pasar a Biko'}
+          title={
+            exportSuccess
+              ? 'Pasado a Biko'
+              : exportReplace
+                ? 'Regenerar en Biko'
+                : 'Pasar a Biko'
+          }
           variant="primary"
-          confirmLabel={exportSuccess ? 'Listo' : 'Pasar a Biko'}
+          confirmLabel={
+            exportSuccess ? 'Listo' : exportReplace ? 'Reemplazar gasto' : 'Pasar a Biko'
+          }
           singleAction={Boolean(exportSuccess)}
           loadingLabel="Exportando…"
           loading={exportMutation.isPending}
@@ -314,10 +343,33 @@ export default function TripHubPage() {
               <TripExportBreakdown
                 netShare={exportSuccess.netShare}
                 categoryMix={exportSuccess.categoryMix}
+                members={exportSuccess.members}
+                tripId={exportSuccess.tripId}
+                purchaseId={exportSuccess.purchaseId}
                 mode="success"
               />
             ) : exportPreview.isLoading ? (
               <p>Calculando…</p>
+            ) : exportReplace ? (
+              <div>
+                <p>
+                  Se van a borrar los gastos anteriores de este viaje en el hogar y crear un solo
+                  gasto Viaje con lo que cada uno pagó y gastó.
+                </p>
+                <TripExportBreakdown
+                  netShare={exportPreview.data?.netShare ?? 0}
+                  categoryMix={exportPreview.data?.categoryMix ?? []}
+                  members={exportPreview.data?.members}
+                  mode="preview"
+                />
+                {exportMutation.isError && (
+                  <p className="error">
+                    {exportMutation.error instanceof Error
+                      ? exportMutation.error.message
+                      : 'No se pudo regenerar'}
+                  </p>
+                )}
+              </div>
             ) : exportPreview.data && !exportPreview.data.eligible ? (
               <p>{exportPreview.data.reason ?? 'No disponible'}</p>
             ) : (
@@ -325,6 +377,7 @@ export default function TripHubPage() {
                 <TripExportBreakdown
                   netShare={exportPreview.data?.netShare ?? 0}
                   categoryMix={exportPreview.data?.categoryMix ?? []}
+                  members={exportPreview.data?.members}
                   mode="preview"
                 />
                 {exportMutation.isError && (
@@ -341,14 +394,19 @@ export default function TripHubPage() {
             if (exportSuccess) {
               setExportOpen(false);
               setExportSuccess(null);
+              setExportReplace(false);
               return;
             }
-            if (exportPreview.data?.eligible) exportMutation.mutate();
-            else setExportOpen(false);
+            if (exportReplace || exportPreview.data?.eligible) {
+              exportMutation.mutate({ replace: exportReplace });
+              return;
+            }
+            setExportOpen(false);
           }}
           onCancel={() => {
             setExportOpen(false);
             setExportSuccess(null);
+            setExportReplace(false);
           }}
         />
       )}
@@ -703,7 +761,13 @@ function TripDetailsDialog({
   );
 }
 
-function TripExportSummaryCard({ tripId }: { tripId: string }) {
+function TripExportSummaryCard({
+  tripId,
+  onRegenerate,
+}: {
+  tripId: string;
+  onRegenerate?: () => void;
+}) {
   const { data, isLoading } = useQuery({
     queryKey: ['trips', tripId, 'export-summary'],
     queryFn: () => api<TripExportPreview>(`/trips/${tripId}/export/preview`),
@@ -717,13 +781,18 @@ function TripExportSummaryCard({ tripId }: { tripId: string }) {
     );
   }
 
-  if (!data?.categoryMix.length) {
+  if (!data || (data.netShare <= 0 && !data.members?.length && !data.categoryMix.length)) {
     return (
       <section className="card trip-export-summary">
         <h2 style={{ margin: 0 }}>En Biko</h2>
         <p className="hint" style={{ margin: '8px 0 0' }}>
           Ya pasado a Biko
         </p>
+        {onRegenerate && (
+          <button type="button" className="btn-secondary" style={{ marginTop: 12 }} onClick={onRegenerate}>
+            Regenerar en Biko
+          </button>
+        )}
       </section>
     );
   }
@@ -731,7 +800,19 @@ function TripExportSummaryCard({ tripId }: { tripId: string }) {
   return (
     <section className="card trip-export-summary">
       <h2 style={{ margin: 0 }}>En Biko</h2>
-      <TripExportBreakdown netShare={data.netShare} categoryMix={data.categoryMix} mode="summary" />
+      <TripExportBreakdown
+        netShare={data.netShare}
+        categoryMix={data.categoryMix}
+        members={data.members}
+        tripId={tripId}
+        purchaseId={data.purchaseId}
+        mode="summary"
+      />
+      {onRegenerate && (
+        <button type="button" className="btn-secondary" style={{ marginTop: 12 }} onClick={onRegenerate}>
+          Regenerar en Biko
+        </button>
+      )}
     </section>
   );
 }
@@ -741,6 +822,7 @@ function ResumenTab({
   closed,
   onSettle,
   onExport,
+  onRegenerateExport,
   onOpenAlojamiento,
   onOpenItinerario,
 }: {
@@ -748,6 +830,7 @@ function ResumenTab({
   closed: boolean;
   onSettle: () => void;
   onExport?: () => void;
+  onRegenerateExport?: () => void;
   onOpenAlojamiento: () => void;
   onOpenItinerario: () => void;
 }) {
@@ -836,7 +919,9 @@ function ResumenTab({
         </button>
       )}
 
-      {trip.alreadyExported && <TripExportSummaryCard tripId={trip.id} />}
+      {trip.alreadyExported && (
+        <TripExportSummaryCard tripId={trip.id} onRegenerate={onRegenerateExport} />
+      )}
     </>
   );
 }
